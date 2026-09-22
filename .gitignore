@@ -1,0 +1,16 @@
+# Environment variables and secrets
+.env
+.env.local
+
+# Dependency directories
+node_modules/
+vendor/
+
+# System and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log
