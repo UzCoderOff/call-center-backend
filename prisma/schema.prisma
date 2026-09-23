@@ -107,6 +107,31 @@ model CallLog {
   @@index([employeeId, callTimestampMs])
 }
 
+// One row per sync attempt from a device's Android agent — success or
+// failure, including ones that never got far enough to know which employee
+// sent them (bad JSON, a multer/multipart error). This is what makes a
+// "stuck on Syncing" report on a phone nobody has physical/USB access to
+// diagnosable from the portal/DB, instead of only from an on-device log the
+// employee has to manually export and send over.
+//
+// employeeId is stored as the raw string the device sent, not a foreign
+// key to Employee — an unknown/typo'd employeeId is itself something we
+// need to be able to log and see.
+model SyncLog {
+  id             Int      @id @default(autoincrement())
+  employeeId     String?
+  ok             Boolean
+  httpStatus     Int
+  errorCode      String?
+  errorMessage   String?
+  callCount      Int?
+  recordingCount Int?
+  payloadBytes   Int?
+  createdAt      DateTime @default(now())
+
+  @@index([employeeId, createdAt])
+}
+
 // Empty/unused until the transcription pipeline is wired up. One row per
 // call, created (status "pending") as soon as a recording lands, or later
 // by a backfill job — whichever comes first.

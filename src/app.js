@@ -10,6 +10,7 @@ const employeeRoutes = require("./routes/employees");
 const callRoutes = require("./routes/calls");
 const dashboardRoutes = require("./routes/dashboard");
 const userRoutes = require("./routes/users");
+const syncLogRoutes = require("./routes/syncLogs");
 
 const app = express();
 
@@ -40,6 +41,17 @@ app.use(
 app.use(cookieParser());
 app.use(express.json());
 
+// Lightweight request logger — method, path, status, duration. Not a
+// replacement for real observability, but enough to see e.g. a spike of
+// 413s from one device in plain server logs without adding a dependency.
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+  });
+  next();
+});
+
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 // Device-facing: the Android app posts here directly, authenticated by the
@@ -53,6 +65,7 @@ app.use("/api/employees", employeeRoutes);
 app.use("/api/calls", callRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/sync-logs", syncLogRoutes);
 
 app.use((req, res) => res.status(404).json({ error: "not_found" }));
 app.use(errorHandler);
