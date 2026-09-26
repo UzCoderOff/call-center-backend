@@ -2,56 +2,104 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth } = require("../middleware/auth");
 const { resolveRecordingPath } = require("../utils/fileStorage");
-const { serializeCall } = require("../utils/serialize");
 const { resolvePlayableRecording } = require("../utils/audioTranscode");
+const { badRequest, parseMs, parseId } = require("../utils/params");
+const {
+  FOLLOW_UP_WINDOW_MS,
+  NEEDS_CALLBACK_STATUSES,
+  reconcileFollowUps,
+} = require("../services/followUp");
 
 const router = express.Router();
 router.use(requireAuth);
 
-// EMPLOYEE always sees only their own calls, regardless of what filters
-// they pass — BOSS and DEVELOPER can see and filter across everyone.
-function scopedWhere(req) {
-  if (req.user.role === "EMPLOYEE") {
-    if (!req.user.employee) return { employeeId: -1 }; // no linked employee -> sees nothing
-    return { employeeId: req.user.employee.id };
-  }
+const FOLLOW_UP_STATUSES = ["pending", "attempted", "called_back", "client_called_again", "handled", "no_number"];
 
+// Who may see which calls: an EMPLOYEE only ever sees their own, whatever
+// they ask for; BOSS/DEVELOPER see everyone's.
+function accessWhere(req) {
+  if (req.user.role === "EMPLOYEE") {
+    return { employeeId: req.user.employee ? req.user.employee.id : -1 }; // no linked employee -> sees nothing
+  }
+  return {};
+}
+
+// List filters, applied on top of accessWhere for every role.
+function filterWhere(req) {
+  const q = req.query;
   const where = {};
-  if (req.query.employeeId) where.employeeId = Number(req.query.employeeId);
-  if (req.query.missed !== undefined) where.missed = req.query.missed === "true";
-  if (req.query.callType) where.callType = req.query.callType;
+
+  if (q.employeeId && req.user.role !== "EMPLOYEE") where.employeeId = parseId(q.employeeId, "employeeId");
+  if (q.missed !== undefined) where.missed = q.missed === "true";
+  if (q.callType) where.callType = String(q.callType);
   // Lets the portal filter down to "calls with no recording attached" —
   // e.g. so someone reviewing calls doesn't have to open each one just to
   // find out whether a file exists.
-  if (req.query.hasRecording !== undefined) {
-    where.recordingPath = req.query.hasRecording === "true" ? { not: null } : null;
+  if (q.hasRecording !== undefined) {
+    where.recordingPath = q.hasRecording === "true" ? { not: null } : null;
   }
-  if (req.query.from || req.query.to) {
-    where.callTimestampMs = {};
-    if (req.query.from) where.callTimestampMs.gte = BigInt(req.query.from);
-    if (req.query.to) where.callTimestampMs.lte = BigInt(req.query.to);
+  if (q.followUp) {
+    const statuses = String(q.followUp).split(",").filter((s) => FOLLOW_UP_STATUSES.includes(s));
+    if (statuses.length === 0) throw badRequest("unknown followUp status");
+    where.missed = true;
+    where.followUp = { in: statuses };
+  }
+  // The "call these people back" list: still unreached, and recent enough
+  // that calling back still makes sense.
+  if (q.needsCallback === "true") {
+    where.missed = true;
+    where.followUp = { in: NEEDS_CALLBACK_STATUSES };
+    where.callTimestampMs = { gte: BigInt(Date.now() - FOLLOW_UP_WINDOW_MS) };
+  }
+  if (q.phone) {
+    const digits = String(q.phone).replace(/\D/g, "");
+    if (digits.length >= 3) where.phoneKey = { contains: digits.length > 9 ? digits.slice(-9) : digits };
+  }
+
+  const from = parseMs(q.from, "from");
+  const to = parseMs(q.to, "to");
+  if (from != null || to != null) {
+    where.callTimestampMs = {
+      ...(where.callTimestampMs || {}),
+      ...(from != null ? { gte: BigInt(from) } : {}),
+      ...(to != null ? { lte: BigInt(to) } : {}),
+    };
   }
   return where;
 }
+
+const LINKED_CALL_SELECT = {
+  id: true,
+  callType: true,
+  callTimestampMs: true,
+  durationSeconds: true,
+  employee: { select: { id: true, name: true } },
+};
+
+const LIST_INCLUDE = {
+  employee: { select: { id: true, name: true } },
+  followUpCall: { select: LINKED_CALL_SELECT },
+};
 
 router.get("/", async (req, res, next) => {
   try {
     const pageSize = Math.min(Number(req.query.pageSize) || 50, 200);
     const page = Math.max(Number(req.query.page) || 1, 1);
+    const where = { ...filterWhere(req), ...accessWhere(req) };
 
     const [calls, total] = await Promise.all([
       prisma.callLog.findMany({
-        where: scopedWhere(req),
-        include: { employee: { select: { id: true, name: true } } },
+        where,
+        include: LIST_INCLUDE,
         orderBy: { callTimestampMs: "desc" },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
-      prisma.callLog.count({ where: scopedWhere(req) }),
+      prisma.callLog.count({ where }),
     ]);
 
     res.json({
-      calls: calls.map(serializeCall),
+      calls,
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     });
   } catch (err) {
@@ -59,19 +107,81 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+async function loadCallDetail(req, id) {
+  const call = await prisma.callLog.findFirst({
+    where: { id, ...accessWhere(req) },
+    include: {
+      ...LIST_INCLUDE,
+      transcript: true,
+      analysis: true,
+      // For a callback: which missed calls this one resolved.
+      resolvesMissed: { select: { id: true, callTimestampMs: true, employee: { select: { id: true, name: true } } } },
+      followUpMarkedBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
+    },
+  });
+  if (!call) return null;
+
+  // Everything else on record with this caller — the start of a per-client
+  // history. Same access rules as everywhere else.
+  const history = call.phoneKey
+    ? await prisma.callLog.findMany({
+        where: { phoneKey: call.phoneKey, id: { not: call.id }, ...accessWhere(req) },
+        select: { ...LINKED_CALL_SELECT, missed: true, followUp: true },
+        orderBy: { callTimestampMs: "desc" },
+        take: 20,
+      })
+    : [];
+
+  return { ...call, history };
+}
+
 router.get("/:id", async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    const call = await prisma.callLog.findFirst({
-      where: { id, ...scopedWhere(req) },
-      include: {
-        employee: { select: { id: true, name: true } },
-        transcript: true,
-        analysis: true,
-      },
-    });
+    const call = await loadCallDetail(req, parseId(req.params.id));
     if (!call) return res.status(404).json({ error: "not_found" });
-    res.json(serializeCall(call));
+    res.json(call);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Manually mark a missed call as handled (the caller was reached some
+// other way — Telegram, in person, a personal phone) or undo that.
+// Employees can do this for their own calls; managers for anyone's.
+router.patch("/:id/follow-up", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    const { handled } = req.body || {};
+    if (typeof handled !== "boolean") throw badRequest("handled must be true or false");
+
+    const call = await prisma.callLog.findFirst({ where: { id, ...accessWhere(req) } });
+    if (!call) return res.status(404).json({ error: "not_found" });
+    if (!call.missed) return res.status(409).json({ error: "not_a_missed_call" });
+    if (!call.phoneKey) return res.status(409).json({ error: "no_number" });
+
+    if (handled) {
+      if (!NEEDS_CALLBACK_STATUSES.includes(call.followUp)) {
+        return res.status(409).json({ error: "already_resolved" });
+      }
+      await prisma.callLog.update({
+        where: { id },
+        data: { followUp: "handled", followUpMarkedById: req.user.id, followUpMarkedAt: new Date() },
+      });
+    } else {
+      if (call.followUp !== "handled") return res.status(409).json({ error: "not_marked_handled" });
+      if (req.user.role === "EMPLOYEE" && call.followUpMarkedById !== req.user.id) {
+        return res.status(403).json({ error: "forbidden" });
+      }
+      await prisma.callLog.update({
+        where: { id },
+        data: { followUp: "pending", followUpMarkedById: null, followUpMarkedAt: null },
+      });
+    }
+
+    // Re-derive from the actual call history (e.g. undoing "handled" on a
+    // call that did get an unanswered callback attempt -> "attempted").
+    await reconcileFollowUps([call.phoneKey]);
+    res.json(await loadCallDetail(req, id));
   } catch (err) {
     next(err);
   }
@@ -79,8 +189,8 @@ router.get("/:id", async (req, res, next) => {
 
 router.get("/:id/recording", async (req, res, next) => {
   try {
-    const id = Number(req.params.id);
-    const call = await prisma.callLog.findFirst({ where: { id, ...scopedWhere(req) } });
+    const id = parseId(req.params.id);
+    const call = await prisma.callLog.findFirst({ where: { id, ...accessWhere(req) } });
     if (!call) return res.status(404).json({ error: "not_found" });
     if (!call.recordingPath) return res.status(404).json({ error: "no_recording" });
 

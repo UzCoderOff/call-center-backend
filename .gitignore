@@ -14,3 +14,8 @@ Thumbs.db
 
 # Logs
 *.log
+# Local data — the SQLite database and call recordings (client audio) must
+# never end up in git.
+prisma/*.db
+prisma/*.db-journal
+storage/

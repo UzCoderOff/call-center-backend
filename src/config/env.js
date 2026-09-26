@@ -17,8 +17,13 @@ const storageRoot = path.isAbsolute(process.env.STORAGE_ROOT || "")
   ? process.env.STORAGE_ROOT
   : path.join(process.cwd(), process.env.STORAGE_ROOT || "./storage/recordings");
 
+const downloadsDir = process.env.DOWNLOADS_DIR
+  ? path.resolve(process.env.DOWNLOADS_DIR)
+  : path.join(path.dirname(storageRoot), "downloads");
+
 module.exports = {
   port: Number(process.env.PORT) || 4000,
+  downloadsDir,
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "12h",
   storageRoot,
@@ -32,4 +37,14 @@ module.exports = {
   nodeEnv: process.env.NODE_ENV || "development",
   adminUsername: process.env.ADMIN_USERNAME,
   adminPassword: process.env.ADMIN_PASSWORD,
+  // Which calendar day a daily report belongs to is decided in the firm's
+  // own timezone, not the server's (a VPS usually runs on UTC).
+  firmTimezone: process.env.FIRM_TIMEZONE || "Asia/Tashkent",
+  // The newest Android app build, so installed apps can offer an update.
+  // Leave APP_LATEST_VERSION_CODE unset to disable the prompt.
+  appLatest: {
+    versionCode: Number(process.env.APP_LATEST_VERSION_CODE) || null,
+    versionName: process.env.APP_LATEST_VERSION_NAME || null,
+    downloadUrl: process.env.APP_DOWNLOAD_URL || null,
+  },
 };

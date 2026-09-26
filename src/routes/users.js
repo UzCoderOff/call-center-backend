@@ -20,12 +20,32 @@ router.use(requireAuth);
 // DEVELOPER row even if someone guesses its id.
 const MANAGEABLE_ROLE = "BOSS";
 
+const WITH_CALENDAR = { calendar: { select: { id: true, name: true, active: true } } };
+
+// A boss account can keep the appointment calendar (the lawyer). Turning it
+// on creates the calendar (named after the account unless a name is given);
+// turning it off hides it, keeping its history.
+async function setCalendar(userId, enabled, name) {
+  const existing = await prisma.calendar.findUnique({ where: { ownerId: userId } });
+  const cleanName = typeof name === "string" && name.trim() ? name.trim().slice(0, 80) : undefined;
+  if (existing) {
+    await prisma.calendar.update({
+      where: { id: existing.id },
+      data: { active: enabled, ...(cleanName ? { name: cleanName } : {}) },
+    });
+  } else if (enabled) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    await prisma.calendar.create({ data: { ownerId: userId, name: cleanName || user.username } });
+  }
+}
+
 function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
     role: user.role,
     active: user.active,
+    calendar: user.calendar && user.calendar.active ? { id: user.calendar.id, name: user.calendar.name } : null,
     createdAt: user.createdAt,
     passwordStatus: {
       mustChangePassword: user.mustChangePassword,
@@ -43,6 +63,7 @@ router.get("/", requireRole("DEVELOPER"), async (req, res, next) => {
     const users = await prisma.user.findMany({
       where: { role: MANAGEABLE_ROLE },
       orderBy: { username: "asc" },
+      include: WITH_CALENDAR,
     });
     res.json(users.map(publicUser));
   } catch (err) {
@@ -66,9 +87,12 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
     const tempPassword = generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
 
-    const user = await prisma.user.create({
+    const created = await prisma.user.create({
       data: { username: cleanUsername, passwordHash, role: MANAGEABLE_ROLE, mustChangePassword: true },
     });
+    // The lawyer is a boss account with a calendar — on unless turned off.
+    if (req.body?.hasCalendar !== false) await setCalendar(created.id, true, req.body?.calendarName);
+    const user = await prisma.user.findUnique({ where: { id: created.id }, include: WITH_CALENDAR });
 
     res.status(201).json({
       user: publicUser(user),
@@ -88,10 +112,12 @@ router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
       return res.status(404).json({ error: "not_found" });
     }
 
-    const { active } = req.body || {};
+    const { active, hasCalendar, calendarName } = req.body || {};
+    if (typeof hasCalendar === "boolean") await setCalendar(id, hasCalendar, calendarName);
     const user = await prisma.user.update({
       where: { id },
-      data: { ...(active !== undefined ? { active } : {}) },
+      data: { ...(typeof active === "boolean" ? { active } : {}) },
+      include: WITH_CALENDAR,
     });
     res.json(publicUser(user));
   } catch (err) {
@@ -113,6 +139,7 @@ router.post("/:id/reset-password", requireRole("DEVELOPER"), async (req, res, ne
     const user = await prisma.user.update({
       where: { id },
       data: { passwordHash, mustChangePassword: true, passwordChangedAt: null },
+      include: WITH_CALENDAR,
     });
 
     res.json({

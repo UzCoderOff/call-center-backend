@@ -1,9 +1,9 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const { verifyPassword, hashPassword } = require("../lib/passwords");
-const { signSessionToken } = require("../lib/tokens");
+const { startSession, endSession, publicMe } = require("../lib/session");
+const throttle = require("../lib/loginThrottle");
 const { requireAuth } = require("../middleware/auth");
-const env = require("../config/env");
 
 // Deliberately generous — this guards against trivially weak passwords
 // without being a source of confusing rejected-for-no-clear-reason support
@@ -12,12 +12,23 @@ const MIN_PASSWORD_LENGTH = 8;
 
 const router = express.Router();
 
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: env.cookieSecure,
-  sameSite: env.cookieSameSite,
-  maxAge: 12 * 60 * 60 * 1000, // 12h; independent of JWT_EXPIRES_IN, just a cookie lifetime ceiling
-};
+// Shared with the Android app's sign-in (routes/device.js). Same generic
+// error whether the username doesn't exist or the password is wrong — don't
+// help an attacker enumerate valid usernames.
+async function checkCredentials(req, username, password) {
+  if (throttle.isBlocked(req, username)) return { error: "too_many_attempts", status: 429 };
+
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: { employee: true },
+  });
+  if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
+    throttle.recordFailure(req, username);
+    return { error: "invalid_credentials", status: 401 };
+  }
+  throttle.recordSuccess(req, username);
+  return { user };
+}
 
 router.post("/login", async (req, res, next) => {
   try {
@@ -26,48 +37,23 @@ router.post("/login", async (req, res, next) => {
       return res.status(400).json({ error: "username and password are required" });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { username },
-      include: { employee: true },
-    });
+    const result = await checkCredentials(req, String(username), String(password));
+    if (result.error) return res.status(result.status).json({ error: result.error });
 
-    // Same generic error whether the username doesn't exist or the password
-    // is wrong — don't help an attacker enumerate valid usernames.
-    if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
-      return res.status(401).json({ error: "invalid_credentials" });
-    }
-
-    const token = signSessionToken(user);
-    res.cookie("session", token, COOKIE_OPTIONS);
-    res.json({
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      mustChangePassword: user.mustChangePassword,
-      employee: user.employee
-        ? { id: user.employee.id, name: user.employee.name }
-        : null,
-    });
+    startSession(res, result.user);
+    res.json(publicMe(result.user));
   } catch (err) {
     next(err);
   }
 });
 
 router.post("/logout", (req, res) => {
-  res.clearCookie("session", COOKIE_OPTIONS);
+  endSession(res);
   res.json({ ok: true });
 });
 
 router.get("/me", requireAuth, (req, res) => {
-  res.json({
-    id: req.user.id,
-    username: req.user.username,
-    role: req.user.role,
-    mustChangePassword: req.user.mustChangePassword,
-    employee: req.user.employee
-      ? { id: req.user.employee.id, name: req.user.employee.name }
-      : null,
-  });
+  res.json(publicMe(req.user));
 });
 
 // Every role — DEVELOPER, BOSS, EMPLOYEE — can change their own password
@@ -103,3 +89,4 @@ router.post("/change-password", requireAuth, async (req, res, next) => {
 });
 
 module.exports = router;
+module.exports.checkCredentials = checkCredentials;
