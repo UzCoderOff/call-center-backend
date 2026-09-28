@@ -2,18 +2,23 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth, requireRole, MANAGER_ROLES } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
-const { firmDate, firmDayRange, isValidDate } = require("../lib/firmTime");
+const { firmDate, firmDayRange, isValidDate, shiftDate } = require("../lib/firmTime");
 const { validateAnswers, summarize } = require("../services/reportFields");
 const { computeCallStats } = require("../services/stats");
+const { autoReportDays, addUp, checkRange, MAX_DAYS } = require("../services/autoReport");
 
 // Daily reports. Everyone with a report form fills in one report per day
 // (the firm's calendar day). Managers see, per day and office, who
 // submitted and who didn't, plus totals of the numeric questions, and can
-// mark reports as reviewed with a comment.
+// mark reports as reviewed with a comment. People with an automatic report
+// (call-center staff) fill in nothing: their day is worked out from their
+// calls, bookings and clients (src/services/autoReport.js).
 const router = express.Router();
 router.use(requireAuth);
 
 const isManager = (req) => MANAGER_ROLES.includes(req.user.role);
+
+const AUTO_EMPLOYEE = { id: true, name: true, userId: true, collectCalls: true, autoReport: true, office: { select: { id: true, name: true } } };
 
 const REPORT_INCLUDE = {
   employee: { select: { id: true, name: true, collectCalls: true, office: { select: { id: true, name: true } } } },
@@ -41,6 +46,10 @@ router.get("/today", async (req, res, next) => {
   try {
     const date = firmDate();
     const employee = req.user.employee;
+    if (employee?.autoReport) {
+      const [day] = await autoReportDays(employee, date, date);
+      return res.json({ date, auto: day, template: null, report: null, callStats: null });
+    }
     const template = await activeTemplateFor(employee);
     if (!template) return res.json({ date, template: null, report: null, callStats: null });
 
@@ -63,6 +72,7 @@ router.put("/today", async (req, res, next) => {
   try {
     const date = firmDate();
     const employee = req.user.employee;
+    if (employee?.autoReport) return res.status(409).json({ error: "automatic_report" });
     const template = await activeTemplateFor(employee);
     if (!template) return res.status(409).json({ error: "no_report_form" });
 
@@ -86,7 +96,8 @@ router.put("/today", async (req, res, next) => {
 });
 
 // One day at a glance, for managers: every active person who has a report
-// form, whether they've submitted, and totals per form.
+// form, whether they've submitted, and totals per form; everyone with an
+// automatic report, with that day's numbers and the team's totals.
 router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
   try {
     const date = req.query.date ? String(req.query.date) : firmDate();
@@ -96,11 +107,9 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
 
     const [employees, reports] = await Promise.all([
       prisma.employee.findMany({
-        where: { active: true, reportTemplateId: { not: null }, ...officeWhere },
+        where: { active: true, OR: [{ reportTemplateId: { not: null } }, { autoReport: true }], ...officeWhere },
         select: {
-          id: true,
-          name: true,
-          office: { select: { id: true, name: true } },
+          ...AUTO_EMPLOYEE,
           reportTemplate: { select: { id: true, name: true, active: true } },
         },
         orderBy: { name: "asc" },
@@ -111,25 +120,35 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       }),
     ]);
 
-    const reportByEmployee = new Map(reports.map((r) => [r.employeeId, r]));
-    const rows = employees
-      .filter((e) => e.reportTemplate?.active)
-      .map((e) => ({
-        employee: { id: e.id, name: e.name, office: e.office },
-        template: { id: e.reportTemplate.id, name: e.reportTemplate.name },
-        report: reportByEmployee.get(e.id) ? summaryOf(reportByEmployee.get(e.id)) : null,
-      }));
-    // Reports from people no longer expected (deactivated, form changed)
-    // still count and still show.
-    const listed = new Set(rows.map((r) => r.employee.id));
+    const reportFor = (employeeId, templateId) => reports.find((r) => r.employeeId === employeeId && r.templateId === templateId);
+    const automatic = employees.filter((e) => e.autoReport);
+    const autoDays = await Promise.all(automatic.map((e) => autoReportDays(e, date, date).then(([day]) => day)));
+    const rows = [
+      ...automatic.map((e, i) => ({ employee: { id: e.id, name: e.name, office: e.office }, template: null, report: null, auto: autoDays[i] })),
+      ...employees
+        .filter((e) => !e.autoReport && e.reportTemplate?.active)
+        .map((e) => {
+          const report = reportFor(e.id, e.reportTemplate.id);
+          return {
+            employee: { id: e.id, name: e.name, office: e.office },
+            template: { id: e.reportTemplate.id, name: e.reportTemplate.name },
+            report: report ? summaryOf(report) : null,
+          };
+        }),
+    ];
+    // Reports that were sent anyway (by someone no longer expected —
+    // deactivated, form changed, switched to automatic) still count and show.
+    const shown = new Set(rows.filter((r) => r.report).map((r) => r.report.id));
     for (const r of reports) {
-      if (!listed.has(r.employeeId)) {
+      if (!shown.has(r.id)) {
         rows.push({ employee: { id: r.employee.id, name: r.employee.name, office: r.employee.office }, template: r.template, report: summaryOf(r) });
       }
     }
+    rows.sort((a, b) => a.employee.name.localeCompare(b.employee.name));
 
     const byTemplate = new Map();
     for (const row of rows) {
+      if (!row.template) continue;
       if (!byTemplate.has(row.template.id)) byTemplate.set(row.template.id, { template: row.template, expected: 0, reports: [] });
       byTemplate.get(row.template.id).expected += 1;
     }
@@ -146,7 +165,8 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       };
     });
 
-    res.json({ date, today: firmDate(), rows, forms });
+    const auto = autoDays.length ? { people: autoDays.length, totals: addUp(autoDays) } : null;
+    res.json({ date, today: firmDate(), rows, forms, auto });
   } catch (err) {
     next(err);
   }
@@ -191,6 +211,33 @@ router.get("/", async (req, res, next) => {
       prisma.report.count({ where }),
     ]);
     res.json({ reports, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Automatic reports: one person's day (?date=), or a run of days
+// (?from=&to=, newest first) for their history. Managers: anyone's
+// (?employeeId=); everyone else: their own.
+router.get("/auto", async (req, res, next) => {
+  try {
+    const own = req.user.employee?.id ?? null;
+    const employeeId = req.query.employeeId ? parseId(req.query.employeeId, "employeeId") : own;
+    if (employeeId == null || (!isManager(req) && employeeId !== own)) return res.status(404).json({ error: "not_found" });
+    const employee = await prisma.employee.findUnique({ where: { id: employeeId }, select: AUTO_EMPLOYEE });
+    if (!employee) return res.status(404).json({ error: "not_found" });
+
+    const today = firmDate();
+    const to = String(req.query.to || req.query.date || today);
+    // ?days=14: the 14 days up to `to` (the firm's dates, not the phone's).
+    const span = Math.min(Math.max(Number(req.query.days) || 1, 1), MAX_DAYS);
+    const from = String(req.query.from || req.query.date || (isValidDate(to) ? shiftDate(to, 1 - span) : to));
+    const problem = checkRange(from, to, today);
+    if (problem) throw badRequest(problem);
+
+    const days = await autoReportDays(employee, from, to);
+    const { userId, ...person } = employee;
+    res.json({ employee: person, today, days: days.reverse() });
   } catch (err) {
     next(err);
   }

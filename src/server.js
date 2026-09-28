@@ -1,6 +1,7 @@
 const env = require("./config/env");
 const app = require("./app");
 const { describeFfmpegAvailability } = require("./utils/audioTranscode");
+const { prepareDatabase } = require("./lib/dbSetup");
 
 // Check this once, loudly, at startup — so a missing/broken ffmpeg (e.g.
 // ffmpeg-static's binary never downloaded because this server has no
@@ -22,6 +23,13 @@ process.on("unhandledRejection", (reason) => {
   console.error("unhandledRejection:", reason);
 });
 
-app.listen(env.port, () => {
-  console.log(`call-center-backend listening on port ${env.port} (${env.nodeEnv})`);
-});
+// SQLite in WAL mode: reading never waits for someone saving, and saves
+// queue briefly instead of failing — what several operators working at once
+// need. The setting is stored in the database file, so this is idempotent.
+prepareDatabase()
+  .catch((err) => console.error("database setup:", err.message))
+  .finally(() => {
+    app.listen(env.port, () => {
+      console.log(`call-center-backend listening on port ${env.port} (${env.nodeEnv})`);
+    });
+  });

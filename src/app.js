@@ -15,6 +15,7 @@ const deviceRoutes = require("./routes/device");
 const reportRoutes = require("./routes/reports");
 const organization = require("./routes/organization");
 const calendarRoutes = require("./routes/calendar");
+const clientRoutes = require("./routes/clients");
 
 const app = express();
 
@@ -55,6 +56,9 @@ app.use(
   })
 );
 app.use(cookieParser());
+// Spreadsheet imports arrive in batches of up to 200 rows — more than the
+// default 100 KB. Everything else keeps the small default.
+app.use("/api/clients/import", express.json({ limit: "2mb" }));
 app.use(express.json());
 
 // Lightweight request logger — method, path, status, duration. Not a
@@ -93,6 +97,12 @@ app.use("/api/positions", organization.positions);
 app.use("/api/report-templates", organization.templates);
 app.use("/api/calendars", calendarRoutes.calendars);
 app.use("/api/appointments", calendarRoutes.appointments);
+app.use("/api/clients", clientRoutes.clients);
+app.use("/api/client-cases", clientRoutes.cases);
+app.use("/api/client-payments", clientRoutes.payments);
+app.use("/api/client-notes", clientRoutes.notes);
+app.use("/api/client-links", clientRoutes.links);
+app.use("/api/audit", clientRoutes.auditLog);
 
 // Android app: sign-in with a portal account, device-token session refresh,
 // "collect calls?" config. Authenticated by device token, not the cookie.

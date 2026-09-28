@@ -1,7 +1,8 @@
 # Call Center Backend
 
 The server behind the firm's staff system ("Ledger"): portal logins, staff and
-offices, daily reports, and call recording/monitoring for call-center staff.
+offices, daily reports, call recording/monitoring for call-center staff, the
+lawyer's calendar and the clients database.
 Serves a REST API to the portal (`call-center-portal`) and to the Android app
 (`call-center-agent`).
 
@@ -31,18 +32,28 @@ DEMO_PASSWORD=some-password npm run seed:demo
 ```
 
 It creates offices, positions, three report forms, six staff (three
-call-center, three office staff), ~30 days of calls and ~10 days of reports.
+call-center, three office staff), ~30 days of calls, ~10 days of reports, the
+lawyer's calendar with bookings, and ~50 made-up clients (every case status,
+court stages, full/partial/no payment, connections, one archived, one entered
+twice to try merging). Run it again any time: it resets the demo data.
 
 `npm test` runs the unit tests (Node's built-in test runner, Node 21+).
 
 ## Who can do what
 
-| | Employee | Boss | Developer |
-|---|---|---|---|
-| Own stats, calls (if collected), reports | ✓ | ✓ everyone's | ✓ everyone's |
-| Review reports | — | ✓ | ✓ |
-| See staff, settings | — | read-only | ✓ edit |
-| Create/remove accounts, reset passwords, sign out phones | — | — | ✓ |
+| | Employee | Lawyer | Boss | Developer |
+|---|---|---|---|---|
+| Own stats, calls (if collected), reports | ✓ | — | ✓ everyone's | ✓ everyone's |
+| Calendar | per their access | their own | all | all |
+| Clients | if they take calls / book | only those with a case assigned to them; can move those cases and write notes | all | all |
+| Review reports | — | — | ✓ | ✓ |
+| See staff, settings | — | — | read-only | ✓ edit |
+| Create/remove accounts, reset passwords, sign out phones | — | — | — | ✓ |
+
+Boss and Lawyer accounts are the same kind of account (Team → Boss and
+lawyers) with one switch, **"Sees everything"**: on = Boss (the head of the
+firm), off = Lawyer. Anything not explicitly opened to a role is closed to
+it (`src/middleware/auth.js`).
 
 There is no open registration. The first DEVELOPER comes from `npm run seed`;
 every other account is created by a DEVELOPER in the portal.
@@ -62,11 +73,19 @@ Everything about a person's job is configuration, not code:
   number, amount (soʻm), yes/no, one choice, several choices. Each submitted
   report stores the questions as they were, so editing a form never changes
   old reports. See `src/services/reportFields.js`.
+- **Automatic report** — per person (preset on the position; on for
+  call-center staff): nothing to fill in, the day's report is worked out from
+  their calls (answered, missed, called back, still to call back, talk time),
+  the appointments they booked, clients added, consultations, contracts and
+  payments recorded. Computed when viewed, never stored, so late-syncing
+  calls still count. A report form set on the person is kept (not asked) and
+  comes back if automatic is switched off. See `src/services/autoReport.js`.
 
 ## The lawyer's calendar
 
-A BOSS account can keep a calendar (Team → Boss accounts → "Keeps a
-calendar"). Its settings are the lawyer's **usual week** — working days,
+Every lawyer — a BOSS or LAWYER account — can keep a calendar (Team → Boss
+and lawyers → "Keeps a calendar"); staff book with whichever lawyer the client
+needs, and a booking assigns the client's case to that lawyer. Its settings are the lawyer's **usual week** — working days,
 reception hours, a lunch break (12:00–13:00 by default; can be moved or
 switched off) and the appointment length. Every new week starts filled in
 from it; the lawyer changes any single day — a normal day, **busy all day**
@@ -88,6 +107,44 @@ client ("I told them", or re-booking the client, clears it). The lawyer
 marks appointments attended / no-show; whoever booked one can cancel it
 before it happens. From Thursday the lawyer's home page reminds them to
 confirm next week. Logic: `src/services/calendar.js`.
+
+## Clients
+
+The client base the call center works from (replaces the Excel CRM). Who:
+bosses and developers, and staff who take calls or book appointments.
+
+- **Client** — name, phone numbers (matched by their last 9 digits, so no
+  number belongs to two clients by accident), city, where they came from,
+  notes, the **next call** to make (with what it's about). Search finds a name
+  typed in Latin or Cyrillic either way, a phone number, or a case number.
+- **Lawyers** — a case is assigned to a lawyer account (`lawyerId`; its name
+  is kept in `lawyer` too), by picking one, by booking into their calendar,
+  or on import when the sheet's lawyer column names exactly one account
+  (`src/lib/lawyers.js`). A lawyer without an account can still be written by
+  name. LAWYER accounts see only clients with a case assigned to them, and of
+  those only their own cases, payments and history — no calls, no connections.
+- **Cases** — what the client came for, each with a **status**
+  (consultation → call again → contract → finished / declined) and, once
+  signed, the **court stage** (inquiry … supreme court review), lawyer, case
+  number, contract amount and **payments** (paid / still owed). The first
+  consultation and the contract are dated when reached; the monthly
+  **targets** set on a position count those dates per operator.
+- **History** — status and stage changes, notes, imports, merges, plus the
+  client's calls and appointments; **connections** between clients (family,
+  who referred whom, the same case).
+- Calls show the client's name instead of a bare number, and a booking in the
+  calendar finds or creates its client (with a consultation for the booker).
+
+Nothing is thrown away: "delete" **archives** a client (hidden from lists,
+restorable, re-activated by a new booking); **merge** moves everything of a
+duplicate into the right record; deleting a case or a payment, merging,
+archiving and importing are kept in the **change log** (Settings), with a copy
+of what was deleted. **Import** reads Excel or Google Sheets (the portal parses
+the file, `src/services/clientImport.js` matches and merges: by the ID column
+of our own export, by phone, by an unambiguous exact name) — importing the same
+file twice changes nothing. **Export** gives an .xlsx of the current list that
+imports back unchanged. Logic: `src/services/clients.js`,
+`src/routes/clients.js`.
 
 ## Authentication
 
@@ -126,13 +183,15 @@ and `/api/calls/sync` use the device token.
 | Auth | `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/change-password` |
 | App | `POST /device/login`, `POST /device/session`, `GET /device/config`, `POST /device/logout` |
 | Sync | `POST /calls/sync` (multipart: `payload` JSON part first, then `recording` files) |
-| Calls | `GET /calls` (filters: `employeeId, callType, missed, hasRecording, followUp, needsCallback, phone, from, to, page`), `GET /calls/:id`, `PATCH /calls/:id/follow-up`, `GET /calls/:id/recording` (Range; AMR→MP3 on first play) |
+| Calls | `GET /calls` (filters: `employeeId, callType, missed, hasRecording, followUp, needsCallback, phone, from, to, page`; `sort=longest`; returns `summary` with total talk time), `GET /calls/:id`, `PATCH /calls/:id/follow-up`, `GET /calls/:id/recording` (Range; AMR→MP3 on first play) |
 | Dashboard | `GET /dashboard?from&to&tzOffset[&employeeId]` |
-| Reports | `GET/PUT /reports/today`, `GET /reports/day?date&officeId`, `GET /reports`, `GET /reports/:id`, `POST /reports/:id/review` |
+| Reports | `GET/PUT /reports/today` (automatic: `auto` instead of a form; PUT refused), `GET /reports/day?date&officeId` (rows with `auto`, team totals in `auto`), `GET /reports/auto?employeeId&date` or `&days=14` / `&from&to` (max 62 days), `GET /reports`, `GET /reports/:id`, `POST /reports/:id/review` |
 | Staff | `GET/POST /employees`, `GET/PATCH/DELETE /employees/:id`, `DELETE /employees/:id/devices/:deviceId`, `POST /employees/:id/reset-password`, `POST /employees/:id/regenerate-device-id` |
-| Boss accounts | `GET/POST /users`, `PATCH/DELETE /users/:id`, `POST /users/:id/reset-password` |
+| Boss and lawyers | `GET/POST /users` (`role`: BOSS or LAWYER, `name`), `PATCH /users/:id` (`role`, `name`, `active`, `hasCalendar`), `DELETE /users/:id`, `POST /users/:id/reset-password` |
 | Calendar | `GET/POST /calendars`, `PATCH /calendars/:id` (usual week: `workDays, dayStart, dayEnd, lunch, slotMinutes`), `GET/PUT /calendars/:id/weeks/:monday` (PUT: `blocks`, optional `cancelAppointments, cancelReason`), `POST …/publish`, `POST /calendars/:id/appointments`, `GET /appointments?phone=|mine=true|attention=true`, `PATCH /appointments/:id` |
-| Settings | `/offices`, `/positions`, `/report-templates` (GET for managers; writes DEVELOPER-only) |
+| Clients | `GET /clients` (`q, filter=callToday|debt|active|archived, status, legalStage, operatorId, lawyer, page`), `GET /clients/export` (same filters, .xlsx), `GET /clients/lookup?phone`, `GET /clients/lawyers`, `GET /clients/targets`, `POST /clients`, `GET/PATCH/DELETE /clients/:id` (DELETE archives), `POST /clients/:id/restore`, `POST /clients/:id/merge` (`otherId`), `POST /clients/:id/cases|payments|notes|links`, `PATCH/DELETE /client-cases/:id`, `DELETE /client-payments/:id`, `DELETE /client-notes/:id`, `DELETE /client-links/:id`, `POST /clients/import` (`rows`), `GET /clients/import/google?url` |
+| Change log | `GET /audit` (managers: the last 100 archive/restore/merge/delete/import entries) |
+| Settings | `/offices`, `/positions` (incl. monthly `targetConsultations`, `targetContracts`), `/report-templates` (GET for managers; writes DEVELOPER-only) |
 | Diagnostics | `GET /sync-logs` |
 
 `GET /downloads/ledger.apk` (outside `/api`) serves the Android app.
@@ -149,7 +208,10 @@ and `/api/calls/sync` use the device token.
 
 ## Storage
 
-- `prisma/*.db` — the SQLite database. Back it up.
+- `prisma/*.db` — the SQLite database (WAL mode, set at startup; the
+  `-wal`/`-shm` files next to it belong to it). `npm run backup` writes a
+  consistent dated copy to `storage/backups/` and keeps 14 — run it nightly
+  (DEPLOY.md → Backups).
 - `storage/recordings/` — call recordings (client audio). Grows forever; back
   it up and watch disk space. Never commit (it's in `.gitignore`).
 - `storage/recording-cache/` — MP3 conversions of AMR recordings; safe to

@@ -29,13 +29,14 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// A portal login account. DEVELOPER and BOSS accounts stand alone.
-// EMPLOYEE accounts are linked 1:1 to an Employee record.
+// A portal login account. DEVELOPER, BOSS and LAWYER accounts stand alone;
+// EMPLOYEE accounts are linked 1:1 to an Employee record. BOSS sees
+// everything; LAWYER only their own calendar and the cases assigned to them.
 model User {
   id                 Int       @id @default(autoincrement())
   username           String    @unique
   passwordHash       String
-  role               String // "DEVELOPER" | "BOSS" | "EMPLOYEE"
+  role               String // "DEVELOPER" | "BOSS" | "LAWYER" | "EMPLOYEE"
   employee           Employee?
   active             Boolean   @default(true)
   // True until the user (or a DEVELOPER, via the reset endpoint) sets a
@@ -57,9 +58,18 @@ model User {
   // The lawyer's appointment calendar, for a BOSS account that has one.
   calendar           Calendar?
   bookedAppointments Appointment[] @relation("AppointmentBookedBy")
+  clientsCreated     Client[]      @relation("ClientCreatedBy")
+  paymentsRecorded   Payment[]     @relation("PaymentRecordedBy")
+  clientEvents       ClientEvent[] @relation("ClientEventAuthor")
+  auditLogs          AuditLog[]    @relation("AuditUser")
+  lawyerCases        ClientCase[]  @relation("CaseLawyer")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Shown for boss and lawyer accounts (e.g. on cases); null: the calendar
+  // name, else the username.
+  name String?
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -99,12 +109,18 @@ model Employee {
 
   calls   CallLog[]
   reports Report[]
+  cases   ClientCase[]
 
   // Flexible metadata escape hatch — see schema-level note above.
   customFields Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // The daily report is made automatically from their calls, bookings and
+  // clients (src/services/autoReport.js); no form is asked while this is on.
+  // The report form above is kept for when it is switched off.
+  autoReport Boolean @default(false)
 }
 
 // A physical location — e.g. the office by the court, the translation office.
@@ -122,15 +138,21 @@ model Office {
 // "collect calls" and the report form. It's copied onto the person, not
 // linked live — editing a position never silently changes existing staff.
 model Position {
-  id               Int             @id @default(autoincrement())
-  name             String          @unique
-  collectCalls     Boolean         @default(false)
-  calendarAccess   String          @default("none")
-  reportTemplateId Int?
-  reportTemplate   ReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
-  employees        Employee[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id                  Int             @id @default(autoincrement())
+  name                String          @unique
+  collectCalls        Boolean         @default(false)
+  calendarAccess      String          @default("none")
+  reportTemplateId    Int?
+  reportTemplate      ReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
+  // Monthly targets for people in this position (e.g. operators: 60
+  // consultations, 30 contracts). Null: no target.
+  targetConsultations Int?
+  targetContracts     Int?
+  employees           Employee[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  // Preset for new staff: their daily report is made automatically.
+  autoReport          Boolean         @default(false)
 }
 
 // A daily report form, built in the portal. `fields` is an ordered list of
@@ -382,6 +404,9 @@ model Appointment {
   id             Int       @id @default(autoincrement())
   calendarId     Int
   calendar       Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  // Linked (or created) by phone number when booked — see routes/calendar.js.
+  clientId       Int?
+  client         Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
   date           String // "YYYY-MM-DD", firm timezone
   start          Int // minutes from midnight
   end            Int
@@ -409,4 +434,169 @@ model Appointment {
 
   @@index([calendarId, date])
   @@index([phoneKey])
+}
+
+// ------------------------------------------------------------------ clients
+// The firm's clients — replaces the Excel CRM. Calls and appointments attach
+// to a client through its phone numbers (the same last-9-digit key as calls,
+// src/lib/phone.js). Rules and value lists: src/services/clients.js.
+model Client {
+  id           Int           @id @default(autoincrement())
+  name         String
+  city         String?
+  email        String?
+  // Where they came from: "call" | "telegram" | "instagram" | "referral" |
+  // "walk_in" | "other"
+  source       String?
+  notes        String?
+  // When someone should call them next — shown on the operator's home that day.
+  nextCallAt   DateTime?
+  nextCallNote String?
+  // Name, city, phone digits and case numbers in lowercase Latin (Cyrillic
+  // transliterated), so a search in either script finds the client.
+  searchText   String        @default("")
+  // Archived clients are hidden from lists but kept, with everything about
+  // them, and can be restored — nothing is deleted by accident.
+  archivedAt   DateTime?
+  // Room for fields added later without a migration (like Employee.customFields).
+  extra        Json?
+  createdById  Int?
+  createdBy    User?         @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  phones       ClientPhone[]
+  cases        ClientCase[]
+  payments     Payment[]
+  events       ClientEvent[]
+  linksFrom    ClientLink[]  @relation("ClientLinkFrom")
+  linksTo      ClientLink[]  @relation("ClientLinkTo")
+  appointments Appointment[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([nextCallAt])
+  @@index([name])
+  @@index([archivedAt])
+}
+
+model ClientPhone {
+  id       Int     @id @default(autoincrement())
+  clientId Int
+  client   Client  @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  phone    String
+  phoneKey String?
+
+  @@index([phoneKey])
+  @@index([clientId])
+}
+
+// One matter the firm handles for a client ("ish"). Two tracks, as in the
+// firm's spreadsheet: `status` — the operator's side (consultation, call
+// again, contract, done, declined) — and, once there's a contract,
+// `legalStage` — where the case stands (inquiry … Supreme Court review).
+model ClientCase {
+  id               Int           @id @default(autoincrement())
+  clientId         Int
+  client           Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  matter           String?
+  number           String?
+  // The lawyer by name, as shown and exported. Kept in step with lawyerId
+  // when the lawyer has an account; a name alone for anyone else.
+  lawyer           String?
+  // The operator responsible — their monthly targets count this case.
+  operatorId       Int?
+  operator         Employee?     @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  status           String        @default("consultation")
+  legalStage       String?
+  // "YYYY-MM-DD". consultationDate/contractDate are set when the status first
+  // reaches them — the monthly targets count by these.
+  startDate        String?
+  consultationDate String?
+  contractDate     String?
+  contractAmount   Int?
+  payments         Payment[]
+  events           ClientEvent[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  // The lawyer account the case is assigned to. A LAWYER account sees
+  // exactly the clients with a case assigned to them.
+  lawyerId      Int?
+  lawyerAccount User? @relation("CaseLawyer", fields: [lawyerId], references: [id], onDelete: SetNull)
+
+  @@index([clientId])
+  @@index([operatorId, consultationDate])
+  @@index([operatorId, contractDate])
+  @@index([lawyerId])
+}
+
+model Payment {
+  id           Int         @id @default(autoincrement())
+  clientId     Int
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  caseId       Int?
+  case         ClientCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  amount       Int
+  date         String // "YYYY-MM-DD"
+  method       String? // "cash" | "card" | "transfer"
+  kind         String      @default("contract") // "consultation" | "contract" | "other"
+  note         String?
+  recordedById Int?
+  recordedBy   User?       @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+
+  @@index([clientId])
+  @@index([caseId])
+}
+
+// A client's timeline: notes people write, and what the system records
+// (status changes, imports). Calls, appointments and payments come from
+// their own tables and are merged in when shown.
+model ClientEvent {
+  id        Int         @id @default(autoincrement())
+  clientId  Int
+  client    Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  caseId    Int?
+  case      ClientCase? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  kind      String // "note" | "status" | "import"
+  text      String
+  authorId  Int?
+  author    User?       @relation("ClientEventAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt DateTime    @default(now())
+
+  @@index([clientId, createdAt])
+}
+
+// How two clients are connected. kind: "family" | "referral" (`from`
+// recommended the firm to `to`) | "same_case" | "work" | "other"; `label`
+// says it in words ("akasi", "turmush o'rtog'i").
+model ClientLink {
+  id        Int      @id @default(autoincrement())
+  fromId    Int
+  from      Client   @relation("ClientLinkFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  toId      Int
+  to        Client   @relation("ClientLinkTo", fields: [toId], references: [id], onDelete: Cascade)
+  kind      String
+  label     String?
+  createdAt DateTime @default(now())
+
+  @@unique([fromId, toId, kind])
+  @@index([toId])
+}
+
+// Who archived, restored, merged, deleted or imported what, and when — with
+// a copy of anything deleted, so no change disappears without a trace and a
+// mistake can be put right.
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation("AuditUser", fields: [userId], references: [id], onDelete: SetNull)
+  // "client.archive" | "client.restore" | "client.merge" | "case.delete" |
+  // "payment.delete" | "clients.import"
+  action    String
+  entity    String
+  entityId  Int?
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
 }

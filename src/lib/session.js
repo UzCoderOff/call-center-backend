@@ -22,12 +22,13 @@ function endSession(res) {
 
 // What the portal (and the app) knows about whoever is signed in. The
 // employee part drives which sections they see: Calls only with
-// collectCalls, Reports only with a report form.
+// collectCalls, Reports only with a report form or an automatic report.
 function publicMe(user) {
   const e = user.employee;
   return {
     id: user.id,
     username: user.username,
+    name: user.name ?? null,
     role: user.role,
     mustChangePassword: user.mustChangePassword,
     employee: e
@@ -35,7 +36,8 @@ function publicMe(user) {
           id: e.id,
           name: e.name,
           collectCalls: e.collectCalls,
-          hasReport: e.reportTemplateId != null,
+          hasReport: e.reportTemplateId != null || e.autoReport,
+          autoReport: e.autoReport,
           calendarAccess: e.calendarAccess,
         }
       : null,

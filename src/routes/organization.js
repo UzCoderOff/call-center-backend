@@ -27,6 +27,15 @@ function calendarAccess(value) {
   return value;
 }
 
+// A monthly target: a whole number, or null for "no target".
+function target(value, field) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > 100000) throw badRequest(`invalid ${field}`);
+  return n;
+}
+
 function handleKnownErrors(err, res, next) {
   if (err.code === "P2002") return res.status(409).json({ error: "name_taken" });
   if (err.code === "P2025") return res.status(404).json({ error: "not_found" });
@@ -108,8 +117,11 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       data: {
         name: cleanName(req.body?.name),
         collectCalls: Boolean(req.body?.collectCalls),
+        autoReport: Boolean(req.body?.autoReport),
         calendarAccess: calendarAccess(req.body?.calendarAccess) ?? "none",
         reportTemplateId: optionalId(req.body?.reportTemplateId, "reportTemplateId") ?? null,
+        targetConsultations: target(req.body?.targetConsultations, "targetConsultations") ?? null,
+        targetContracts: target(req.body?.targetContracts, "targetContracts") ?? null,
       },
       include: POSITION_INCLUDE,
     });
@@ -121,16 +133,23 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
 
 positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
-    const { name, collectCalls, reportTemplateId } = req.body || {};
+    const { name, collectCalls, autoReport, reportTemplateId } = req.body || {};
     const templateId = optionalId(reportTemplateId, "reportTemplateId");
     const access = calendarAccess(req.body?.calendarAccess);
+    const targets = {
+      targetConsultations: target(req.body?.targetConsultations, "targetConsultations"),
+      targetContracts: target(req.body?.targetContracts, "targetContracts"),
+    };
+    for (const key of Object.keys(targets)) if (targets[key] === undefined) delete targets[key];
     const position = await prisma.position.update({
       where: { id: parseId(req.params.id) },
       data: {
         ...(name !== undefined ? { name: cleanName(name) } : {}),
         ...(typeof collectCalls === "boolean" ? { collectCalls } : {}),
+        ...(typeof autoReport === "boolean" ? { autoReport } : {}),
         ...(access !== undefined ? { calendarAccess: access } : {}),
         ...(templateId !== undefined ? { reportTemplateId: templateId } : {}),
+        ...targets,
       },
       include: POSITION_INCLUDE,
     });

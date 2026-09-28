@@ -1,9 +1,10 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, isManager } = require("../middleware/auth");
 const { resolveRecordingPath } = require("../utils/fileStorage");
 const { resolvePlayableRecording } = require("../utils/audioTranscode");
 const { badRequest, parseMs, parseId } = require("../utils/params");
+const { clientIndex } = require("../lib/clientsDb");
 const {
   FOLLOW_UP_WINDOW_MS,
   NEEDS_CALLBACK_STATUSES,
@@ -15,10 +16,10 @@ router.use(requireAuth);
 
 const FOLLOW_UP_STATUSES = ["pending", "attempted", "called_back", "client_called_again", "handled", "no_number"];
 
-// Who may see which calls: an EMPLOYEE only ever sees their own, whatever
-// they ask for; BOSS/DEVELOPER see everyone's.
+// Who may see which calls: BOSS/DEVELOPER see everyone's; anyone else
+// only ever their own, whatever they ask for (a lawyer: none).
 function accessWhere(req) {
-  if (req.user.role === "EMPLOYEE") {
+  if (!isManager(req.user)) {
     return { employeeId: req.user.employee ? req.user.employee.id : -1 }; // no linked employee -> sees nothing
   }
   return {};
@@ -29,7 +30,7 @@ function filterWhere(req) {
   const q = req.query;
   const where = {};
 
-  if (q.employeeId && req.user.role !== "EMPLOYEE") where.employeeId = parseId(q.employeeId, "employeeId");
+  if (q.employeeId && isManager(req.user)) where.employeeId = parseId(q.employeeId, "employeeId");
   if (q.missed !== undefined) where.missed = q.missed === "true";
   if (q.callType) where.callType = String(q.callType);
   // Lets the portal filter down to "calls with no recording attached" —
@@ -81,25 +82,38 @@ const LIST_INCLUDE = {
   followUpCall: { select: LINKED_CALL_SELECT },
 };
 
+// ?sort=longest lists the longest conversations first (the dashboard's
+// "talk time" tile opens this); the default is newest first.
+const SORTS = {
+  newest: [{ callTimestampMs: "desc" }],
+  longest: [{ durationSeconds: "desc" }, { callTimestampMs: "desc" }],
+};
+
 router.get("/", async (req, res, next) => {
   try {
     const pageSize = Math.min(Number(req.query.pageSize) || 50, 200);
     const page = Math.max(Number(req.query.page) || 1, 1);
+    const orderBy = SORTS[req.query.sort] || SORTS.newest;
     const where = { ...filterWhere(req), ...accessWhere(req) };
 
-    const [calls, total] = await Promise.all([
+    const [calls, total, sums] = await Promise.all([
       prisma.callLog.findMany({
         where,
         include: LIST_INCLUDE,
-        orderBy: { callTimestampMs: "desc" },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
       prisma.callLog.count({ where }),
+      prisma.callLog.aggregate({ where, _sum: { durationSeconds: true } }),
     ]);
 
+    // The client behind each number, when the number is in the clients database.
+    const clients = await clientIndex(prisma, calls.map((c) => c.phoneKey));
     res.json({
-      calls,
+      calls: calls.map((c) => ({ ...c, client: clients.get(c.phoneKey) || null })),
+      // Totals for the whole filtered list, not just this page.
+      summary: { total, talkSeconds: sums._sum.durationSeconds || 0 },
       pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
     });
   } catch (err) {
@@ -132,7 +146,8 @@ async function loadCallDetail(req, id) {
       })
     : [];
 
-  return { ...call, history };
+  const clients = await clientIndex(prisma, [call.phoneKey]);
+  return { ...call, history, client: clients.get(call.phoneKey) || null };
 }
 
 router.get("/:id", async (req, res, next) => {
@@ -169,7 +184,7 @@ router.patch("/:id/follow-up", async (req, res, next) => {
       });
     } else {
       if (call.followUp !== "handled") return res.status(409).json({ error: "not_marked_handled" });
-      if (req.user.role === "EMPLOYEE" && call.followUpMarkedById !== req.user.id) {
+      if (!isManager(req.user) && call.followUpMarkedById !== req.user.id) {
         return res.status(403).json({ error: "forbidden" });
       }
       await prisma.callLog.update({

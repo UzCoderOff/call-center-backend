@@ -37,6 +37,7 @@ function publicEmployee(employee, viewerRole, sync) {
     office: employee.office ?? null,
     position: employee.position ?? null,
     collectCalls: employee.collectCalls,
+    autoReport: employee.autoReport,
     calendarAccess: employee.calendarAccess,
     reportTemplate: employee.reportTemplate ?? null,
     createdAt: employee.createdAt,
@@ -85,6 +86,10 @@ function workSettings(body) {
     if (typeof body.collectCalls !== "boolean") throw badRequest("collectCalls must be true or false");
     data.collectCalls = body.collectCalls;
   }
+  if (body.autoReport !== undefined) {
+    if (typeof body.autoReport !== "boolean") throw badRequest("autoReport must be true or false");
+    data.autoReport = body.autoReport;
+  }
   if (body.calendarAccess !== undefined) {
     if (!CALENDAR_ACCESS.includes(body.calendarAccess)) throw badRequest("invalid calendarAccess");
     data.calendarAccess = body.calendarAccess;
@@ -120,6 +125,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       const position = await prisma.position.findUnique({ where: { id: settings.positionId } });
       if (!position) throw badRequest("unknown position");
       if (settings.collectCalls === undefined) settings.collectCalls = position.collectCalls;
+      if (settings.autoReport === undefined) settings.autoReport = position.autoReport;
       if (settings.calendarAccess === undefined) settings.calendarAccess = position.calendarAccess;
       if (settings.reportTemplateId === undefined) settings.reportTemplateId = position.reportTemplateId;
     }
@@ -142,6 +148,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         name,
         phoneNumber: optionalString(body.phoneNumber),
         collectCalls: settings.collectCalls ?? false,
+        autoReport: settings.autoReport ?? false,
         calendarAccess: settings.calendarAccess ?? "none",
         office: connect(settings.officeId),
         position: connect(settings.positionId),

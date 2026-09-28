@@ -1,7 +1,13 @@
 const { verifySessionToken } = require("../lib/tokens");
 const prisma = require("../lib/prisma");
 
-const ROLES = ["DEVELOPER", "BOSS", "EMPLOYEE"];
+// DEVELOPER and BOSS see everything ("managers"). LAWYER: only their own
+// calendar and the cases assigned to them. EMPLOYEE: per their settings.
+// Anything not explicitly opened to a role is closed to it.
+const ROLES = ["DEVELOPER", "BOSS", "LAWYER", "EMPLOYEE"];
+const MANAGER_ROLES = ["BOSS", "DEVELOPER"];
+const isManager = (user) => Boolean(user) && MANAGER_ROLES.includes(user.role);
+const isLawyer = (user) => Boolean(user) && user.role === "LAWYER";
 
 // Verifies the session cookie and attaches the current user (with their
 // linked Employee record, if any) to req.user. The account is re-fetched
@@ -45,4 +51,4 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireAuth, requireRole, ROLES, MANAGER_ROLES: ["BOSS", "DEVELOPER"] };
+module.exports = { requireAuth, requireRole, ROLES, MANAGER_ROLES, isManager, isLawyer };

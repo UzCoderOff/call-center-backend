@@ -16,14 +16,18 @@ router.use(requireAuth);
 // one comes into existence is prisma/seed.js, run directly against the
 // database. That "no open registration for the top role" rule predates
 // this file (see the comment in seed.js) and this endpoint preserves it:
-// it only ever creates/manages BOSS accounts, and refuses to touch a
-// DEVELOPER row even if someone guesses its id.
-const MANAGEABLE_ROLE = "BOSS";
+// it only ever creates/manages BOSS and LAWYER accounts, and refuses to
+// touch a DEVELOPER row even if someone guesses its id.
+//
+// BOSS sees everything. LAWYER — the firm's other lawyers — sees only their
+// own calendar and the cases assigned to them. Switching an account between
+// the two ("sees everything" on/off) takes effect on its next request.
+const MANAGEABLE_ROLES = ["BOSS", "LAWYER"];
 
 const WITH_CALENDAR = { calendar: { select: { id: true, name: true, active: true } } };
 
-// A boss account can keep the appointment calendar (the lawyer). Turning it
-// on creates the calendar (named after the account unless a name is given);
+// A boss or lawyer account can keep an appointment calendar. Turning it on
+// creates the calendar (named after the account unless a name is given);
 // turning it off hides it, keeping its history.
 async function setCalendar(userId, enabled, name) {
   const existing = await prisma.calendar.findUnique({ where: { ownerId: userId } });
@@ -35,14 +39,20 @@ async function setCalendar(userId, enabled, name) {
     });
   } else if (enabled) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    await prisma.calendar.create({ data: { ownerId: userId, name: cleanName || user.username } });
+    await prisma.calendar.create({ data: { ownerId: userId, name: cleanName || user.name || user.username } });
   }
+}
+
+function cleanName(value) {
+  if (value === undefined) return undefined;
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 120) : null;
 }
 
 function publicUser(user) {
   return {
     id: user.id,
     username: user.username,
+    name: user.name ?? null,
     role: user.role,
     active: user.active,
     calendar: user.calendar && user.calendar.active ? { id: user.calendar.id, name: user.calendar.name } : null,
@@ -56,13 +66,13 @@ function publicUser(user) {
 
 router.get("/", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
-    const role = req.query.role || MANAGEABLE_ROLE;
-    if (role !== MANAGEABLE_ROLE) {
+    if (req.query.role && !MANAGEABLE_ROLES.includes(req.query.role)) {
       return res.status(400).json({ error: "unsupported_role_filter" });
     }
     const users = await prisma.user.findMany({
-      where: { role: MANAGEABLE_ROLE },
-      orderBy: { username: "asc" },
+      where: { role: req.query.role ? req.query.role : { in: MANAGEABLE_ROLES } },
+      // The one(s) who see everything first, then the lawyers.
+      orderBy: [{ role: "asc" }, { username: "asc" }],
       include: WITH_CALENDAR,
     });
     res.json(users.map(publicUser));
@@ -84,13 +94,16 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       return res.status(409).json({ error: "username_taken" });
     }
 
+    const role = req.body?.role ?? "BOSS";
+    if (!MANAGEABLE_ROLES.includes(role)) return res.status(400).json({ error: "invalid_role" });
+
     const tempPassword = generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
 
     const created = await prisma.user.create({
-      data: { username: cleanUsername, passwordHash, role: MANAGEABLE_ROLE, mustChangePassword: true },
+      data: { username: cleanUsername, name: cleanName(req.body?.name) ?? null, passwordHash, role, mustChangePassword: true },
     });
-    // The lawyer is a boss account with a calendar — on unless turned off.
+    // A calendar for appointments — on unless turned off.
     if (req.body?.hasCalendar !== false) await setCalendar(created.id, true, req.body?.calendarName);
     const user = await prisma.user.findUnique({ where: { id: created.id }, include: WITH_CALENDAR });
 
@@ -108,17 +121,27 @@ router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing || existing.role !== MANAGEABLE_ROLE) {
+    if (!existing || !MANAGEABLE_ROLES.includes(existing.role)) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    const { active, hasCalendar, calendarName } = req.body || {};
+    const { active, hasCalendar, calendarName, role } = req.body || {};
+    if (role !== undefined && !MANAGEABLE_ROLES.includes(role)) return res.status(400).json({ error: "invalid_role" });
+    const name = cleanName(req.body?.name);
     if (typeof hasCalendar === "boolean") await setCalendar(id, hasCalendar, calendarName);
     const user = await prisma.user.update({
       where: { id },
-      data: { ...(typeof active === "boolean" ? { active } : {}) },
+      data: {
+        ...(typeof active === "boolean" ? { active } : {}),
+        ...(role !== undefined ? { role } : {}),
+        ...(name !== undefined ? { name } : {}),
+      },
       include: WITH_CALENDAR,
     });
+    // Their name on their cases follows the account's.
+    if (name !== undefined || hasCalendar !== undefined) {
+      await prisma.clientCase.updateMany({ where: { lawyerId: id }, data: { lawyer: user.name || user.calendar?.name || user.username } });
+    }
     res.json(publicUser(user));
   } catch (err) {
     if (err.code === "P2025") return res.status(404).json({ error: "not_found" });
@@ -130,7 +153,7 @@ router.post("/:id/reset-password", requireRole("DEVELOPER"), async (req, res, ne
   try {
     const id = Number(req.params.id);
     const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing || existing.role !== MANAGEABLE_ROLE) {
+    if (!existing || !MANAGEABLE_ROLES.includes(existing.role)) {
       return res.status(404).json({ error: "not_found" });
     }
 
@@ -151,14 +174,14 @@ router.post("/:id/reset-password", requireRole("DEVELOPER"), async (req, res, ne
   }
 });
 
-// Full removal of a BOSS account. Unlike an employee, a BOSS has no call
-// history to worry about, so there's no "has history" guard needed — just
-// a straight delete.
+// Full removal of a BOSS or LAWYER account. Unlike an employee, they have no
+// call history to worry about, so there's no "has history" guard needed —
+// just a straight delete (their cases keep the lawyer's name).
 router.delete("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const existing = await prisma.user.findUnique({ where: { id } });
-    if (!existing || existing.role !== MANAGEABLE_ROLE) {
+    if (!existing || !MANAGEABLE_ROLES.includes(existing.role)) {
       return res.status(404).json({ error: "not_found" });
     }
     await prisma.user.delete({ where: { id } });

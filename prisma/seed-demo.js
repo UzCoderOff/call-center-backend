@@ -2,7 +2,8 @@
 // positions and daily report forms; call-center staff with ~30 days of calls
 // (including missed calls, callbacks and unanswered callback attempts);
 // office staff (translation, document services) with ~10 days of reports;
-// and a boss account — so every screen of the portal has something to show.
+// the lawyer's calendar; made-up clients with cases and payments; and a boss
+// account — so every screen of the portal has something to show.
 //
 //   DEMO_PASSWORD=<something> npm run seed:demo
 //
@@ -23,6 +24,9 @@ const { reconcileFollowUps } = require("../src/services/followUp");
 const { normalizeFields } = require("../src/services/reportFields");
 const { usualWeekOf, usualWeekBlocks } = require("../src/services/calendar");
 const { firmDate, shiftDate, weekStartOf } = require("../src/lib/firmTime");
+const cl = require("../src/services/clients");
+const { refreshSearch } = require("../src/lib/clientsDb");
+const { lawyerAccounts, matchLawyer } = require("../src/lib/lawyers");
 
 if (env.nodeEnv === "production") {
   console.error("seed-demo refuses to run with NODE_ENV=production.");
@@ -75,7 +79,7 @@ const TEMPLATES = [
 ];
 
 const POSITIONS = [
-  { key: "operator", name: "Call-markaz operatori", collectCalls: true, calendarAccess: "book", template: "callcenter" },
+  { key: "operator", name: "Call-markaz operatori", collectCalls: true, autoReport: true, calendarAccess: "book", template: "callcenter", targetConsultations: 40, targetContracts: 12 },
   { key: "translator", name: "Tarjimon", collectCalls: false, calendarAccess: "view", template: "translation" },
   { key: "clerk", name: "Hujjat xizmatlari xodimi", collectCalls: false, calendarAccess: "none", template: "documents" },
 ];
@@ -94,6 +98,8 @@ const EMPLOYEES = [
 ];
 const REPORT_DAYS = 10;
 const BOSS_USERNAME = "rahbar";
+// A second lawyer: a LAWYER account — sees only her own calendar and cases.
+const LAWYER = { username: "rashidova", name: "Rashidova Madina", calendar: "Advokat Rashidova" };
 const DAYS = 30;
 const MIN = 60 * 1000;
 
@@ -139,6 +145,8 @@ function demoAnswers(fields) {
 async function main() {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
   await upsertUser(BOSS_USERNAME, "BOSS", passwordHash);
+  const lawyerUser = await upsertUser(LAWYER.username, "LAWYER", passwordHash);
+  await prisma.user.update({ where: { id: lawyerUser.id }, data: { name: LAWYER.name } });
 
   const offices = {};
   for (const o of OFFICES) {
@@ -158,7 +166,14 @@ async function main() {
   }
   const positions = {};
   for (const p of POSITIONS) {
-    const data = { collectCalls: p.collectCalls, calendarAccess: p.calendarAccess, reportTemplateId: templates[p.template].id };
+    const data = {
+      collectCalls: p.collectCalls,
+      autoReport: Boolean(p.autoReport),
+      calendarAccess: p.calendarAccess,
+      reportTemplateId: templates[p.template].id,
+      targetConsultations: p.targetConsultations ?? null,
+      targetContracts: p.targetContracts ?? null,
+    };
     positions[p.key] = await prisma.position.upsert({ where: { name: p.name }, update: data, create: { name: p.name, ...data } });
   }
 
@@ -172,6 +187,7 @@ async function main() {
       officeId: offices[e.office].id,
       positionId: position.id,
       collectCalls: position.collectCalls,
+      autoReport: position.autoReport,
       calendarAccess: position.calendarAccess,
       reportTemplateId: position.reportTemplateId,
     };
@@ -269,7 +285,8 @@ async function main() {
   for (const employee of employees) {
     await prisma.report.deleteMany({ where: { employeeId: employee.id } });
     const template = Object.values(templates).find((t) => t.id === employee.reportTemplateId);
-    if (!template) continue;
+    // Call-center staff don't fill in forms: their report is automatic.
+    if (!template || employee.autoReport) continue;
     for (let back = REPORT_DAYS; back >= 0; back--) {
       const date = shiftDate(today, -back);
       if (new Date(date + "T12:00:00Z").getUTCDay() === 0) continue;
@@ -309,6 +326,9 @@ async function main() {
   const operators = employees.filter((e) => e.collectCalls);
   const operatorUsers = await prisma.user.findMany({ where: { id: { in: operators.map((e) => e.userId) } } });
   let appointmentCount = 0;
+  // Each section starts its own random sequence, so changing one section
+  // never reshuffles the next.
+  seed = 7;
   for (const weekStart of [thisWeek, shiftDate(thisWeek, 7)]) {
     const blocks = usualWeekBlocks(usual, weekStart);
     await prisma.calendarWeek.create({
@@ -345,6 +365,25 @@ async function main() {
   }
 
   const courtDay = shiftDate(thisWeek, 9);
+  // Every operator has someone booked that day, so each of them gets a
+  // "tell the client" card when it becomes a court day.
+  const courtStarts = usualWeekBlocks(usual, shiftDate(thisWeek, 7))
+    .filter((b) => b.date === courtDay && b.kind === "available")
+    .flatMap((b) => Array.from({ length: Math.floor((b.end - b.start) / 30) }, (_, i) => b.start + i * 30));
+  const takenStarts = new Set(
+    (await prisma.appointment.findMany({ where: { calendarId: calendar.id, date: courtDay }, select: { start: true } })).map((a) => a.start)
+  );
+  const freeStarts = courtStarts.filter((m) => !takenStarts.has(m) && !takenStarts.has(m - 30) && !takenStarts.has(m + 30));
+  for (const booker of operatorUsers) {
+    const has = await prisma.appointment.count({ where: { calendarId: calendar.id, date: courtDay, bookedById: booker.id } });
+    if (has > 0 || freeStarts.length === 0) continue;
+    const start = freeStarts.shift();
+    freeStarts.splice(0, freeStarts.length, ...freeStarts.filter((m) => Math.abs(m - start) >= 60));
+    await prisma.appointment.create({
+      data: { calendarId: calendar.id, date: courtDay, start, end: start + 30, clientName: pick(CLIENT_NAMES), matter: pick(MATTERS), status: "booked", bookedById: booker.id },
+    });
+    appointmentCount += 1;
+  }
   const nextWeek = await prisma.calendarWeek.findUnique({
     where: { calendarId_weekStart: { calendarId: calendar.id, weekStart: shiftDate(thisWeek, 7) } },
   });
@@ -362,8 +401,303 @@ async function main() {
     data: { status: "cancelled", cancelReason: "Samarqand sudi", cancelledById: boss.id, cancelledAt: new Date() },
   });
 
-  console.log(`Demo data ready: ${employees.length} employees, ${created} calls, ${changed} missed calls resolved, ${reportCount} reports, ${appointmentCount} appointments.`);
-  console.log(`Logins: ${BOSS_USERNAME} (BOSS), ${EMPLOYEES.map((e) => e.username).join(", ")} (EMPLOYEE) — password from DEMO_PASSWORD.`);
+  seed = 11;
+  const lawyerCalendar = await prisma.calendar.upsert({
+    where: { ownerId: lawyerUser.id },
+    update: { name: LAWYER.calendar, active: true, workDays: "1,2,3,4,5", dayStart: H(10), dayEnd: H(17), lunchStart: H(13), lunchEnd: H(14), slotMinutes: 30 },
+    create: { ownerId: lawyerUser.id, name: LAWYER.calendar, dayStart: H(10), dayEnd: H(17), lunchStart: H(13), lunchEnd: H(14) },
+  });
+  await prisma.appointment.deleteMany({ where: { calendarId: lawyerCalendar.id } });
+  await prisma.calendarWeek.deleteMany({ where: { calendarId: lawyerCalendar.id } });
+  for (const weekStart of [thisWeek, shiftDate(thisWeek, 7)]) {
+    const blocks = usualWeekBlocks(usualWeekOf(lawyerCalendar), weekStart);
+    await prisma.calendarWeek.create({ data: { calendarId: lawyerCalendar.id, weekStart, status: "published", publishedAt: new Date(), blocks } });
+    for (const block of blocks.filter((b) => b.kind === "available")) {
+      for (let start = block.start; start + 30 <= block.end; start += 90) {
+        if (rand() > 0.3) continue;
+        const booker = pick(operatorUsers);
+        const recentCall = await prisma.callLog.findFirst({
+          where: { employee: { userId: booker.id }, missed: false },
+          orderBy: { callTimestampMs: "desc" },
+          skip: between(20, 40),
+        });
+        await prisma.appointment.create({
+          data: {
+            calendarId: lawyerCalendar.id,
+            date: block.date,
+            start,
+            end: start + 30,
+            clientName: pick(CLIENT_NAMES),
+            clientPhone: recentCall?.phoneNumber ?? null,
+            phoneKey: recentCall?.phoneKey ?? null,
+            matter: pick(MATTERS),
+            status: block.date < today ? (rand() < 0.8 ? "attended" : "no_show") : "booked",
+            bookedById: booker.id,
+            callLogId: recentCall?.id ?? null,
+          },
+        });
+        appointmentCount += 1;
+      }
+    }
+  }
+
+  const clientCount = await seedClients({ boss, operators, today });
+
+  console.log(
+    `Demo data ready: ${employees.length} employees, ${created} calls, ${changed} missed calls resolved, ${reportCount} reports, ${appointmentCount} appointments, ${clientCount} clients.`
+  );
+  console.log(`Logins: ${BOSS_USERNAME} (BOSS), ${LAWYER.username} (LAWYER), ${EMPLOYEES.map((e) => e.username).join(", ")} (EMPLOYEE) — password from DEMO_PASSWORD.`);
+}
+
+// ---------------------------------------------------------------- clients
+// Made-up clients (invented names, numbers from the demo calls above) at
+// every step: consultations, "call again", contracts at different court
+// stages with full, partial and no payment, finished and declined cases, a
+// few connections, one archived client and one entered twice (to try
+// "merge a duplicate" on). Clients whose number was booked in the calendar
+// are linked to those appointments.
+const FIRST = [
+  ["Jasur", false], ["Dilshod", false], ["Bekzod", false], ["Otabek", false], ["Sardor", false], ["Umid", false],
+  ["Kamron", false], ["Ulugʻbek", false], ["Aziza", true], ["Madina", true], ["Nigora", true], ["Feruza", true],
+  ["Laylo", true], ["Sevara", true], ["Nilufar", true],
+];
+const LAST = ["Qodirov", "Saidov", "Tursunov", "Nazarov", "Ismoilov", "Olimov", "Aminov", "Rahmonov", "Mirzayev", "Xoliqov", "Yoʻldoshev"];
+// Some staff type names in Cyrillic; search finds them either way.
+const CYRILLIC_NAMES = ["Каримов Жасур", "Салимова Мадина", "Холматов Шерзод", "Юсупова Нигора", "Эргашев Бахтиёр"];
+const CITIES = ["Toshkent", "Toshkent", "Toshkent", "Samarqand", "Buxoro", "Andijon", "Fargʻona", "Namangan", "Qarshi"];
+const CASE_MATTERS = [
+  "Ajrashish va aliment",
+  "Meros taqsimoti",
+  "Mehnat nizosi: ishdan boʻshatish",
+  "Kredit qarzi boʻyicha daʼvo",
+  "Uy-joy oldi-sotdisi",
+  "Jinoiy ish: himoya",
+  "Yer uchastkasi nizosi",
+  "Shartnoma tekshiruvi",
+];
+const LAWYERS = ["Karimov A.", "Rashidova M."];
+const NOTES = [
+  "Hujjatlar nusxasini olib keladi.",
+  "Kechqurun qoʻngʻiroq qilishni soʻradi.",
+  "Oldin boshqa advokatga murojaat qilgan.",
+  "Telegramda yozishni afzal koʻradi.",
+];
+const CALL_NOTES = ["Qarorini aytadi", "Hujjatlarni olib keladi", "Toʻlov boʻyicha eslatish"];
+const DEMO_CLIENTS = 46;
+const DAY = 24 * 60 * MIN;
+
+function demoName(i) {
+  if (i % 9 === 4) return CYRILLIC_NAMES[Math.floor(i / 9) % CYRILLIC_NAMES.length];
+  const [first, female] = pick(FIRST);
+  const last = pick(LAST);
+  return `${female ? `${last}a` : last} ${first}`;
+}
+
+function demoStatus() {
+  const r = rand();
+  if (r < 0.28) return "consultation";
+  if (r < 0.42) return "call_again";
+  if (r < 0.75) return "contract";
+  if (r < 0.87) return "done";
+  return "declined";
+}
+
+const minDate = (a, b) => (a < b ? a : b);
+
+async function demoCase(clientId, { status, start, today, operatorId, bossId, lawyers }) {
+  const consulted = ["consultation", "contract", "done", "declined"].includes(status);
+  const signed = status === "contract" || status === "done";
+  const contractDate = signed ? minDate(shiftDate(start, between(0, 6)), today) : null;
+  const legalStage = status === "done" ? pick(cl.LEGAL_STAGES.slice(3, 6)) : status === "contract" ? pick(cl.LEGAL_STAGES.slice(0, 6)) : null;
+  const inCourt = legalStage && cl.LEGAL_STAGES.indexOf(legalStage) >= cl.LEGAL_STAGES.indexOf("sent_to_court");
+  const contractAmount = signed ? between(6, 60) * 500000 : null;
+  const c = await prisma.clientCase.create({
+    data: {
+      clientId,
+      matter: pick(CASE_MATTERS),
+      number: inCourt ? `2-${between(1000, 9999)}/2026` : null,
+      ...lawyerFields(signed ? pick(LAWYERS) : null, lawyers),
+      operatorId,
+      status,
+      legalStage,
+      startDate: start,
+      consultationDate: consulted ? start : null,
+      contractDate,
+      contractAmount,
+      createdAt: new Date(`${start}T10:00:00Z`),
+    },
+  });
+  await prisma.clientEvent.create({
+    data: { clientId, caseId: c.id, kind: "case", text: c.matter, authorId: bossId, createdAt: new Date(`${start}T10:00:00Z`) },
+  });
+
+  // Consultation fee for some; contracts paid in full, in part or not yet.
+  if (status === "consultation" && rand() < 0.5) {
+    await prisma.payment.create({
+      data: { clientId, caseId: c.id, amount: 200000, date: start, method: "cash", kind: "consultation", recordedById: bossId },
+    });
+  }
+  let debt = 0;
+  if (signed) {
+    const share = status === "done" ? 1 : pick([0, 0.3, 0.5, 1]);
+    const total = Math.round((contractAmount * share) / 100000) * 100000;
+    const parts = total === 0 ? 0 : between(1, 3);
+    let left = total;
+    for (let p = 0; p < parts; p++) {
+      const amount = p === parts - 1 ? left : Math.round(total / parts / 100000) * 100000;
+      left -= amount;
+      await prisma.payment.create({
+        data: {
+          clientId,
+          caseId: c.id,
+          amount,
+          date: minDate(shiftDate(contractDate, p * between(5, 15)), today),
+          method: pick(cl.PAYMENT_METHODS),
+          kind: "contract",
+          recordedById: bossId,
+        },
+      });
+    }
+    debt = contractAmount - total;
+  }
+  return { debt };
+}
+
+// A lawyer written on a case -> their account, as the import does it.
+function lawyerFields(name, lawyers) {
+  if (!name) return { lawyer: null };
+  const account = matchLawyer(name, lawyers);
+  return account ? { lawyer: account.name, lawyerId: account.id } : { lawyer: name };
+}
+
+async function seedClients({ boss, operators, today }) {
+  const lawyers = await lawyerAccounts();
+  const now = Date.now();
+  seed = 2026;
+  // Numbers booked in the calendar first (so those appointments get their
+  // client), then other numbers from the demo calls.
+  const booked = await prisma.appointment.findMany({ where: { phoneKey: { not: null } }, select: { clientPhone: true }, orderBy: { id: "asc" } });
+  const numbers = [...new Set([...booked.map((a) => a.clientPhone), ...CLIENTS])].slice(0, DEMO_CLIENTS + 1);
+  const keys = numbers.map(phoneKey);
+
+  // A previous run's demo clients (everything about them goes with them).
+  await prisma.client.deleteMany({ where: { phones: { some: { phoneKey: { in: keys } } } } });
+
+  const ids = [];
+  for (let i = 0; i < DEMO_CLIENTS; i++) {
+    const phones = [{ phone: numbers[i], phoneKey: keys[i] }];
+    if (rand() < 0.15) {
+      const second = `+998${pick(OPERATORS)}${between(1000000, 9999999)}`;
+      phones.push({ phone: second, phoneKey: phoneKey(second) });
+    }
+    const start = shiftDate(today, -between(0, 70));
+    const status = demoStatus();
+    const client = await prisma.client.create({
+      data: {
+        name: demoName(i),
+        city: rand() < 0.8 ? pick(CITIES) : null,
+        source: pick(["call", "call", "call", "call", "telegram", "instagram", "referral", "walk_in"]),
+        createdById: boss.id,
+        createdAt: new Date(`${start}T09:30:00Z`),
+        phones: { create: phones },
+      },
+    });
+    const operatorId = pick(operators).id;
+    const { debt } = await demoCase(client.id, { status, start, today, operatorId, bossId: boss.id, lawyers });
+    // An older, finished case for some.
+    if (rand() < 0.12) await demoCase(client.id, { status: "done", start: shiftDate(start, -between(120, 300)), today, operatorId, bossId: boss.id, lawyers });
+
+    // Who to call and when: "call again" clients (some overdue, some today,
+    // some later) and some who owe money.
+    let nextCallAt = null;
+    if (status === "call_again" || (debt > 0 && rand() < 0.5)) {
+      const r = rand();
+      nextCallAt = new Date(r < 0.3 ? now - between(1, 3) * DAY : r < 0.65 ? now + between(1, 4) * 60 * MIN : now + between(1, 7) * DAY);
+    }
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { nextCallAt, nextCallNote: nextCallAt ? (debt > 0 ? CALL_NOTES[2] : pick(CALL_NOTES.slice(0, 2))) : null },
+    });
+    if (rand() < 0.3) {
+      await prisma.clientEvent.create({ data: { clientId: client.id, kind: "note", text: pick(NOTES), authorId: pick([boss.id, ...operators.map((e) => e.userId)]) } });
+    }
+    await refreshSearch(prisma, client.id);
+    ids.push(client.id);
+  }
+
+  // Connections between some of them.
+  const LINKS = [
+    [0, 1, "family", "Turmush oʻrtogʻi"],
+    [2, 3, "referral", null],
+    [5, 6, "same_case", null],
+    [8, 9, "family", "Aka-uka"],
+  ];
+  for (const [a, b, kind, label] of LINKS) {
+    await prisma.clientLink.create({ data: { fromId: ids[a], toId: ids[b], kind, label } });
+  }
+
+  // One archived client (a declined inquiry from a while ago).
+  await prisma.client.update({ where: { id: ids[ids.length - 1] }, data: { archivedAt: new Date(now - 10 * DAY) } });
+  await prisma.clientEvent.create({ data: { clientId: ids[ids.length - 1], kind: "archive", text: "", authorId: boss.id } });
+
+  // The same person entered twice: the second time in Cyrillic, from their
+  // other number — to try "merge a duplicate" on.
+  const original = await prisma.client.findUnique({ where: { id: ids[1] } });
+  const [last, first] = original.name.split(" ");
+  const twin = await prisma.client.create({
+    data: {
+      name: `${cyrillic(last)} ${cyrillic(first)}`,
+      source: "telegram",
+      createdById: boss.id,
+      phones: { create: [{ phone: numbers[DEMO_CLIENTS], phoneKey: keys[DEMO_CLIENTS] }] },
+    },
+  });
+  await demoCase(twin.id, { status: "consultation", start: shiftDate(today, -2), today, operatorId: pick(operators).id, bossId: boss.id, lawyers });
+  await refreshSearch(prisma, twin.id);
+
+  // Calendar bookings belong to their clients.
+  const byKey = new Map(
+    (await prisma.clientPhone.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, client: { select: { id: true, name: true } } } })).map(
+      (p) => [p.phoneKey, p.client]
+    )
+  );
+  // …and a client booked with a lawyer is that lawyer's (their open case).
+  for (const a of await prisma.appointment.findMany({ where: { phoneKey: { in: keys } }, include: { calendar: { select: { ownerId: true } } } })) {
+    const client = byKey.get(a.phoneKey);
+    await prisma.appointment.update({ where: { id: a.id }, data: { clientId: client.id, clientName: client.name } });
+    const lawyer = lawyers.find((l) => l.id === a.calendar.ownerId);
+    if (lawyer) {
+      await prisma.clientCase.updateMany({
+        where: { clientId: client.id, lawyerId: null, status: { in: cl.OPEN_STATUSES } },
+        data: { lawyerId: lawyer.id, lawyer: lawyer.name },
+      });
+    }
+  }
+  return ids.length + 1;
+}
+
+// Latin -> Cyrillic, just enough for the demo names above.
+function cyrillic(word) {
+  const MAP = [
+    ["sh", "ш"], ["ch", "ч"], ["yo", "ё"], ["yu", "ю"], ["ya", "я"], ["oʻ", "ў"], ["gʻ", "ғ"],
+    ["a", "а"], ["b", "б"], ["d", "д"], ["e", "е"], ["f", "ф"], ["g", "г"], ["h", "ҳ"], ["i", "и"], ["j", "ж"], ["k", "к"],
+    ["l", "л"], ["m", "м"], ["n", "н"], ["o", "о"], ["p", "п"], ["q", "қ"], ["r", "р"], ["s", "с"], ["t", "т"], ["u", "у"],
+    ["v", "в"], ["x", "х"], ["y", "й"], ["z", "з"],
+  ];
+  let out = "";
+  let rest = word;
+  while (rest) {
+    const lower = rest.toLowerCase();
+    const hit = MAP.find(([lat]) => lower.startsWith(lat));
+    if (!hit) {
+      out += rest[0];
+      rest = rest.slice(1);
+      continue;
+    }
+    out += rest[0] === rest[0].toUpperCase() && rest[0] !== rest[0].toLowerCase() ? hit[1].toUpperCase() : hit[1];
+    rest = rest.slice(hit[0].length);
+  }
+  return out;
 }
 
 main()

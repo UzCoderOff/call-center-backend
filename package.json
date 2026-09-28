@@ -13,7 +13,8 @@
     "seed": "node prisma/seed.js",
     "seed:demo": "node prisma/seed-demo.js",
     "followups:rebuild": "node scripts/rebuild-follow-ups.js",
-    "test": "node --test \"test/*.test.js\""
+    "test": "node --test \"test/*.test.js\"",
+    "backup": "node scripts/backup-db.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -22,6 +23,7 @@
     "cors": "2.8.5",
     "dotenv": "17.4.2",
     "express": "5.2.1",
+    "fflate": "^0.8.3",
     "ffmpeg-static": "^5.2.0",
     "jsonwebtoken": "9.0.3",
     "multer": "2.4.0"

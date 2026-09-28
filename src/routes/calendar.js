@@ -1,10 +1,11 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
-const { requireAuth, requireRole, MANAGER_ROLES } = require("../middleware/auth");
+const { requireAuth, requireRole, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
 const { phoneKey } = require("../lib/phone");
 const { firmNow, isValidDate, isoWeekday, shiftDate, weekStartOf } = require("../lib/firmTime");
 const cal = require("../services/calendar");
+const { clientForBooking } = require("../lib/clientsDb");
 
 // The lawyer's calendar.
 //
@@ -18,10 +19,12 @@ const cal = require("../services/calendar");
 //
 // Who can do what: the calendar's owner (and DEVELOPER) plans and publishes;
 // BOSS/DEVELOPER can see and book everything; employees per their
-// calendarAccess ("view" or "book"). Staff only ever see published weeks.
+// calendarAccess ("view" or "book"); a LAWYER sees, runs and books into
+// their own calendar only. Staff only ever see published weeks.
 
 function accessOf(user) {
-  if (MANAGER_ROLES.includes(user.role)) return "book";
+  if (isManager(user)) return "book";
+  if (isLawyer(user)) return "none";
   return user.employee?.calendarAccess || "none";
 }
 const canView = (user) => accessOf(user) !== "none";
@@ -46,7 +49,7 @@ async function loadCalendar(req, id, { manage = false } = {}) {
     err.status = 404;
     throw err;
   }
-  if (manage ? !canManage(req.user, calendar) : !canView(req.user)) {
+  if (manage ? !canManage(req.user, calendar) : !canView(req.user) && calendar.ownerId !== req.user.id) {
     const err = new Error("forbidden");
     err.status = 403;
     throw err;
@@ -102,9 +105,9 @@ calendars.use(requireAuth);
 
 calendars.get("/", async (req, res, next) => {
   try {
-    if (!canView(req.user)) return res.json([]);
+    if (!canView(req.user) && !isLawyer(req.user)) return res.json([]);
     const rows = await prisma.calendar.findMany({
-      where: req.user.role === "DEVELOPER" ? {} : { active: true },
+      where: req.user.role === "DEVELOPER" ? {} : { active: true, ...(isLawyer(req.user) ? { ownerId: req.user.id } : {}) },
       include: { owner: { select: { id: true, username: true } } },
       orderBy: { name: "asc" },
     });
@@ -134,7 +137,7 @@ calendars.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
     const ownerId = parseId(req.body?.ownerId, "ownerId");
     const owner = await prisma.user.findUnique({ where: { id: ownerId } });
-    if (!owner || !MANAGER_ROLES.includes(owner.role)) throw badRequest("owner must be a boss account");
+    if (!owner || !["BOSS", "DEVELOPER", "LAWYER"].includes(owner.role)) throw badRequest("owner must be a boss or lawyer account");
     const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim().slice(0, 80) : owner.username;
     const calendar = await prisma.calendar.upsert({
       where: { ownerId },
@@ -200,8 +203,8 @@ calendars.get("/:id/weeks/:weekStart", async (req, res, next) => {
       appointments: visible ? (manage ? appointments : appointments.filter(cal.isActive)) : [],
       free: visible ? cal.freeSlots({ blocks, appointments, slotMinutes: calendar.slotMinutes, now }) : [],
       canManage: manage,
-      canBook: canBook(req.user) && Boolean(week) && visible,
-      nextFree: canBook(req.user) ? await nextFreeSlot(calendar, now) : null,
+      canBook: (canBook(req.user) || manage) && Boolean(week) && visible,
+      nextFree: canBook(req.user) || manage ? await nextFreeSlot(calendar, now) : null,
       ...(manage ? { usual } : {}),
     });
   } catch (err) {
@@ -276,8 +279,9 @@ calendars.post("/:id/weeks/:weekStart/publish", async (req, res, next) => {
 calendars.post("/:id/appointments", async (req, res, next) => {
   try {
     const calendar = await loadCalendar(req, req.params.id);
-    if (!canBook(req.user)) return res.status(403).json({ error: "forbidden" });
     const manage = canManage(req.user, calendar);
+    // Staff with "book" access and managers; the owner into their own.
+    if (!canBook(req.user) && !manage) return res.status(403).json({ error: "forbidden" });
 
     const b = req.body || {};
     if (!isValidDate(b.date)) throw badRequest("invalid date");
@@ -293,7 +297,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     let callLogId = null;
     if (b.callLogId != null) {
       const call = await prisma.callLog.findUnique({ where: { id: parseId(b.callLogId, "callLogId") } });
-      const own = req.user.role !== "EMPLOYEE" || call?.employeeId === req.user.employee?.id;
+      const own = isManager(req.user) || call?.employeeId === req.user.employee?.id;
       if (call && own) callLogId = call.id;
     }
 
@@ -327,6 +331,20 @@ calendars.post("/:id/appointments", async (req, res, next) => {
         },
         include: APPOINTMENT_INCLUDE,
       });
+      // The booking belongs to a client in the clients database — found by
+      // phone number, or added (with a consultation case for the booker).
+      const clientId = await clientForBooking(tx, {
+        name: clientName,
+        phone: clientPhone,
+        matter: appointment.matter,
+        date: b.date,
+        user: req.user,
+        lawyerId: calendar.ownerId,
+      });
+      if (clientId) {
+        await tx.appointment.update({ where: { id: appointment.id }, data: { clientId } });
+        appointment.clientId = clientId;
+      }
       // A client booked again has clearly been told about the cancelled
       // appointment — take it off the "tell the client" list.
       if (appointment.phoneKey) {
@@ -355,9 +373,10 @@ appointments.use(requireAuth);
 // client hasn't been told yet.
 appointments.get("/", async (req, res, next) => {
   try {
-    if (!canView(req.user)) return res.json([]);
+    if (!canView(req.user) && !isLawyer(req.user)) return res.json([]);
     const today = firmNow().date;
-    const where = { date: { gte: today }, status: "booked", calendar: { active: true } };
+    // A lawyer: only appointments in their own calendar.
+    const where = { date: { gte: today }, status: "booked", calendar: { active: true, ...(isLawyer(req.user) ? { ownerId: req.user.id } : {}) } };
     if (req.query.attention === "true") {
       where.status = "cancelled";
       where.bookedById = req.user.id;
@@ -394,7 +413,7 @@ appointments.patch("/:id", async (req, res, next) => {
       where: { id: parseId(req.params.id) },
       include: { calendar: true },
     });
-    if (!appointment || !canView(req.user)) return res.status(404).json({ error: "not_found" });
+    if (!appointment || (!canView(req.user) && appointment.calendar.ownerId !== req.user.id)) return res.status(404).json({ error: "not_found" });
 
     const manage = canManage(req.user, appointment.calendar);
     const isBooker = appointment.bookedById === req.user.id;
@@ -407,7 +426,7 @@ appointments.patch("/:id", async (req, res, next) => {
         b.status === "cancelled" &&
         appointment.status === "booked" &&
         !hasStarted(appointment, firmNow()) &&
-        (isBooker || MANAGER_ROLES.includes(req.user.role));
+        (isBooker || isManager(req.user));
       if (!manage && !mayCancel) return res.status(403).json({ error: "forbidden" });
       data.status = b.status;
       if (b.status === "cancelled") {
@@ -421,7 +440,7 @@ appointments.patch("/:id", async (req, res, next) => {
     }
 
     if (b.clientInformed !== undefined) {
-      if (!isBooker && !MANAGER_ROLES.includes(req.user.role)) return res.status(403).json({ error: "forbidden" });
+      if (!isBooker && !isManager(req.user)) return res.status(403).json({ error: "forbidden" });
       data.clientInformed = Boolean(b.clientInformed);
     }
 

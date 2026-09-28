@@ -1,58 +1,90 @@
 # Deploying Ledger
 
 Three parts, deployed together: the **backend** (VPS), the **portal**
-(Vercel), and the **Android app** (APK you hand out). This version resets the
-database — the old test data (calls, the two test recordings) is not kept.
+(Vercel), and the **Android app** (APK you hand out).
 
-Order: backend → portal → check on a phone → Android app → set up the firm.
+> **The database holds the firm's real data. Never delete the database file,
+> never run `prisma migrate reset` on the VPS.** Updates only ever add to it.
+
+Order: backend → portal → check on a phone → (Android app, when it changed).
 
 ---
 
 ## 1. Backend (on the VPS)
 
+In the backend folder (the one you `git pull` in):
+
 ```bash
-cd /path/to/call-center-backend
 git pull
 npm install
-```
-
-Reset the database (the test data isn't needed):
-
-```bash
-# Make a backup copy first, just in case — the file DATABASE_URL points to
-# (usually prisma/dev.db):
-cp prisma/dev.db ~/ledger-old-$(date +%F).db
-rm prisma/dev.db
-rm -rf storage/recordings storage/recording-cache
-```
-
-If `git status` lists any **untracked** folders under `prisma/migrations/`,
-delete them — they're from the old setup; the only migration now is
-`20260926000000_init`.
-
-Update `.env` (compare with `.env.example`):
-
-```
-COOKIE_SECURE=true
-COOKIE_SAME_SITE=lax
-CORS_ORIGIN=https://call-center-frontend-hazel.vercel.app
-FIRM_TIMEZONE=Asia/Tashkent
-APP_DOWNLOAD_URL=https://82.115.51.61.nip.io/downloads/ledger.apk
-APP_LATEST_VERSION_CODE=        # leave empty until step 4
-APP_LATEST_VERSION_NAME=
-```
-
-Create the database and the first DEVELOPER account, then restart:
-
-```bash
-npx prisma migrate deploy
+npm run backup              # a dated copy of the database first (see Backups)
+npx prisma migrate deploy   # applies only the new migrations — keeps all data
 npx prisma generate
-npm run seed          # DEVELOPER from ADMIN_USERNAME / ADMIN_PASSWORD
-pm2 restart all       # or however the server is run (systemctl restart …)
+pm2 restart all             # or however the server is run
 ```
 
-The startup log should say `listening on port …` and report where ffmpeg was
-found (needed to play AMR recordings).
+The startup log should say `database: journal mode wal`, `listening on port
+…`, and where ffmpeg was found (needed to play AMR recordings).
+
+`.env` only changes when a release says so — compare with `.env.example`.
+
+### This release: the clients database and automatic reports
+
+- The migration `20260928000000_clients` adds the new tables (clients, their
+  phone numbers, cases, payments, history, connections, the change log) and
+  links appointments to their client. Nothing existing is removed — staff,
+  logins and passwords, phones, calls, recordings and reports stay as they
+  are.
+- The migration `20260928120000_auto_reports` adds one switch per person and
+  per position and turns it on for everyone whose calls are collected: their
+  daily report is automatic from now on (nothing to fill in). A report form
+  set on them (e.g. a custom one) is kept, just not asked; switch it back per
+  person in **Team → the person → Edit → Avtomatik hisobot**.
+- The migration `20260928140000_lawyers` adds a name to boss/lawyer accounts
+  and lets cases be assigned to a lawyer. **Every existing boss account keeps
+  seeing everything** — nobody is locked out by the update. Then, as the
+  DEVELOPER, in **Team → Rahbar va advokatlar**: open each lawyer who
+  shouldn't see everything, give them their name, and switch **"Hamma narsani
+  koʻradi"** off. From that moment they see only their own calendar and the
+  clients whose cases are assigned to them. Leave it on only for the head of
+  the firm. Do this before importing the Excel file, so its "Advokat" column
+  is matched to the right lawyers.
+- Afterwards, as the DEVELOPER: **Settings → Positions → the call-center
+  operator position → monthly targets** (consultations, contracts).
+- Bring in the Excel CRM: **Mijozlar → Exceldan import** (boss or
+  developer). Pick the .xlsx — or paste a Google Sheets link shared "anyone
+  with the link can view" — check whose each sheet is and how its columns
+  were understood, import. Importing the same file again is safe: nothing is
+  duplicated.
+- Set up the nightly backup (next section) — once.
+
+### Backups
+
+`npm run backup` writes `storage/backups/ledger-YYYY-MM-DD.db` — a
+consistent copy even while the server runs — and keeps the last 14. Run it
+every night: `crontab -e` and add (use your folder; `which node` shows node's
+path):
+
+```
+0 3 * * * cd /path/to/call-center-backend && /usr/bin/node scripts/backup-db.js >> storage/backups/backup.log 2>&1
+```
+
+These copies live on the same server — if its disk dies, they go with it.
+About once a week copy the newest one to your computer (from your computer,
+not inside the SSH session):
+
+```bash
+scp root@82.115.51.61:/path/to/call-center-backend/storage/backups/ledger-2026-10-01.db .
+```
+
+**Restoring** a backup: `pm2 stop all`; copy it over the database file
+(the one `DATABASE_URL` points to, usually `prisma/dev.db`) and delete
+`dev.db-wal` and `dev.db-shm` next to it if they exist; `pm2 start all`.
+Don't copy the live database file with `cp` while the server runs — use
+`npm run backup`.
+
+Recordings (`storage/recordings`) are plain files; copy that folder the same
+way now and then.
 
 ## 2. Portal (Vercel)
 
@@ -64,8 +96,7 @@ no longer used and can be deleted.
 ## 3. Check it on a phone
 
 Open https://call-center-frontend-hazel.vercel.app on an iPhone and an Android
-phone, sign in, and open Overview and Calls. Everything should load. (Sign in
-again on desktop too — old sessions are gone after the reset.)
+phone, sign in, and open Overview, Calls and Mijozlar. Everything should load.
 
 ## 4. Android app
 
@@ -126,14 +157,19 @@ backup). Never commit it — it's in `.gitignore`.
 4. **Team → Add employee:** name, username, office, position (fills in the
    rest). Give them the username and temporary password shown — the same
    login works in the app and the portal.
-5. **Team → Boss accounts** for the lawyer, with "Keeps a calendar" on
-   (default). The lawyer signs in and, once, opens Calendar → *Sozlamalar*:
+5. **Team → Rahbar va advokatlar**: an account for the head of the firm
+   (*Hamma narsani koʻradi* on) and one per lawyer (off — they see only their
+   own calendar and cases), each with "Keeps a calendar" on
+   (default). Each lawyer signs in and, once, opens Calendar → *Sozlamalar*:
    working days, hours, lunch (12:00–13:00 by default — move it or switch
    it off). From then on each new week is already filled in; the lawyer
    changes any day that's different (*Kunni oʻzgartirish* → busy all day,
    day off…) and presses *Tasdiqlash* so staff can book.
 6. Give call-center positions calendar access *View and book* (Settings →
    Positions) so operators can book appointments.
+7. On the same position, set the **monthly targets** (consultations,
+   contracts); operators see their progress on the Mijozlar page.
+8. **Mijozlar → Exceldan import** the existing client spreadsheets.
 
 ## 6. Moving to your own domain (when you buy one)
 
@@ -161,6 +197,10 @@ Then:
 
 ## Troubleshooting
 
+- **How is the server doing?** In the backend folder run
+  `bash scripts/server-check.sh` — read-only, prints nothing secret: disk,
+  memory, the app and its recent errors, database migrations, backups, HTTPS,
+  SSH/firewall settings, pending updates. Paste the output to whoever helps.
 - **A phone isn't syncing:** Team → the person → *Phone sync* shows the last
   success and the last error. In the app, Profile → *Share diagnostics* sends
   the phone's own log (Telegram etc.).

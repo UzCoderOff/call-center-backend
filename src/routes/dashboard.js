@@ -1,6 +1,6 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, isManager } = require("../middleware/auth");
 const { parseMs, parseId } = require("../utils/params");
 const { computeCallStats, computeDailySeries, blankStats } = require("../services/stats");
 const { getSyncHealth } = require("../services/syncHealth");
@@ -49,7 +49,7 @@ router.get("/", async (req, res, next) => {
     const to = parseMs(req.query.to, "to");
     const tzOffsetMin = Math.max(-840, Math.min(840, Number(req.query.tzOffset) || 0));
 
-    if (req.user.role !== "EMPLOYEE" && req.query.employeeId) {
+    if (isManager(req.user) && req.query.employeeId) {
       const employee = await prisma.employee.findUnique({ where: { id: parseId(req.query.employeeId, "employeeId") } });
       if (!employee) return res.status(404).json({ error: "not_found" });
       const employeeIds = [employee.id];
@@ -62,7 +62,7 @@ router.get("/", async (req, res, next) => {
       return res.json({ scope: "employee", totals, daily, needsCallback, sync: health.get(employee.id) });
     }
 
-    if (req.user.role === "EMPLOYEE") {
+    if (!isManager(req.user)) {
       const self = req.user.employee;
       if (!self) {
         return res.json({ scope: "self", totals: blankStats(), daily: [], needsCallback: { count: 0, items: [] }, sync: null });
