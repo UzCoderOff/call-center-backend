@@ -69,9 +69,20 @@ const TEMPLATES = [
     key: "documents",
     name: "Hujjat xizmatlari: kunlik hisobot",
     fields: [
-      { id: "clients", label: "Xizmat koʻrsatilgan mijozlar soni", type: "number", required: true },
-      { id: "work", label: "Bajarilgan ishlar", type: "checklist", options: ["Nusxa koʻchirish", "Skanerlash", "Hujjat yuborish", "Ariza toʻldirish", "Boshqa"] },
-      { id: "cash", label: "Tushum (soʻm)", type: "money", required: true },
+      // Like the Excel they used: a line per service — how many people, how much.
+      {
+        id: "services",
+        label: "Bugungi xizmatlar",
+        type: "table",
+        required: true,
+        hint: "Har bir xizmat turi — alohida qator",
+        columns: [
+          { id: "kind", label: "Xizmat", type: "select", options: ["Nusxa koʻchirish", "Skanerlash", "Hujjat yuborish", "Ariza toʻldirish", "Notarial tasdiq", "Boshqa"] },
+          { id: "people", label: "Mijozlar soni", type: "number" },
+          { id: "cash", label: "Tushum (soʻm)", type: "money" },
+          { id: "note", label: "Izoh", type: "text" },
+        ],
+      },
       { id: "problems", label: "Muammolar boʻldimi?", type: "yesno", required: true },
       { id: "notes", label: "Izoh", type: "textarea" },
     ],
@@ -135,6 +146,15 @@ function demoAnswers(fields) {
     else if (f.type === "yesno") answers[f.id] = rand() < 0.8;
     else if (f.type === "checklist") answers[f.id] = f.options.filter(() => rand() < 0.45);
     else if (f.type === "select") answers[f.id] = pick(f.options);
+    else if (f.type === "table") {
+      answers[f.id] = Array.from({ length: between(1, 4) }, () =>
+        Object.fromEntries(
+          f.columns
+            .filter((c) => c.type !== "text")
+            .map((c) => [c.id, c.type === "select" ? pick(c.options) : c.type === "money" ? between(2, 20) * 10000 : between(1, 8)])
+        )
+      );
+    }
     else if (f.type === "textarea" && rand() < 0.4) {
       answers[f.id] = pick(["Hammasi reja boʻyicha.", "Printer ikki marta ishlamay qoldi.", "Mijozlar koʻp boʻldi."]);
     }

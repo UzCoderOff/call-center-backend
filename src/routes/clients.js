@@ -2,7 +2,7 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
-const { firmNow, firmDayRange } = require("../lib/firmTime");
+const { firmNow, firmDayRange, shiftDate } = require("../lib/firmTime");
 const { phoneKey } = require("../lib/phone");
 const { refreshSearch, clientsByPhoneKeys } = require("../lib/clientsDb");
 const cl = require("../services/clients");
@@ -165,8 +165,9 @@ async function listQuery(q, user) {
   const caseWhere = {};
   if (q.status) caseWhere.status = cl.oneOf(q.status, cl.STATUSES, "status");
   if (q.legalStage) caseWhere.legalStage = cl.oneOf(q.legalStage, cl.LEGAL_STAGES, "legalStage");
-  if (q.operatorId) caseWhere.operatorId = parseId(q.operatorId, "operatorId");
-  if (q.lawyerId) caseWhere.lawyerId = parseId(q.lawyerId, "lawyerId");
+  // "none": cases nobody is assigned to yet — to find and fill in.
+  if (q.operatorId) caseWhere.operatorId = q.operatorId === "none" ? null : parseId(q.operatorId, "operatorId");
+  if (q.lawyerId) caseWhere.lawyerId = q.lawyerId === "none" ? null : parseId(q.lawyerId, "lawyerId");
   if (q.lawyer) caseWhere.lawyer = String(q.lawyer);
   if (q.filter === "active") caseWhere.status = caseWhere.status || { in: cl.OPEN_STATUSES };
   if (isLawyer(user) && Object.keys(caseWhere).length > 0) caseWhere.lawyerId = user.id;
@@ -178,6 +179,13 @@ async function listQuery(q, user) {
     orderBy = [{ nextCallAt: "asc" }];
   }
   if (q.filter === "debt") and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? user.id : null) } });
+  if (q.filter === "stale") {
+    // Consultations that went nowhere: still "consultation" or "call again"
+    // after 30 days (or with no date — from the old spreadsheets), and no
+    // contract. To close them in one go ("didn't continue").
+    and.push({ cases: { some: { status: { in: ["consultation", "call_again"] }, OR: [{ startDate: null }, { startDate: { lt: shiftDate(today(), -30) } }] } } });
+    and.push({ cases: { none: { status: { in: ["contract", "done"] } } } });
+  }
   return { where: { AND: and }, orderBy };
 }
 
@@ -238,7 +246,7 @@ async function clientIdsWithDebt(lawyerId = null) {
 
 // The current list (same filters) as an Excel file — one row per case; the
 // column titles are ones the importer recognises, so it can be imported back.
-const EXPORT_STATUS = { consultation: "Konsultatsiya", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Rad etdi" };
+const EXPORT_STATUS = { consultation: "Konsultatsiya", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Davom etmadi" };
 const EXPORT_STAGE = {
   inquiry: "Surishtiruv",
   investigation: "Tergov harakatlari",
@@ -799,6 +807,63 @@ links.delete("/:id", async (req, res, next) => {
   }
 });
 
+// ------------------------------------------------------------------ bulk
+// Many clients at once (managers): the ones ticked (ids), or every client the
+// list's filters match (query). set — one of:
+//   { operatorId } / { lawyerId }: on every case of each client;
+//   { status: "declined" }: "didn't continue" — closes their consultations
+//   and "call again"s (contracts are left as they are; a consultation still
+//   counts toward its operator's month).
+const BULK_LIMIT = 2000;
+clients.post("/bulk", managersOnly, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    let ids;
+    if (Array.isArray(b.ids)) ids = [...new Set(b.ids.map((x) => parseId(x, "ids")))];
+    else if (b.query && typeof b.query === "object") {
+      const { where } = await listQuery(b.query, req.user);
+      ids = (await prisma.client.findMany({ where, select: { id: true }, take: BULK_LIMIT + 1 })).map((c) => c.id);
+    } else throw badRequest("ids or query is required");
+    if (ids.length > BULK_LIMIT) throw badRequest(`at most ${BULK_LIMIT} clients at once`);
+
+    const set = b.set && typeof b.set === "object" ? b.set : {};
+    const keys = Object.keys(set);
+    if (keys.length !== 1 || !["operatorId", "lawyerId", "status"].includes(keys[0])) throw badRequest("set one of operatorId, lawyerId, status");
+    let data;
+    let label;
+    const where = { clientId: { in: ids } };
+    if (keys[0] === "operatorId") {
+      data = { operatorId: (await operatorFor(req, set.operatorId)) ?? null };
+      label = data.operatorId ? (await prisma.employee.findUnique({ where: { id: data.operatorId }, select: { name: true } })).name : null;
+    } else if (keys[0] === "lawyerId") {
+      data = await lawyerFor(set.lawyerId);
+      label = data.lawyer ?? null;
+    } else {
+      if (set.status !== "declined") throw badRequest("status can only be declined");
+      data = { status: "declined" };
+      where.status = { in: ["consultation", "call_again"] };
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const affected = ids.length ? await tx.clientCase.findMany({ where, select: { id: true, clientId: true, status: true } }) : [];
+      if (affected.length) {
+        await tx.clientCase.updateMany({ where: { id: { in: affected.map((k) => k.id) } }, data });
+        if (data.status) {
+          await tx.clientEvent.createMany({
+            data: affected.map((k) => ({ clientId: k.clientId, caseId: k.id, kind: "status", text: `${k.status}>${data.status}`, authorId: req.user.id })),
+          });
+        }
+      }
+      const summary = { clients: ids.length, cases: affected.length, kind: keys[0] === "status" ? "declined" : keys[0] === "operatorId" ? "operator" : "lawyer", name: label };
+      if (ids.length) await audit(tx, req, "clients.bulk", "client", null, summary);
+      return summary;
+    });
+    res.json(result);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
 // ---------------------------------------------------------------- import
 // Rows already read and interpreted by the portal (see the portal's
 // lib/clientImport.js); here they're matched to existing clients by phone
@@ -878,6 +943,7 @@ function auditSummary(r) {
   if (r.action === "client.merge") return { merged: d.merged?.name || null };
   if (r.action === "case.delete") return { matter: d.case?.matter || null, payments: d.case?.payments?.length || 0 };
   if (r.action === "payment.delete") return { amount: d.payment?.amount ?? null };
+  if (r.action === "clients.bulk") return { clients: d.clients, cases: d.cases, kind: d.kind, name: d.name ?? null };
   return {};
 }
 

@@ -4,6 +4,7 @@ const { requireAuth, requireRole, MANAGER_ROLES } = require("../middleware/auth"
 const { badRequest, parseId } = require("../utils/params");
 const { firmDate, firmDayRange, isValidDate, shiftDate } = require("../lib/firmTime");
 const { validateAnswers, summarize } = require("../services/reportFields");
+const { buildXlsx } = require("../lib/xlsx");
 const { computeCallStats } = require("../services/stats");
 const { autoReportDays, addUp, checkRange, MAX_DAYS } = require("../services/autoReport");
 
@@ -211,6 +212,116 @@ router.get("/", async (req, res, next) => {
       prisma.report.count({ where }),
     ]);
     res.json({ reports, pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ------------------------------------------------------------ periods
+// A run of days (a week, a month, any range) for managers: per form, the
+// totals of every question — for table questions per column and per kind
+// ("Tarjima: 34 people, 1 200 000") — and each person's totals.
+const MAX_PERIOD_DAYS = 366;
+
+function periodOf(req) {
+  const today = firmDate();
+  const to = String(req.query.to || today);
+  const from = String(req.query.from || to);
+  if (!isValidDate(from) || !isValidDate(to) || from > to) throw badRequest("invalid period");
+  if ((Date.parse(to) - Date.parse(from)) / 86400000 >= MAX_PERIOD_DAYS) throw badRequest(`at most ${MAX_PERIOD_DAYS} days`);
+  const officeId = req.query.officeId ? parseId(req.query.officeId, "officeId") : null;
+  return { from, to, officeId };
+}
+
+// The numbers a person's reports add up to: number/money questions and the
+// number/money columns of table questions.
+function measuresOf(summary) {
+  return summary.flatMap((s) =>
+    s.type === "table"
+      ? s.columns.map((c) => ({ id: `${s.id}.${c.id}`, label: c.label, group: s.label, type: c.type, total: c.total }))
+      : s.type === "number" || s.type === "money"
+        ? [{ id: s.id, label: s.label, type: s.type, total: s.total }]
+        : []
+  );
+}
+
+router.get("/summary", requireRole(...MANAGER_ROLES), async (req, res, next) => {
+  try {
+    const { from, to, officeId } = periodOf(req);
+    const reports = await prisma.report.findMany({
+      where: { date: { gte: from, lte: to }, ...(officeId ? { employee: { officeId } } : {}) },
+      include: { employee: { select: { id: true, name: true } }, template: { select: { id: true, name: true } } },
+      orderBy: [{ date: "asc" }, { id: "asc" }],
+    });
+    const byTemplate = new Map();
+    for (const r of reports) {
+      if (!byTemplate.has(r.templateId)) byTemplate.set(r.templateId, { template: r.template, reports: [] });
+      byTemplate.get(r.templateId).reports.push(r);
+    }
+    const forms = [...byTemplate.values()].map(({ template, reports: rs }) => {
+      // Summed with the questions as most recently answered.
+      const fields = rs.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a)).fields;
+      const people = new Map();
+      for (const r of rs) {
+        if (!people.has(r.employeeId)) people.set(r.employeeId, { employee: r.employee, reports: [] });
+        people.get(r.employeeId).reports.push(r);
+      }
+      return {
+        template,
+        reports: rs.length,
+        days: new Set(rs.map((r) => r.date)).size,
+        totals: summarize(fields, rs),
+        people: [...people.values()]
+          .map((p) => ({ employee: p.employee, reports: p.reports.length, measures: measuresOf(summarize(fields, p.reports)) }))
+          .sort((a, b) => a.employee.name.localeCompare(b.employee.name)),
+      };
+    });
+    forms.sort((a, b) => a.template.name.localeCompare(b.template.name));
+    res.json({ from, to, forms });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// One form's reports over a period as an Excel file: a line per report —
+// a table question adds a line per row (the other answers only on the
+// report's first line, so Excel sums stay right).
+router.get("/export", requireRole(...MANAGER_ROLES), async (req, res, next) => {
+  try {
+    const { from, to, officeId } = periodOf(req);
+    const templateId = parseId(req.query.templateId, "templateId");
+    const template = await prisma.reportTemplate.findUnique({ where: { id: templateId } });
+    if (!template) return res.status(404).json({ error: "not_found" });
+    const reports = await prisma.report.findMany({
+      where: { templateId, date: { gte: from, lte: to }, ...(officeId ? { employee: { officeId } } : {}) },
+      include: { employee: { select: { name: true, office: { select: { name: true } } } } },
+      orderBy: [{ date: "asc" }, { id: "asc" }],
+    });
+    const fields = template.fields;
+    const cell = (field, value) => {
+      if (value === undefined || value === null) return "";
+      if (field.type === "yesno") return value ? "Ha" : "Yoʻq";
+      if (Array.isArray(value)) return value.join(", ");
+      return value;
+    };
+    const header = ["Sana", "Xodim", "Filial", ...fields.flatMap((f) => (f.type === "table" ? f.columns.map((c) => `${f.label}: ${c.label}`) : [f.label]))];
+    const table = [header];
+    for (const r of reports) {
+      const lines = Math.max(1, ...fields.filter((f) => f.type === "table").map((f) => (Array.isArray(r.answers?.[f.id]) ? r.answers[f.id].length : 0)));
+      for (let i = 0; i < lines; i++) {
+        table.push([
+          r.date,
+          r.employee.name,
+          r.employee.office?.name || "",
+          ...fields.flatMap((f) =>
+            f.type === "table" ? f.columns.map((c) => r.answers?.[f.id]?.[i]?.[c.id] ?? "") : [i === 0 ? cell(f, r.answers?.[f.id]) : ""]
+          ),
+        ]);
+      }
+    }
+    const file = buildXlsx({ sheetName: template.name, rows: table, widths: [12, 22, 18, ...header.slice(3).map((h) => Math.min(40, Math.max(12, h.length + 2)))] });
+    res.set("Content-Disposition", `attachment; filename="hisobot-${template.id}-${from}-${to}.xlsx"`);
+    res.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(file);
   } catch (err) {
     next(err);
   }

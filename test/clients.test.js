@@ -5,12 +5,12 @@ process.env.JWT_SECRET ??= "unused";
 const cl = require("../src/services/clients");
 
 test("search works in either script and ignores apostrophes", () => {
-  assert.equal(cl.searchable("Абубакиров Искандар"), "abubakirov iskandar");
+  assert.equal(cl.searchable("Абдуллаев Баҳром"), cl.searchable("abdullaev bahrom"));
   assert.equal(cl.searchable("Ғулом Ўроқов"), cl.searchable("G'ulom O'roqov"));
-  assert.equal(cl.searchable("Qosimova Gulnora. Toshkent."), cl.searchable("qosimova gulnora toshkent"));
-  const text = cl.buildSearchText({ name: "Хаққулов Болта", city: "Нурobod", phones: ["+998 90 123-45-67"], caseNumbers: ["A-12/26"] });
-  assert.match(text, new RegExp(cl.searchable("Haqqulov Bolta")));
-  assert.equal(cl.searchable("Khondamir"), cl.searchable("Хондамир"));
+  assert.equal(cl.searchable("Karimova Dilnoza. Toshkent."), cl.searchable("karimova dilnoza toshkent"));
+  const text = cl.buildSearchText({ name: "Ҳамидов Бобур", city: "Нурobod", phones: ["+998 90 123-45-67"], caseNumbers: ["A-12/26"] });
+  assert.match(text, new RegExp(cl.searchable("Hamidov Bobur")));
+  assert.equal(cl.searchable("Khurshid"), cl.searchable("Хуршид"));
   assert.match(text, /998901234567/);
   assert.match(text, /a 12 26/);
 });

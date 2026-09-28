@@ -140,7 +140,15 @@ async function importCase(tx, clientId, raw, { user, today, operators, lawyers }
   const contractAmount = safe(() => cl.amount(raw.contractAmount, "contractAmount")) || null;
   const paid = safe(() => cl.amount(raw.paid, "paid")) || 0;
   const operatorId = raw.operatorId && operators.has(Number(raw.operatorId)) ? Number(raw.operatorId) : null;
-  const lawyerAccount = matchLawyer(raw.lawyer, lawyers);
+  // The lawyer the importer confirmed on the import screen (lawyerId: an
+  // account, or null for "just the name"); otherwise the name matched
+  // against the accounts.
+  const lawyerAccount =
+    raw.lawyerId !== undefined
+      ? raw.lawyerId == null
+        ? null
+        : lawyers.find((l) => l.id === Number(raw.lawyerId)) || null
+      : matchLawyer(raw.lawyer, lawyers);
   const text = {
     matter: cl.text(raw.matter, 500),
     number: cl.text(raw.number, 80),
@@ -154,12 +162,15 @@ async function importCase(tx, clientId, raw, { user, today, operators, lawyers }
   let caseRow;
   if (!existing) {
     const data = cl.normalizeCase(
-      { ...text, status: status || (legalStage ? "contract" : "consultation"), legalStage, startDate: startDate || today, contractDate, contractAmount },
+      { ...text, status: status || (legalStage ? "contract" : "consultation"), legalStage, startDate: startDate || contractDate || today, contractDate, contractAmount },
       {},
       today
     );
     // Dates from the sheet, not the day of the import.
     if (data.contractDate === today && contractDate == null && startDate) data.contractDate = startDate;
+    // A row with no date at all is history of unknown date: it doesn't count
+    // toward this month's (or any month's) targets.
+    if (!startDate && !contractDate) Object.assign(data, { startDate: null, consultationDate: null, contractDate: null });
     const assigned = lawyerAccount ? { lawyerId: lawyerAccount.id, lawyer: lawyerAccount.name } : {};
     caseRow = await tx.clientCase.create({ data: { ...data, clientId, operatorId, ...assigned } });
   } else {
@@ -171,9 +182,13 @@ async function importCase(tx, clientId, raw, { user, today, operators, lawyers }
     const newStatus = status || (legalStage ? "contract" : null);
     if (newStatus && (STATUS_RANK[newStatus] ?? -1) > (STATUS_RANK[existing.status] ?? -1)) update.status = newStatus;
     if (legalStage && cl.LEGAL_STAGES.indexOf(legalStage) > cl.LEGAL_STAGES.indexOf(existing.legalStage)) update.legalStage = legalStage;
+    // Moved forward by the sheet: dated from the sheet or the case itself —
+    // never "today" (that would count old work toward this month's targets).
     const dates = cl.normalizeCase({ status: update.status }, existing, today);
-    if (dates.consultationDate) update.consultationDate = startDate || dates.consultationDate;
-    if (dates.contractDate) update.contractDate = contractDate || startDate || dates.contractDate;
+    const consultedOn = startDate || existing.startDate;
+    const signedOn = contractDate || startDate || existing.startDate;
+    if (dates.consultationDate && consultedOn) update.consultationDate = consultedOn;
+    if (dates.contractDate && signedOn) update.contractDate = signedOn;
     caseRow = Object.keys(update).length ? await tx.clientCase.update({ where: { id: existing.id }, data: update }) : existing;
   }
 

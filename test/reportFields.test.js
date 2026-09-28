@@ -57,3 +57,63 @@ test("a day's reports are summed per question", () => {
   assert.equal(s.late.yes, 1);
   assert.equal(s.note, undefined);
 });
+
+// ------------------------------------------------------------ table questions
+const SERVICES = normalizeFields([
+  {
+    id: "services",
+    label: "Xizmatlar",
+    type: "table",
+    required: true,
+    columns: [
+      { id: "kind", label: "Xizmat", type: "select", options: ["Nusxa", "Tarjima", "Ariza"] },
+      { id: "people", label: "Mijozlar soni", type: "number" },
+      { id: "cash", label: "Tushum", type: "money" },
+      { id: "note", label: "Izoh", type: "text" },
+    ],
+  },
+]);
+
+test("a table question keeps its columns (ids, types, choices)", () => {
+  const [field] = SERVICES;
+  assert.equal(field.type, "table");
+  assert.deepEqual(field.columns.map((c) => [c.id, c.type]), [["kind", "select"], ["people", "number"], ["cash", "money"], ["note", "text"]]);
+  assert.throws(() => normalizeFields([{ label: "X", type: "table", columns: [] }]), /at least one column/);
+  assert.throws(() => normalizeFields([{ label: "X", type: "table", columns: [{ label: "A", type: "date" }] }]), /unknown type/);
+  assert.throws(() => normalizeFields([{ label: "X", type: "table", columns: [{ label: "A", type: "select", options: [] }] }]), /at least one option/);
+});
+
+test("table rows are cleaned: empty rows dropped, numbers read, bad cells refused", () => {
+  const ok = validateAnswers(SERVICES, {
+    services: [
+      { kind: "Nusxa", people: "3", cash: "45 000" },
+      { kind: "", people: "", cash: "" },
+      { kind: "Tarjima", people: 2, cash: 300000, note: " tez " },
+    ],
+  });
+  assert.deepEqual(ok.errors, {});
+  assert.deepEqual(ok.answers.services, [
+    { kind: "Nusxa", people: 3, cash: 45000 },
+    { kind: "Tarjima", people: 2, cash: 300000, note: "tez" },
+  ]);
+  assert.equal(validateAnswers(SERVICES, { services: [{ kind: "Nusxa", cash: "-5" }] }).errors.services, "invalid");
+  assert.equal(validateAnswers(SERVICES, { services: [{ kind: "Pochta" }] }).errors.services, "invalid");
+  assert.equal(validateAnswers(SERVICES, { services: [{}] }).errors.services, "required");
+});
+
+test("table totals: per column, and per service", () => {
+  const reports = [
+    { answers: { services: [{ kind: "Nusxa", people: 3, cash: 45000 }, { kind: "Tarjima", people: 2, cash: 300000 }] } },
+    { answers: { services: [{ kind: "Nusxa", people: 5, cash: 75000 }, { people: 1, cash: 10000 }] } },
+    { answers: {} },
+  ];
+  const [s] = summarize(SERVICES, reports);
+  assert.equal(s.answered, 2);
+  assert.equal(s.rows, 4);
+  assert.deepEqual(s.columns.map((c) => [c.id, c.total]), [["people", 11], ["cash", 430000]]);
+  assert.deepEqual(s.groups, [
+    { name: "Nusxa", rows: 2, totals: { people: 8, cash: 120000 } },
+    { name: "Tarjima", rows: 1, totals: { people: 2, cash: 300000 } },
+    { name: null, rows: 1, totals: { people: 1, cash: 10000 } },
+  ]);
+});

@@ -70,9 +70,14 @@ Everything about a person's job is configuration, not code:
   phone is never touched.
 - **Report form** — the daily report they fill in. Forms are built in the
   portal (Settings → Report forms): questions of type text, long text,
-  number, amount (soʻm), yes/no, one choice, several choices. Each submitted
-  report stores the questions as they were, so editing a form never changes
-  old reports. See `src/services/reportFields.js`.
+  number, amount (soʻm), yes/no, one choice, several choices, and **table** —
+  rows the person adds, like lines in Excel, with the columns the form sets
+  (e.g. Service | People served | Income | Note). Each submitted report stores
+  the questions as they were, so editing a form never changes old reports.
+  Managers see a day's totals, or a **period's** (a week, a month, any dates):
+  per question, per kind for tables (income and people per service), and per
+  person — and download a form's reports as Excel (a line per table row).
+  See `src/services/reportFields.js`.
 - **Automatic report** — per person (preset on the position; on for
   call-center staff): nothing to fill in, the day's report is worked out from
   their calls (answered, missed, called back, still to call back, talk time),
@@ -135,6 +140,14 @@ bosses and developers, and staff who take calls or book appointments.
 - Calls show the client's name instead of a bare number, and a booking in the
   calendar finds or creates its client (with a consultation for the booker).
 
+**Many at once** (managers, Mijozlar → Tanlash): tick clients, a whole page,
+or everything a filter matches, then assign an operator or a lawyer to all
+their cases, or close their consultations as **"didn't continue"** (status
+`declined`; contracts are never touched and consultations keep counting toward
+the operator's month). The "old consultations" filter (consultation or "call
+again" over 30 days old, or undated from the old sheets, with no contract)
+finds the ones to close. `POST /clients/bulk` — logged in the change log.
+
 Nothing is thrown away: "delete" **archives** a client (hidden from lists,
 restorable, re-activated by a new booking); **merge** moves everything of a
 duplicate into the right record; deleting a case or a payment, merging,
@@ -185,7 +198,7 @@ and `/api/calls/sync` use the device token.
 | Sync | `POST /calls/sync` (multipart: `payload` JSON part first, then `recording` files) |
 | Calls | `GET /calls` (filters: `employeeId, callType, missed, hasRecording, followUp, needsCallback, phone, from, to, page`; `sort=longest`; returns `summary` with total talk time), `GET /calls/:id`, `PATCH /calls/:id/follow-up`, `GET /calls/:id/recording` (Range; AMR→MP3 on first play) |
 | Dashboard | `GET /dashboard?from&to&tzOffset[&employeeId]` |
-| Reports | `GET/PUT /reports/today` (automatic: `auto` instead of a form; PUT refused), `GET /reports/day?date&officeId` (rows with `auto`, team totals in `auto`), `GET /reports/auto?employeeId&date` or `&days=14` / `&from&to` (max 62 days), `GET /reports`, `GET /reports/:id`, `POST /reports/:id/review` |
+| Reports | `GET/PUT /reports/today` (automatic: `auto` instead of a form; PUT refused), `GET /reports/day?date&officeId` (rows with `auto`, team totals in `auto`), `GET /reports/auto?employeeId&date` or `&days=14` / `&from&to` (max 62 days), `GET /reports/summary?from&to&officeId` (managers; per form totals and per person, max 366 days), `GET /reports/export?templateId&from&to&officeId` (managers; .xlsx), `GET /reports`, `GET /reports/:id`, `POST /reports/:id/review` |
 | Staff | `GET/POST /employees`, `GET/PATCH/DELETE /employees/:id`, `DELETE /employees/:id/devices/:deviceId`, `POST /employees/:id/reset-password`, `POST /employees/:id/regenerate-device-id` |
 | Boss and lawyers | `GET/POST /users` (`role`: BOSS or LAWYER, `name`), `PATCH /users/:id` (`role`, `name`, `active`, `hasCalendar`), `DELETE /users/:id`, `POST /users/:id/reset-password` |
 | Calendar | `GET/POST /calendars`, `PATCH /calendars/:id` (usual week: `workDays, dayStart, dayEnd, lunch, slotMinutes`), `GET/PUT /calendars/:id/weeks/:monday` (PUT: `blocks`, optional `cancelAppointments, cancelReason`), `POST …/publish`, `POST /calendars/:id/appointments`, `GET /appointments?phone=|mine=true|attention=true`, `PATCH /appointments/:id` |

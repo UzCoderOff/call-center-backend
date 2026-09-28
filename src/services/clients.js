@@ -84,7 +84,7 @@ function normalizePhones(input) {
 }
 
 // Uzbek Cyrillic -> Latin, lowercase, apostrophes and punctuation removed —
-// so "Абубакиров" and "Abubakirov", "Ғулом" and "G'ulom" meet in search.
+// so "Абдуллаев" and "Abdullaev", "Ғулом" and "G'ulom" meet in search.
 // Only ever compared with itself (index and query go through it alike).
 const CYR = {
   а: "a", б: "b", в: "v", г: "g", ғ: "g", д: "d", е: "e", ё: "yo", ж: "j", з: "z", и: "i", й: "y",
