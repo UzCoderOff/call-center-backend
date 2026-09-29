@@ -7,7 +7,9 @@ const env = require("../config/env");
 // revoked/deactivated account stops working immediately rather than at
 // next token expiry.
 function signSessionToken(user) {
-  return jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, {
+  // `at`: when it was issued, to the millisecond (the standard `iat` is whole
+  // seconds) — a login made just before a password change must not count.
+  return jwt.sign({ sub: user.id, role: user.role, at: Date.now() }, env.jwtSecret, {
     expiresIn: env.jwtExpiresIn,
   });
 }

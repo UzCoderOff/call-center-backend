@@ -16,6 +16,10 @@ const reportRoutes = require("./routes/reports");
 const organization = require("./routes/organization");
 const calendarRoutes = require("./routes/calendar");
 const clientRoutes = require("./routes/clients");
+const materialRoutes = require("./routes/materials");
+const telegramRoutes = require("./routes/telegram");
+const financeRoutes = require("./routes/finance");
+const taskRoutes = require("./routes/tasks");
 
 const app = express();
 
@@ -103,6 +107,10 @@ app.use("/api/client-payments", clientRoutes.payments);
 app.use("/api/client-notes", clientRoutes.notes);
 app.use("/api/client-links", clientRoutes.links);
 app.use("/api/audit", clientRoutes.auditLog);
+app.use("/api/materials", materialRoutes);
+app.use("/api/telegram", telegramRoutes);
+app.use("/api/finance", financeRoutes);
+app.use("/api/tasks", taskRoutes);
 
 // Android app: sign-in with a portal account, device-token session refresh,
 // "collect calls?" config. Authenticated by device token, not the cookie.

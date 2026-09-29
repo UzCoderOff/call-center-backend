@@ -21,7 +21,15 @@ router.get("/", async (req, res, next) => {
       orderBy: { createdAt: "desc" },
       take,
     });
-    res.json(logs);
+    // SyncLog.employeeId holds the phone's legacy sync token, which lets
+    // anyone who has it send calls as that person — only the DEVELOPER sees
+    // it; everyone else gets the person's name.
+    if (req.user.role === "DEVELOPER") return res.json(logs);
+    const tokens = [...new Set(logs.map((l) => l.employeeId).filter(Boolean))];
+    const people = new Map(
+      (await prisma.employee.findMany({ where: { employeeId: { in: tokens } }, select: { id: true, name: true, employeeId: true } })).map((e) => [e.employeeId, e])
+    );
+    res.json(logs.map(({ employeeId: token, ...l }) => ({ ...l, employee: people.has(token) ? { id: people.get(token).id, name: people.get(token).name } : null })));
   } catch (err) {
     next(err);
   }

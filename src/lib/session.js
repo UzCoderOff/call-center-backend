@@ -1,5 +1,7 @@
 const { signSessionToken } = require("./tokens");
 const env = require("../config/env");
+const { canSeeFinance } = require("./finance");
+const { asksForm } = require("../services/autoReport");
 
 // The portal login cookie. Shared by the web login (routes/auth.js) and the
 // Android app, which gets a session cookie for its in-app portal view from
@@ -31,6 +33,8 @@ function publicMe(user) {
     name: user.name ?? null,
     role: user.role,
     mustChangePassword: user.mustChangePassword,
+    // Sees the money from clients (contract amounts, payments, debts).
+    finance: canSeeFinance(user),
     employee: e
       ? {
           id: e.id,
@@ -38,6 +42,9 @@ function publicMe(user) {
           collectCalls: e.collectCalls,
           hasReport: e.reportTemplateId != null || e.autoReport,
           autoReport: e.autoReport,
+          alsoForm: e.alsoForm,
+          // A report form to fill in today (alone, or next to the automatic report).
+          reportForm: asksForm(e),
           calendarAccess: e.calendarAccess,
         }
       : null,

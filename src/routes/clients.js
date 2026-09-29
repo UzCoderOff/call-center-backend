@@ -9,6 +9,7 @@ const cl = require("../services/clients");
 const importer = require("../services/clientImport");
 const { buildXlsx } = require("../lib/xlsx");
 const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
+const { canSeeFinance, financeForbidden, caseWithoutMoney, visiblePayments, isConsultation, CONSULTATION } = require("../lib/finance");
 const env = require("../config/env");
 
 // The clients database (replaces the firm's Excel CRM).
@@ -31,6 +32,13 @@ const env = require("../config/env");
 // Lawyers (LAWYER accounts) see only their own clients — those with a case
 // assigned to them — and only their own cases of those; they can move their
 // cases along and write notes, nothing else.
+//
+// Contract money — contract amounts, contract payments, debts — only for the
+// DEVELOPER and accounts with the "Moliya" switch (src/lib/finance.js):
+// everyone else gets none of it in any answer, and a contract amount they
+// send is ignored (so editing a case they can't see the amount of never
+// erases it). The consultation fee is the exception: staff see it and record
+// it (they check it before booking the client in).
 
 function canUseClients(user) {
   return isManager(user) || isLawyer(user) || Boolean(user.employee?.collectCalls || user.employee?.calendarAccess === "book");
@@ -70,6 +78,13 @@ function sendError(err, res, next) {
   return next(err);
 }
 
+// A case's input without the contract amount, for people who can't see money.
+function caseInput(req, b) {
+  if (!b || canSeeFinance(req.user)) return b || {};
+  const { contractAmount, ...rest } = b;
+  return rest;
+}
+
 function clientFields(b) {
   const data = {};
   if (b.name !== undefined) {
@@ -99,21 +114,32 @@ function clientFields(b) {
   return data;
 }
 
-// An operator's own cases count toward their targets; managers can assign any.
-async function operatorFor(req, requested) {
+// An operator's own cases count toward their targets; managers can assign
+// any. Staff can put themselves on a case, or take themselves off one of
+// theirs — not take a colleague off (and their monthly count with it).
+// `current`: the case's operator now (undefined for a new case).
+async function operatorFor(req, requested, current) {
   if (requested === undefined) return undefined;
-  if (requested === null || requested === "") return null;
+  const own = req.user.employee?.id ?? null;
+  const mayChange = isManager(req.user) || current == null || current === own;
+  if (requested === null || requested === "") {
+    if (!mayChange) throw badRequest("can only assign yourself");
+    return null;
+  }
   const id = parseId(requested, "operatorId");
-  if (!isManager(req.user) && id !== req.user.employee?.id) throw badRequest("can only assign yourself");
+  if (!isManager(req.user) && (id !== own || !mayChange)) throw badRequest("can only assign yourself");
   const exists = await prisma.employee.findUnique({ where: { id }, select: { id: true } });
   if (!exists) throw badRequest("unknown operator");
   return id;
 }
 
 // A case's lawyer: an account (its name goes into `lawyer` too), or none.
-// undefined: not given.
-async function lawyerFor(requested) {
+// undefined: not given. Assigning a lawyer opens the client to them, so
+// staff can only choose one for a case that has none yet (`current`: the
+// case's lawyer now; undefined for a new case); changing it is for managers.
+async function lawyerFor(requested, req, current) {
   if (requested === undefined) return undefined;
+  if (req && !isManager(req.user) && current != null && Number(requested) !== current) throw badRequest("only a manager can change the lawyer");
   if (requested === null || requested === "") return { lawyerId: null };
   const lawyer = await lawyerById(parseId(requested, "lawyerId"));
   if (!lawyer) throw badRequest("unknown lawyer");
@@ -152,6 +178,18 @@ function withMoney(c) {
 const clients = express.Router();
 clients.use(requireAuth, gate, lawyerGate);
 
+// Two sections, so ongoing work isn't buried under one-off consultations:
+//   ?section=clients        clients with a contract (or a finished case)
+//   ?section=consultations  everyone else — consultations, "call again", declined
+// (no section: everyone, e.g. when searching). A lawyer: by their own cases.
+const CONTRACT_STATUSES = ["contract", "done"];
+function sectionWhere(section, user) {
+  const own = isLawyer(user) ? { lawyerId: user.id } : {};
+  if (section === "clients") return { cases: { some: { ...own, status: { in: CONTRACT_STATUSES } } } };
+  if (section === "consultations") return { cases: { none: { ...own, status: { in: CONTRACT_STATUSES } } } };
+  return null;
+}
+
 // ?q= name / phone / case number (Latin or Cyrillic) · ?filter= callToday |
 // debt | active | archived (managers) · ?status= · ?legalStage= ·
 // ?operatorId= · ?lawyerId= · ?lawyer=  — archived clients only appear under
@@ -178,7 +216,15 @@ async function listQuery(q, user) {
     and.push({ nextCallAt: { not: null, lte: new Date(firmDayRange(today()).to) } });
     orderBy = [{ nextCallAt: "asc" }];
   }
-  if (q.filter === "debt") and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? user.id : null) } });
+  if (q.filter === "debt") {
+    if (!canSeeFinance(user)) throw financeForbidden();
+    and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? user.id : null) } });
+  }
+  // Archived clients are shown whatever their section.
+  if (q.filter !== "archived") {
+    const section = sectionWhere(q.section, user);
+    if (section) and.push(section);
+  }
   if (q.filter === "stale") {
     // Consultations that went nowhere: still "consultation" or "call again"
     // after 30 days (or with no date — from the old spreadsheets), and no
@@ -192,7 +238,11 @@ async function listQuery(q, user) {
 clients.get("/", async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
+    const money = canSeeFinance(req.user);
     const { where, orderBy } = await listQuery(req.query, req.user);
+    // How many each section has with the same filters — for the tabs.
+    const sectionCount = async (section) => prisma.client.count({ where: (await listQuery({ ...req.query, section }, req.user)).where });
+    const sections = req.query.section ? { clients: await sectionCount("clients"), consultations: await sectionCount("consultations") } : null;
     const [rows, total] = await Promise.all([
       prisma.client.findMany({
         where,
@@ -211,9 +261,9 @@ clients.get("/", async (req, res, next) => {
               legalStage: true,
               lawyer: true,
               lawyerId: true,
-              contractAmount: true,
+              contractAmount: money,
               operator: { select: { id: true, name: true } },
-              payments: { select: { amount: true } },
+              ...(money ? { payments: { select: { amount: true } } } : {}),
             },
           },
         },
@@ -227,9 +277,10 @@ clients.get("/", async (req, res, next) => {
         phone: phones[0]?.phone || null,
         latestCase: cases[0] ? (({ payments, ...k }) => k)(cases[0]) : null,
         caseCount: cases.length,
-        debt: cases.reduce((sum, k) => sum + cl.paymentSummary(k.contractAmount, k.payments).remaining, 0),
+        ...(money ? { debt: cases.reduce((sum, k) => sum + cl.paymentSummary(k.contractAmount, k.payments).remaining, 0) } : {}),
       })),
       pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+      ...(sections ? { sections } : {}),
     });
   } catch (err) {
     sendError(err, res, next);
@@ -273,19 +324,24 @@ clients.get("/export", managersOnly, async (req, res, next) => {
     // "2026-09-28 14:30" in the firm's time, whatever the server's clock.
     const firmClock = new Intl.DateTimeFormat("sv-SE", { timeZone: env.firmTimezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
     const when = (d) => (d ? firmClock.format(d) : "");
-    const header = ["ID", "Mijoz", "Telefonlar", "Shahar", "Qayerdan", "Ish bosqichi", "Masala", "Advokat", "Operator", "Ish raqami", "Boshlangan sana", "Shartnoma summasi", "Toʻlangan", "Qoldi", "Keyingi qoʻngʻiroq", "Izoh"];
+    // The money columns only for people who see money.
+    const withMoney = canSeeFinance(req.user);
+    const moneyHeader = withMoney ? ["Shartnoma summasi", "Toʻlangan", "Qoldi"] : [];
+    const header = ["ID", "Mijoz", "Telefonlar", "Shahar", "Qayerdan", "Ish bosqichi", "Masala", "Advokat", "Operator", "Ish raqami", "Boshlangan sana", ...moneyHeader, "Keyingi qoʻngʻiroq", "Izoh"];
     const table = [header];
     for (const c of rows) {
       const base = [c.id, c.name, c.phones.map((p) => p.phone).join(", "), c.city || "", EXPORT_SOURCE[c.source] || ""];
       const tail = [when(c.nextCallAt), c.notes || ""];
-      if (c.cases.length === 0) table.push([...base, "", "", "", "", "", "", "", "", "", ...tail]);
+      if (c.cases.length === 0) table.push([...base, "", "", "", "", "", "", ...moneyHeader.map(() => ""), ...tail]);
       for (const k of c.cases) {
         const money = cl.paymentSummary(k.contractAmount, k.payments);
         const stage = [EXPORT_STATUS[k.status], EXPORT_STAGE[k.legalStage]].filter(Boolean).join(" · ");
-        table.push([...base, stage, k.matter || "", k.lawyer || "", k.operator?.name || "", k.number || "", k.startDate || "", k.contractAmount || "", money.paid || "", money.remaining || "", ...tail]);
+        const moneyCells = withMoney ? [k.contractAmount || "", money.paid || "", money.remaining || ""] : [];
+        table.push([...base, stage, k.matter || "", k.lawyer || "", k.operator?.name || "", k.number || "", k.startDate || "", ...moneyCells, ...tail]);
       }
     }
-    const file = buildXlsx({ sheetName: "Mijozlar", rows: table, widths: [6, 28, 22, 14, 12, 30, 28, 24, 20, 14, 14, 16, 14, 14, 18, 30] });
+    const widths = [6, 28, 22, 14, 12, 30, 28, 24, 20, 14, 14, ...(withMoney ? [16, 14, 14] : []), 18, 30];
+    const file = buildXlsx({ sheetName: "Mijozlar", rows: table, widths });
     res.set("Content-Disposition", `attachment; filename="mijozlar-${today()}.xlsx"`);
     res.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(file);
   } catch (err) {
@@ -367,7 +423,7 @@ clients.post("/", async (req, res, next) => {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey));
       if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: clash[0].client });
     }
-    const firstCase = b.case ? { ...cl.normalizeCase(b.case, {}, today()), ...((await lawyerFor(b.case.lawyerId)) || {}) } : null;
+    const firstCase = b.case ? { ...cl.normalizeCase(caseInput(req, b.case), {}, today()), ...((await lawyerFor(b.case.lawyerId, req)) || {}) } : null;
     const operatorId = b.case ? ((await operatorFor(req, b.case.operatorId)) ?? req.user.employee?.id ?? null) : null;
     const client = await prisma.$transaction(async (tx) => {
       const created = await tx.client.create({
@@ -447,14 +503,16 @@ clients.get("/:id", async (req, res, next) => {
     ]);
 
     const { linksFrom, linksTo, searchText, extra, ...rest } = client;
-    // A lawyer sees their own cases (and those cases' payments and history,
-    // plus notes about the client), not the rest of the file.
+    // A lawyer sees their own cases (and those cases' history, plus notes
+    // about the client), not the rest of the file. Money: only with Moliya.
     const ownCases = lawyer ? client.cases.filter((k) => k.lawyerId === req.user.id) : client.cases;
     const ownIds = new Set(ownCases.map((k) => k.id));
+    const money = canSeeFinance(req.user);
     res.json({
       ...rest,
-      cases: ownCases.map(withMoney),
-      payments: lawyer ? client.payments.filter((p) => ownIds.has(p.caseId)) : client.payments,
+      cases: ownCases.map((k) => (money ? withMoney(k) : caseWithoutMoney(k))),
+      payments: visiblePayments(req.user, lawyer ? client.payments.filter((p) => ownIds.has(p.caseId)) : client.payments),
+      finance: money,
       events: lawyer ? client.events.filter((e) => e.caseId == null ? e.kind === "note" : ownIds.has(e.caseId)) : client.events,
       links: lawyer
         ? []
@@ -605,8 +663,8 @@ clients.post("/:id/cases", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    const b = req.body || {};
-    const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId)) || {}) };
+    const b = caseInput(req, req.body);
+    const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId, req)) || {}) };
     const operatorId = (await operatorFor(req, b.operatorId)) ?? req.user.employee?.id ?? null;
     const created = await prisma.$transaction(async (tx) => {
       const c = await tx.clientCase.create({ data: { ...data, clientId, operatorId } });
@@ -615,7 +673,7 @@ clients.post("/:id/cases", async (req, res, next) => {
       await tx.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
       return c;
     });
-    res.status(201).json(created);
+    res.status(201).json(canSeeFinance(req.user) ? created : caseWithoutMoney(created));
   } catch (err) {
     sendError(err, res, next);
   }
@@ -633,16 +691,16 @@ cases.patch("/:id", async (req, res, next) => {
     const id = parseId(req.params.id);
     const current = await prisma.clientCase.findUnique({ where: { id } });
     if (!current) return res.status(404).json({ error: "not_found" });
-    let b = req.body || {};
+    let b = caseInput(req, req.body);
     if (isLawyer(req.user)) {
       if (current.lawyerId !== req.user.id) return res.status(404).json({ error: "not_found" });
       if (Object.keys(b).some((k) => !LAWYER_CASE_FIELDS.includes(k))) return res.status(403).json({ error: "forbidden" });
       b = Object.fromEntries(Object.entries(b).filter(([k]) => LAWYER_CASE_FIELDS.includes(k)));
     }
     const data = cl.normalizeCase(b, current, today());
-    const operatorId = await operatorFor(req, b.operatorId);
+    const operatorId = await operatorFor(req, b.operatorId, current.operatorId);
     if (operatorId !== undefined) data.operatorId = operatorId;
-    const lawyer = await lawyerFor(b.lawyerId);
+    const lawyer = await lawyerFor(b.lawyerId, req, current.lawyerId);
     if (lawyer) Object.assign(data, lawyer);
     const updated = await prisma.$transaction(async (tx) => {
       const c = await tx.clientCase.update({ where: { id }, data });
@@ -654,7 +712,7 @@ cases.patch("/:id", async (req, res, next) => {
       await tx.client.update({ where: { id: c.clientId }, data: { updatedAt: new Date() } });
       return c;
     });
-    res.json(updated);
+    res.json(canSeeFinance(req.user) ? updated : caseWithoutMoney(updated));
   } catch (err) {
     sendError(err, res, next);
   }
@@ -677,11 +735,17 @@ cases.delete("/:id", managersOnly, async (req, res, next) => {
 });
 
 // -------------------------------------------------------------- payments
+// Recording a payment: anyone who works with the client can record a
+// consultation fee; any other payment only people who see money.
 clients.post("/:id/payments", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    const b = req.body || {};
+    const b = { ...(req.body || {}) };
+    if (!canSeeFinance(req.user)) {
+      if (b.kind !== undefined && b.kind !== CONSULTATION) throw financeForbidden();
+      b.kind = CONSULTATION;
+    }
     const data = cl.normalizePayment(b);
     let caseId = null;
     if (b.caseId != null) {
@@ -699,11 +763,12 @@ clients.post("/:id/payments", async (req, res, next) => {
 
 const payments = express.Router();
 payments.use(requireAuth, gate, noLawyers);
+// Removing a payment: managers — a contract payment only with Moliya.
 payments.delete("/:id", managersOnly, async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     const payment = await prisma.payment.findUnique({ where: { id } });
-    if (!payment) return res.status(404).json({ error: "not_found" });
+    if (!payment || (!canSeeFinance(req.user) && !isConsultation(payment))) return res.status(404).json({ error: "not_found" });
     await prisma.$transaction([
       prisma.auditLog.create({ data: { userId: req.user.id, action: "payment.delete", entity: "payment", entityId: id, detail: { payment } } }),
       prisma.payment.delete({ where: { id } }),
@@ -836,7 +901,7 @@ clients.post("/bulk", managersOnly, async (req, res, next) => {
       data = { operatorId: (await operatorFor(req, set.operatorId)) ?? null };
       label = data.operatorId ? (await prisma.employee.findUnique({ where: { id: data.operatorId }, select: { name: true } })).name : null;
     } else if (keys[0] === "lawyerId") {
-      data = await lawyerFor(set.lawyerId);
+      data = await lawyerFor(set.lawyerId, req);
       label = data.lawyer ?? null;
     } else {
       if (set.status !== "declined") throw badRequest("status can only be declined");
@@ -873,7 +938,9 @@ clients.post("/import", managersOnly, async (req, res, next) => {
     const rows = req.body?.rows;
     if (!Array.isArray(rows) || rows.length === 0) throw badRequest("rows are required");
     if (rows.length > 200) throw badRequest("at most 200 rows at a time");
-    const result = await importer.importRows(prisma, rows, { user: req.user, today: today() });
+    // Without Moliya, a sheet's contract amounts and payments are left out.
+    const input = canSeeFinance(req.user) ? rows : rows.map((r) => (r && typeof r === "object" ? (({ contractAmount, paid, ...rest }) => rest)(r) : r));
+    const result = await importer.importRows(prisma, input, { user: req.user, today: today() });
     await audit(prisma, req, "clients.import", "client", null, { rows: rows.length, created: result.created, updated: result.updated, skipped: result.skipped });
     res.json(result);
   } catch (err) {
@@ -921,7 +988,7 @@ auditLog.get("/", async (req, res, next) => {
         user: r.user,
         clientId: names.has(auditClientId(r)) ? auditClientId(r) : null,
         clientName: names.get(auditClientId(r)) || null,
-        summary: auditSummary(r),
+        summary: auditSummary(r, canSeeFinance(req.user)),
       }))
     );
   } catch (err) {
@@ -937,13 +1004,14 @@ function auditClientId(r) {
 }
 
 // A short, safe description of what an entry changed (not the whole copy).
-function auditSummary(r) {
+function auditSummary(r, money = true) {
   const d = r.detail || {};
   if (r.action === "clients.import") return { created: d.created, updated: d.updated, skipped: d.skipped };
   if (r.action === "client.merge") return { merged: d.merged?.name || null };
   if (r.action === "case.delete") return { matter: d.case?.matter || null, payments: d.case?.payments?.length || 0 };
-  if (r.action === "payment.delete") return { amount: d.payment?.amount ?? null };
+  if (r.action === "payment.delete") return { amount: money || d.payment?.kind === CONSULTATION ? d.payment?.amount ?? null : null };
   if (r.action === "clients.bulk") return { clients: d.clients, cases: d.cases, kind: d.kind, name: d.name ?? null };
+  if (r.entity === "material") return { title: d.title ?? null, file: d.name ?? null };
   return {};
 }
 

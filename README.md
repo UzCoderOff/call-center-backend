@@ -49,11 +49,55 @@ twice to try merging). Run it again any time: it resets the demo data.
 | Review reports | — | — | ✓ | ✓ |
 | See staff, settings | — | — | read-only | ✓ edit |
 | Create/remove accounts, reset passwords, sign out phones | — | — | — | ✓ |
+| Contract money (contract amounts, contract payments, debts, the Moliya page) | — | only with "Moliya" on (own cases) | only with "Moliya" on | ✓ always |
+| Consultation fee (see it, record it) | ✓ | ✓ (see) | ✓ | ✓ |
+| Training materials | the ones meant for them | the ones meant for them | write, choose who sees, see who read | same as Boss |
+| Telegram notifications | ✓ (own) | ✓ (own) | ✓ (own) + who has connected | same as Boss |
 
 Boss and Lawyer accounts are the same kind of account (Team → Boss and
 lawyers) with one switch, **"Sees everything"**: on = Boss (the head of the
-firm), off = Lawyer. Anything not explicitly opened to a role is closed to
+firm), off = Lawyer. A second switch, **"Moliya"** (off by default), lets an
+account see the money from clients — meant for the head of the firm only;
+only the DEVELOPER can turn it on (`src/lib/finance.js`). Anything not explicitly opened to a role is closed to
 it (`src/middleware/auth.js`).
+
+## Training materials
+
+**Materiallar** in the portal: scripts, how to work with clients, rules —
+text written in the portal (with simple formatting: headings, lists, "say
+this" lines for call scripts, warnings), a link (YouTube, Google Drive), and
+files (PDF, Word, Excel, pictures, audio such as a good call, short videos;
+50 MB each). Each material is for everyone, some positions, the lawyers, or
+named people. **Required** ones sit on the person's home page until they
+press "Oʻqidim" (I've read it) — a new employee's to-read list. The boss sees
+who has read what, can ask everyone to read a changed material again, and
+can announce it on Telegram. Rules: `src/services/materials.js`; files are
+stored in `storage/materials` (MATERIALS_DIR) and only served to the people
+the material is for.
+
+## Telegram bot
+
+A staff bot (create it with @BotFather, set `TELEGRAM_BOT_TOKEN`). Each person
+connects their own Telegram from **Profile → Telegram** (a one-time link) and
+chooses what they get:
+
+- **Uchrashuvlar** — the lawyer hears about new bookings; whoever booked hears
+  when the lawyer cancels, with the client's number to call.
+- **Javobsiz qoʻngʻiroqlar** — a missed call nobody returned in 15 minutes
+  (8:00–21:00) goes to the person whose phone missed it.
+- **Ertalabki xulosa** — 8:30, Mon–Sat: today's appointments, clients to call,
+  calls to return, materials to read; for managers, yesterday in numbers.
+- **Hisobot eslatmasi** — 17:30 if today's report form isn't in.
+- **Yangi materiallar** — a material announced for them.
+- **Jadval eslatmasi** — Thursday/Friday if next week's calendar isn't confirmed.
+
+In the bot: 📅 Bugun (my day), 🗓 Ertaga (tomorrow's appointments),
+⚙️ Sozlamalar (switch kinds on/off), /uzish (disconnect). The bot only talks
+in private chats with connected people, shows each person only what the
+portal shows them, and never sends client phone numbers to lawyers. It
+receives messages by long polling, so it needs no public address; only one
+running server may use a token (`TELEGRAM_POLLING=false` on a test machine).
+Code: `src/services/telegram/`.
 
 There is no open registration. The first DEVELOPER comes from `npm run seed`;
 every other account is created by a DEVELOPER in the portal.

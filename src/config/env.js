@@ -21,9 +21,32 @@ const downloadsDir = process.env.DOWNLOADS_DIR
   ? path.resolve(process.env.DOWNLOADS_DIR)
   : path.join(path.dirname(storageRoot), "downloads");
 
+// Training materials people upload (PDFs, audio, pictures…), next to the
+// recordings unless MATERIALS_DIR says otherwise.
+const materialsDir = process.env.MATERIALS_DIR
+  ? path.resolve(process.env.MATERIALS_DIR)
+  : path.join(path.dirname(storageRoot), "materials");
+
 module.exports = {
   port: Number(process.env.PORT) || 4000,
   downloadsDir,
+  materialsDir,
+  // The portal's address, for links in Telegram messages ("open in Ledger").
+  // Without it, messages simply have no link.
+  portalUrl: (process.env.PORTAL_URL || "").replace(/\/+$/, "") || null,
+  telegram: {
+    // From @BotFather. Unset: no bot, nothing is sent, the portal says so.
+    token: process.env.TELEGRAM_BOT_TOKEN || null,
+    // "false" turns off receiving messages on this machine — for a second
+    // copy of the server (a test computer) sharing the real bot's token:
+    // only one place may receive a bot's messages at a time.
+    polling: process.env.TELEGRAM_POLLING !== "false",
+    // A missed call nobody has called back after this many minutes is sent
+    // to the person whose phone missed it.
+    missedAfterMinutes: Number(process.env.TELEGRAM_MISSED_AFTER_MIN) || 15,
+    // Telegram's address — only changed for a stand-in server in tests.
+    apiUrl: (process.env.TELEGRAM_API_URL || "https://api.telegram.org").replace(/\/+$/, ""),
+  },
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "12h",
   storageRoot,

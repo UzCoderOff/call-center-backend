@@ -64,6 +64,10 @@ async function clientForBooking(db, { name, phone, matter, date, user, lawyerId 
       await db.client.update({ where: { id: existing.client.id }, data: { archivedAt: null } });
       await db.clientEvent.create({ data: { clientId: existing.client.id, kind: "restore", text: "", authorId: user.id } });
     }
+    // A lawyer booking into their own calendar doesn't get an existing
+    // client's file that way: no case is created or handed to them — the
+    // appointment is only linked, and a manager assigns the case.
+    if (user.role === "LAWYER") return existing.client.id;
     const open = await db.clientCase.findFirst({
       where: { clientId: existing.client.id, status: { in: cl.OPEN_STATUSES } },
       orderBy: { updatedAt: "desc" },

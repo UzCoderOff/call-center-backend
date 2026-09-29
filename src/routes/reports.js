@@ -6,7 +6,12 @@ const { firmDate, firmDayRange, isValidDate, shiftDate } = require("../lib/firmT
 const { validateAnswers, summarize } = require("../services/reportFields");
 const { buildXlsx } = require("../lib/xlsx");
 const { computeCallStats } = require("../services/stats");
-const { autoReportDays, addUp, checkRange, MAX_DAYS } = require("../services/autoReport");
+const { autoReportDays, addUp, checkRange, asksForm, MAX_DAYS } = require("../services/autoReport");
+const { canSeeFinance, consultationPaymentsOnly, allPayments } = require("../lib/finance");
+
+// The payments line of automatic reports: all payments for people with
+// Moliya, the consultation fees only for everyone else (src/lib/finance.js).
+const moneyFor = (req) => (day) => (canSeeFinance(req.user) ? allPayments(day) : consultationPaymentsOnly(day));
 
 // Daily reports. Everyone with a report form fills in one report per day
 // (the firm's calendar day). Managers see, per day and office, who
@@ -19,7 +24,16 @@ router.use(requireAuth);
 
 const isManager = (req) => MANAGER_ROLES.includes(req.user.role);
 
-const AUTO_EMPLOYEE = { id: true, name: true, userId: true, collectCalls: true, autoReport: true, office: { select: { id: true, name: true } } };
+const AUTO_EMPLOYEE = {
+  id: true,
+  name: true,
+  userId: true,
+  collectCalls: true,
+  autoReport: true,
+  alsoForm: true,
+  reportTemplateId: true,
+  office: { select: { id: true, name: true } },
+};
 
 const REPORT_INCLUDE = {
   employee: { select: { id: true, name: true, collectCalls: true, office: { select: { id: true, name: true } } } },
@@ -47,12 +61,11 @@ router.get("/today", async (req, res, next) => {
   try {
     const date = firmDate();
     const employee = req.user.employee;
-    if (employee?.autoReport) {
-      const [day] = await autoReportDays(employee, date, date);
-      return res.json({ date, auto: day, template: null, report: null, callStats: null });
-    }
-    const template = await activeTemplateFor(employee);
-    if (!template) return res.json({ date, template: null, report: null, callStats: null });
+    // The automatic numbers (automatic, or automatic + form)…
+    const auto = employee?.autoReport ? moneyFor(req)((await autoReportDays(employee, date, date))[0]) : null;
+    // …and the form to fill in (form, or automatic + form).
+    const template = asksForm(employee) ? await activeTemplateFor(employee) : null;
+    if (!template) return res.json({ date, auto, template: null, report: null, callStats: null });
 
     const [report, callStats] = await Promise.all([
       prisma.report.findUnique({
@@ -61,7 +74,7 @@ router.get("/today", async (req, res, next) => {
       }),
       callStatsForDay(employee, date),
     ]);
-    res.json({ date, template: { id: template.id, name: template.name, fields: template.fields }, report, callStats });
+    res.json({ date, auto, template: { id: template.id, name: template.name, fields: template.fields }, report, callStats });
   } catch (err) {
     next(err);
   }
@@ -73,7 +86,7 @@ router.put("/today", async (req, res, next) => {
   try {
     const date = firmDate();
     const employee = req.user.employee;
-    if (employee?.autoReport) return res.status(409).json({ error: "automatic_report" });
+    if (employee?.autoReport && !asksForm(employee)) return res.status(409).json({ error: "automatic_report" });
     const template = await activeTemplateFor(employee);
     if (!template) return res.status(409).json({ error: "no_report_form" });
 
@@ -125,9 +138,9 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
     const automatic = employees.filter((e) => e.autoReport);
     const autoDays = await Promise.all(automatic.map((e) => autoReportDays(e, date, date).then(([day]) => day)));
     const rows = [
-      ...automatic.map((e, i) => ({ employee: { id: e.id, name: e.name, office: e.office }, template: null, report: null, auto: autoDays[i] })),
+      ...automatic.map((e, i) => ({ employee: { id: e.id, name: e.name, office: e.office }, template: null, report: null, auto: moneyFor(req)(autoDays[i]) })),
       ...employees
-        .filter((e) => !e.autoReport && e.reportTemplate?.active)
+        .filter((e) => asksForm(e) && e.reportTemplate?.active)
         .map((e) => {
           const report = reportFor(e.id, e.reportTemplate.id);
           return {
@@ -166,7 +179,7 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       };
     });
 
-    const auto = autoDays.length ? { people: autoDays.length, totals: addUp(autoDays) } : null;
+    const auto = autoDays.length ? { people: autoDays.length, totals: moneyFor(req)(addUp(autoDays)) } : null;
     res.json({ date, today: firmDate(), rows, forms, auto });
   } catch (err) {
     next(err);
@@ -348,7 +361,7 @@ router.get("/auto", async (req, res, next) => {
 
     const days = await autoReportDays(employee, from, to);
     const { userId, ...person } = employee;
-    res.json({ employee: person, today, days: days.reverse() });
+    res.json({ employee: person, today, days: days.reverse().map(moneyFor(req)) });
   } catch (err) {
     next(err);
   }

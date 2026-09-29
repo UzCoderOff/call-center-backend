@@ -28,7 +28,82 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release: the clients database and automatic reports
+### This release: materials, Telegram bot, Moliya, tasks, fee in bookings, security fixes
+
+- `npm run backup` first, then `npx prisma migrate deploy` and `npx prisma
+  generate` as above. Two migrations, both only adding:
+  - `20260929000000_materials_telegram` — new tables (materials, who they're
+    for, their files, who read them; Telegram connections and sent
+    notifications).
+  - `20260929120000_finance_access` — two columns on accounts (the "Moliya"
+    switch, and "logins before this moment don't count") and an index that
+    speeds up the calls list. Plain `ADD COLUMN`s: the accounts table is not
+    rebuilt.
+  - `20260929180000_tasks` — the tasks table, and on payments which
+    appointment a consultation fee paid for (a plain `ADD COLUMN`: the
+    payments table is not rebuilt; existing payments are untouched).
+  - `20260929200000_auto_report_with_form` — one switch on staff and on
+    positions for the new daily-report choice "Avtomatik + shakl" (automatic
+    numbers AND a form to fill in). Plain `ADD COLUMN`s, off for everyone:
+    nothing changes until you pick it in **Xodimlar → the person → Edit →
+    Kunlik hisobot** (or on a position in Sozlamalar).
+- New for staff: the booking form has **"Konsultatsiya toʻlovi olindi"**
+  (the fee, 450 000 soʻm by default — `CONSULTATION_FEE` in `.env` changes
+  it), and an appointment can take the fee later. **Mijozlar** now has two
+  tabs: clients with a contract, and **Konsultatsiyalar** (everyone else); a
+  search looks in both. **Vazifalar**: the boss gives someone a task with a
+  due time; Telegram reminds them an hour before and when it's due, and they
+  can tick it done right in Telegram.
+- **Contract money is now hidden from everyone but you** (the DEVELOPER)
+  until you switch it on: contract amounts, contract payments and debts
+  disappear for the boss too. Right after deploying: **Xodimlar → Rahbar va
+  advokatlar → the head of the firm → "Moliyani koʻradi" on**. They get the
+  new **Moliya** page (income, contracts, who owes, per lawyer). Nobody else
+  — other lawyers, staff — sees contract money or records contract payments.
+  The consultation fee (450 000 soʻm) stays visible: staff still record it
+  on the client's case ("Toʻlov qoʻshish") before booking.
+- Security fixes that change behaviour:
+  - Resetting someone's password now also signs their phones out of the app
+    and ends their other logins. Changing your own password ends your other
+    logins (not the phone app).
+  - Too many wrong passwords now stop only strangers: the person still
+    signs in from a phone or browser they've used before. (The login sets a
+    second cookie, `kd_…`, for this.)
+  - Boss and lawyer accounts' phones are listed on their account and can be
+    signed out, like staff phones.
+  - A lawyer booking a known client's number into their own calendar no
+    longer gets that client's file; staff can't move a case to another
+    lawyer or take a colleague off a case (managers still can).
+  - A boss or lawyer account with appointments can't be deleted (it would
+    delete them) — deactivate it instead.
+- Reliability fixes: recordings whose file names have Cyrillic or ʻ are no
+  longer lost; a phone with a big backlog (more than 50 recordings) is no
+  longer stuck forever; a sync waits out a busy database instead of failing;
+  backups are checked before they replace the day's copy.
+- `.env` — add (see `.env.example`):
+  - `PORTAL_URL=https://call-center-frontend-hazel.vercel.app` (links in
+    Telegram messages).
+  - `TELEGRAM_BOT_TOKEN=` — in Telegram, open **@BotFather**, send `/newbot`,
+    give it the name **Ledger** and a username ending in `bot` (e.g.
+    `firmname_ledger_bot`), and paste
+    the token it gives you. Treat it like a password. Leave it empty and the
+    bot stays off; everything else works.
+  - `pm2 restart all`. The log should say `[telegram] bot @… ready`.
+- Uploaded material files are stored in `storage/materials` — copy that folder
+  with the recordings when you take copies off the server.
+- Files go up in pieces under 1 MB, so no web server setting needs changing.
+- The Android app **2.2.0 (versionCode 4)** opens PDFs and Excel exports,
+  can pick files to upload (older versions can't — the portal tells people to
+  update), and works through a backlog of calls 30 recordings at a time
+  instead of getting stuck. After the new APK is built and copied to `storage/downloads/ledger.apk`,
+  set `APP_LATEST_VERSION_CODE=4` and `APP_LATEST_VERSION_NAME=2.2.0` and
+  restart, so installed apps offer the update.
+- Afterwards: **Materiallar → Yangi material** (boss or developer) — start
+  with the call-center script, mark it **Majburiy**, choose the call-center
+  position. Ask everyone to open **Profil → Telegram → Telegramni ulash**;
+  **Sozlamalar → Telegram** shows who hasn't yet.
+
+### Earlier release: the clients database and automatic reports
 
 - The migration `20260928000000_clients` adds the new tables (clients, their
   phone numbers, cases, payments, history, connections, the change log) and

@@ -22,6 +22,9 @@ function blankDay(date) {
     consultations: 0,
     contracts: 0,
     payments: { count: 0, amount: 0 },
+    // The consultation fees among them — all that people without Moliya
+    // see (src/lib/finance.js).
+    consultationPayments: { count: 0, amount: 0 },
   };
 }
 
@@ -69,7 +72,7 @@ async function autoReportDays(employee, from, to) {
     prisma.client.findMany({ where: { createdById: userId, createdAt: created }, select: { createdAt: true } }),
     prisma.clientCase.findMany({ where: { operatorId: employee.id, consultationDate: { gte: from, lte: to } }, select: { consultationDate: true } }),
     prisma.clientCase.findMany({ where: { operatorId: employee.id, contractDate: { gte: from, lte: to } }, select: { contractDate: true } }),
-    prisma.payment.findMany({ where: { recordedById: userId, date: { gte: from, lte: to } }, select: { date: true, amount: true } }),
+    prisma.payment.findMany({ where: { recordedById: userId, date: { gte: from, lte: to } }, select: { date: true, amount: true, kind: true } }),
   ]);
 
   for (const c of calls) {
@@ -103,6 +106,10 @@ async function autoReportDays(employee, from, to) {
     if (!day) continue;
     day.payments.count += 1;
     day.payments.amount += p.amount;
+    if (p.kind === "consultation") {
+      day.consultationPayments.count += 1;
+      day.consultationPayments.amount += p.amount;
+    }
   }
 
   const list = [...days.values()];
@@ -122,10 +129,19 @@ function addUp(reports) {
     for (const key of ["booked", "newClients", "consultations", "contracts"]) total[key] += r[key];
     total.payments.count += r.payments.count;
     total.payments.amount += r.payments.amount;
+    total.consultationPayments.count += r.consultationPayments?.count || 0;
+    total.consultationPayments.amount += r.consultationPayments?.amount || 0;
   }
   if (!withCalls) total.calls = null;
   delete total.date;
   return total;
 }
 
-module.exports = { autoReportDays, addUp, checkRange, MAX_DAYS };
+// Is this person asked to fill in their report form? Yes with a form and no
+// automatic report, or with both switched on (automatic + form). With the
+// automatic report alone, a form set on them is only kept, not asked.
+function asksForm(employee) {
+  return Boolean(employee?.reportTemplateId) && (!employee.autoReport || Boolean(employee.alsoForm));
+}
+
+module.exports = { autoReportDays, addUp, checkRange, asksForm, MAX_DAYS };

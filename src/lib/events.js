@@ -15,6 +15,16 @@ const { EventEmitter } = require("events");
 // Events currently emitted:
 //   "calls.synced"  { employeeId, callIds, recordingCallIds }
 //                   after a device sync is fully written to the DB
+//   "appointment.booked"      { appointmentId }
+//   "appointments.cancelled"  { appointmentIds, byUserId }
+//                   a booking made / cancelled (one, or several when the
+//                   lawyer changes a day that already had bookings)
+//   "material.published"      { materialId, byUserId }
+//                   a training material the manager chose to announce
+//   "task.created"            { taskId }   a task given (or given to someone else)
+//   "task.done"               { taskId, byUserId }
+//
+// The Telegram notifications (src/services/telegram/) are built on these.
 //
 // Listeners must not throw into the emitter's caller (the device sync
 // response). `safeOn` wraps a handler so a bug in one feature can never

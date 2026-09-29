@@ -15,13 +15,35 @@ const { firmDate } = require("../src/lib/firmTime");
 
 const KEEP = 14;
 
+// SQLite's own check of the copy, opened read-only on its own.
+async function checkCopy(file) {
+  const { PrismaClient } = require("@prisma/client");
+  const copy = new PrismaClient({ datasources: { db: { url: `file:${file}?mode=ro` } } });
+  try {
+    const rows = await copy.$queryRawUnsafe("PRAGMA quick_check");
+    return rows.map((r) => Object.values(r)[0]);
+  } finally {
+    await copy.$disconnect();
+  }
+}
+
 async function main() {
   const dir = path.join(path.dirname(env.storageRoot), "backups");
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `ledger-${firmDate()}.db`);
-  // VACUUM INTO refuses to overwrite: today's earlier copy is replaced.
-  fs.rmSync(file, { force: true });
-  await prisma.$executeRawUnsafe(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+  // Written under a temporary name first: if it fails (a full disk), the
+  // copy already made today is still there. VACUUM INTO won't overwrite.
+  const temp = `${file}.part`;
+  fs.rmSync(temp, { force: true });
+  await prisma.$executeRawUnsafe(`VACUUM INTO '${temp.replace(/'/g, "''")}'`);
+  // A copy that doesn't check out is not kept.
+  const [check] = await checkCopy(temp);
+  if (check !== "ok") {
+    fs.rmSync(temp, { force: true });
+    throw new Error(`the copy failed its integrity check (${check})`);
+  }
+  fs.renameSync(temp, file);
+  fs.chmodSync(file, 0o600);
   const size = fs.statSync(file).size;
 
   const old = fs

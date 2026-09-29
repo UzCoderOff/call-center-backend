@@ -6,6 +6,8 @@ const { phoneKey } = require("../lib/phone");
 const { firmNow, isValidDate, isoWeekday, shiftDate, weekStartOf } = require("../lib/firmTime");
 const cal = require("../services/calendar");
 const { clientForBooking } = require("../lib/clientsDb");
+const { events } = require("../lib/events");
+const fee = require("../services/consultationFee");
 
 // The lawyer's calendar.
 //
@@ -34,6 +36,9 @@ const canManage = (user, calendar) => user.role === "DEVELOPER" || calendar.owne
 const APPOINTMENT_INCLUDE = {
   bookedBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
   calendar: { select: { id: true, name: true } },
+  // The consultation fee paid for it, if any (visible to everyone who sees
+  // the appointment — src/lib/finance.js).
+  payments: { where: { kind: "consultation" }, select: { id: true, amount: true, method: true, date: true } },
 };
 
 function parseWeekStart(value) {
@@ -246,10 +251,11 @@ calendars.put("/:id/weeks/:weekStart", async (req, res, next) => {
         update: { blocks },
         create: { calendarId: calendar.id, weekStart, blocks },
       });
-      return { week, cancelled: conflicts.length };
+      return { week, cancelled: conflicts.length, cancelledIds: conflicts.map((a) => a.id) };
     });
 
     if (result.conflicts) return res.status(409).json({ error: "appointments_conflict", appointments: result.conflicts });
+    if (result.cancelledIds.length > 0) events.emit("appointments.cancelled", { appointmentIds: result.cancelledIds, byUserId: req.user.id });
     res.json({ ...result.week, cancelled: result.cancelled });
   } catch (err) {
     next(err);
@@ -293,6 +299,15 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     const clientName = typeof b.clientName === "string" ? b.clientName.trim().slice(0, 120) : "";
     if (!clientName) throw badRequest("clientName is required");
     const clientPhone = typeof b.clientPhone === "string" && b.clientPhone.trim() ? b.clientPhone.trim().slice(0, 40) : null;
+    // "Fee received": the consultation fee, recorded with the booking. It
+    // goes on the client's record, so it needs a phone number to find or
+    // create the client by. Lawyers don't record payments.
+    let feeTaken = null;
+    if (b.feeReceived === true) {
+      if (isLawyer(req.user)) return res.status(403).json({ error: "forbidden" });
+      if (!phoneKey(clientPhone)) return res.status(400).json({ error: "phone_required_for_fee" });
+      feeTaken = fee.normalizeFee(b);
+    }
 
     let callLogId = null;
     if (b.callLogId != null) {
@@ -344,6 +359,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
       if (clientId) {
         await tx.appointment.update({ where: { id: appointment.id }, data: { clientId } });
         appointment.clientId = clientId;
+        if (feeTaken) appointment.payments = [await fee.recordFee(tx, { appointment, clientId, user: req.user, ...feeTaken })];
       }
       // A client booked again has clearly been told about the cancelled
       // appointment — take it off the "tell the client" list.
@@ -357,6 +373,13 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     });
 
     if (result.error) return res.status(409).json({ error: result.error });
+    events.emit("appointment.booked", { appointmentId: result.appointment.id });
+    // A lawyer learns the client record only if it's one of theirs — not
+    // whether some phone number belongs to one of the firm's clients.
+    if (isLawyer(req.user) && result.appointment.clientId) {
+      const theirs = await prisma.clientCase.count({ where: { clientId: result.appointment.clientId, lawyerId: req.user.id } });
+      if (!theirs) result.appointment.clientId = null;
+    }
     res.status(201).json(result.appointment);
   } catch (err) {
     next(err);
@@ -455,12 +478,59 @@ appointments.patch("/:id", async (req, res, next) => {
       if (field === "clientPhone") data.phoneKey = phoneKey(value);
     }
 
-    const updated = await prisma.appointment.update({
-      where: { id: appointment.id },
-      data,
-      include: APPOINTMENT_INCLUDE,
+    // Bringing a cancelled appointment back: its time may have been given to
+    // someone else meanwhile — check like a new booking, in one transaction.
+    const reviving = data.status && data.status !== "cancelled" && appointment.status === "cancelled";
+    const updated = await prisma.$transaction(async (tx) => {
+      if (reviving) {
+        const others = await tx.appointment.findMany({
+          where: { calendarId: appointment.calendarId, date: appointment.date, status: { not: "cancelled" }, id: { not: appointment.id } },
+        });
+        if (others.some((a) => cal.overlaps(a, appointment))) return null;
+      }
+      return tx.appointment.update({ where: { id: appointment.id }, data, include: APPOINTMENT_INCLUDE });
     });
+    if (!updated) return res.status(409).json({ error: "slot_taken" });
+    if (data.status === "cancelled" && appointment.status !== "cancelled") {
+      events.emit("appointments.cancelled", { appointmentIds: [appointment.id], byUserId: req.user.id });
+    }
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The consultation fee, when it's paid after booking (at the appointment,
+// say): { feeAmount?, feeMethod? }. Whoever may book, or a manager; not
+// lawyers; once per appointment.
+appointments.post("/:id/fee", async (req, res, next) => {
+  try {
+    if (isLawyer(req.user) || (!canBook(req.user) && !isManager(req.user))) return res.status(403).json({ error: "forbidden" });
+    const appointment = await prisma.appointment.findUnique({ where: { id: parseId(req.params.id) }, include: { payments: { where: { kind: "consultation" } } } });
+    if (!appointment) return res.status(404).json({ error: "not_found" });
+    if (appointment.status === "cancelled") return res.status(409).json({ error: "cancelled" });
+    if (appointment.payments.length > 0) return res.status(409).json({ error: "fee_already_recorded" });
+    const taken = fee.normalizeFee(req.body || {});
+    const updated = await prisma.$transaction(async (tx) => {
+      // Booked without a phone number: no client yet — find or add one now.
+      let clientId = appointment.clientId;
+      if (!clientId) {
+        if (!appointment.phoneKey) return null;
+        clientId = await clientForBooking(tx, {
+          name: appointment.clientName,
+          phone: appointment.clientPhone,
+          matter: appointment.matter,
+          date: appointment.date,
+          user: req.user,
+          lawyerId: (await tx.calendar.findUnique({ where: { id: appointment.calendarId } })).ownerId,
+        });
+        await tx.appointment.update({ where: { id: appointment.id }, data: { clientId } });
+      }
+      await fee.recordFee(tx, { appointment, clientId, user: req.user, ...taken });
+      return tx.appointment.findUnique({ where: { id: appointment.id }, include: APPOINTMENT_INCLUDE });
+    });
+    if (!updated) return res.status(400).json({ error: "phone_required_for_fee" });
+    res.status(201).json(updated);
   } catch (err) {
     next(err);
   }

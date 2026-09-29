@@ -31,7 +31,7 @@ router.post("/login", async (req, res, next) => {
       return res.status(400).json({ error: "username and password are required" });
     }
 
-    const result = await checkCredentials(req, String(username), String(password));
+    const result = await checkCredentials(req, res, String(username), String(password));
     if (result.error) return res.status(result.status).json({ error: result.error });
 
     const token = generateDeviceToken();

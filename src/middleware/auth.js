@@ -27,6 +27,13 @@ async function requireAuth(req, res, next) {
     if (!user || !user.active) {
       return res.status(401).json({ error: "unauthorized" });
     }
+    // A login from before the password was reset or changed no longer
+    // counts. (Tokens from before this rule carry only whole seconds: a
+    // second of slack for those.)
+    const issuedAt = typeof decoded.at === "number" ? decoded.at : decoded.iat * 1000 + 999;
+    if (user.sessionsValidAfter && issuedAt < user.sessionsValidAfter.getTime()) {
+      return res.status(401).json({ error: "unauthorized" });
+    }
 
     req.user = user;
     next();

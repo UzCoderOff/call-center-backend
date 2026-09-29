@@ -15,18 +15,24 @@ const router = express.Router();
 // Shared with the Android app's sign-in (routes/device.js). Same generic
 // error whether the username doesn't exist or the password is wrong — don't
 // help an attacker enumerate valid usernames.
-async function checkCredentials(req, username, password) {
+// A hash to compare against when the username doesn't exist, so a wrong
+// username takes as long as a wrong password (no telling which it was).
+const DUMMY_HASH = hashPassword("not-a-real-password-" + Math.random());
+
+async function checkCredentials(req, res, username, password) {
+  if (username.length > throttle.MAX_USERNAME || password.length > 200) return { error: "invalid_credentials", status: 401 };
   if (throttle.isBlocked(req, username)) return { error: "too_many_attempts", status: 429 };
 
   const user = await prisma.user.findUnique({
     where: { username },
     include: { employee: true },
   });
-  if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
+  const ok = await verifyPassword(password, user?.passwordHash ?? (await DUMMY_HASH));
+  if (!user || !user.active || !ok) {
     throttle.recordFailure(req, username);
     return { error: "invalid_credentials", status: 401 };
   }
-  throttle.recordSuccess(req, username);
+  throttle.recordSuccess(req, res, username);
   return { user };
 }
 
@@ -37,7 +43,7 @@ router.post("/login", async (req, res, next) => {
       return res.status(400).json({ error: "username and password are required" });
     }
 
-    const result = await checkCredentials(req, String(username), String(password));
+    const result = await checkCredentials(req, res, String(username), String(password));
     if (result.error) return res.status(result.status).json({ error: result.error });
 
     startSession(res, result.user);
@@ -64,24 +70,34 @@ router.get("/me", requireAuth, (req, res) => {
 router.post("/change-password", requireAuth, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
-    if (!currentPassword || !newPassword) {
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword || !newPassword) {
       return res.status(400).json({ error: "currentPassword and newPassword are required" });
     }
+    if (newPassword.length > 200) return res.status(400).json({ error: "password_too_long" });
+    // Guessing the current password from an open session counts like
+    // guessing it at the login screen.
+    if (throttle.isBlocked(req, req.user.username)) return res.status(429).json({ error: "too_many_attempts" });
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
       return res.status(400).json({ error: "password_too_short", minLength: MIN_PASSWORD_LENGTH });
     }
 
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!user || !(await verifyPassword(currentPassword, user.passwordHash))) {
+      throttle.recordFailure(req, req.user.username);
       return res.status(401).json({ error: "invalid_current_password" });
     }
 
     const passwordHash = await hashPassword(newPassword);
-    await prisma.user.update({
+    const now = new Date();
+    const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
+      data: { passwordHash, mustChangePassword: false, passwordChangedAt: now, sessionsValidAfter: now },
     });
 
+    // Logins elsewhere with the old password end; this one goes on with a
+    // fresh session. (Phones signed in to the app keep working — signing a
+    // phone out is done from Team.)
+    startSession(res, updated);
     res.json({ ok: true });
   } catch (err) {
     next(err);

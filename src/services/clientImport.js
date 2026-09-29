@@ -234,7 +234,13 @@ async function importRows(db, rows, { user, today }) {
   const operators = new Set((await db.employee.findMany({ select: { id: true } })).map((e) => e.id));
   const lawyers = await lawyerAccounts(db);
   const result = { created: 0, updated: 0, skipped: 0, problems: [] };
+  let done = 0;
   for (const raw of rows) {
+    // A short breath every few rows: SQLite has one writer at a time, and a
+    // phone syncing its calls or someone booking shouldn't wait behind a
+    // whole spreadsheet.
+    done += 1;
+    if (done % 20 === 0) await new Promise((resolve) => setTimeout(resolve, 60));
     try {
       const outcome = await db.$transaction((tx) => importOne(tx, raw || {}, { user, today, operators, lawyers }));
       result[outcome] += 1;

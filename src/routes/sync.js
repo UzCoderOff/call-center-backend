@@ -86,15 +86,42 @@ async function authenticate(req) {
   return { employee, device, payload };
 }
 
+// Waits out a moment when the database is busy (someone importing a big
+// spreadsheet): SQLite lets one writer at a time, and a sync shouldn't fail
+// — and be sent again from the phone — because of it.
+const BUSY_CODES = ["P1008", "P2028", "P2034"];
+async function withRetry(fn, tries = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      const busy = BUSY_CODES.includes(err?.code) || /SQLITE_BUSY|database is locked/i.test(err?.message || "");
+      if (!busy || attempt >= tries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+    }
+  }
+}
+
 const upload = multer({
+  // File names come from the phone as UTF-8 (recorders put contact names in
+  // them, often in Cyrillic or with ʻ). multer's default, latin1, garbled
+  // those, so the recording no longer matched its call and was thrown away.
+  defParamCharset: "utf8",
   storage: multer.diskStorage({
     destination: INCOMING_DIR,
     filename: (req, file, cb) => cb(null, incomingFilename()),
   }),
   limits: {
     fileSize: 100 * 1024 * 1024, // 100MB per recording — a long call in a lossless-ish format
-    files: 50, // generous ceiling per sync batch
+    // As many as a batch can have calls (the app sends at most 400): a phone
+    // that fell behind — Honor froze the app for a day — used to get "too
+    // many recordings" for the same batch forever.
+    files: 400,
     fieldSize: 10 * 1024 * 1024, // 10MB for the JSON "payload" text field
+    // Only the payload is a text part; anything more is junk, refused
+    // before it can fill memory (it arrives before the phone is checked).
+    fields: 4,
+    parts: 410,
   },
   fileFilter: (req, file, cb) => {
     authenticateOnce(req)
@@ -188,7 +215,7 @@ async function processSync({ employee, payload, files }) {
       syncedAtMs,
     };
 
-    const call = await prisma.callLog.upsert({
+    const call = await withRetry(() => prisma.callLog.upsert({
       where: {
         employeeId_deviceCallLogId_callTimestampMs: { employeeId: employee.id, deviceCallLogId, callTimestampMs },
       },
@@ -207,7 +234,7 @@ async function processSync({ employee, payload, files }) {
         followUp: missed ? (key ? "pending" : "no_number") : null,
       },
       select: { id: true },
-    });
+    }));
 
     callIds.push(call.id);
     if (file) recordingCallIds.push(call.id);
@@ -219,6 +246,12 @@ async function processSync({ employee, payload, files }) {
     await reconcileFollowUps([...touchedKeys]);
   } catch (err) {
     console.error("follow-up reconciliation failed:", err);
+  }
+
+  // Recordings that matched no call in the payload are dropped — say so in
+  // the server log, so a naming problem on some phone can be noticed.
+  if (filesByName.size > 0) {
+    console.warn(`sync: ${filesByName.size} recording(s) from employee ${employee.id} matched no call: ${[...filesByName.keys()].slice(0, 3).join(", ")}`);
   }
 
   events.emit("calls.synced", { employeeId: employee.id, callIds, recordingCallIds });

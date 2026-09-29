@@ -118,6 +118,7 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         name: cleanName(req.body?.name),
         collectCalls: Boolean(req.body?.collectCalls),
         autoReport: Boolean(req.body?.autoReport),
+        alsoForm: Boolean(req.body?.alsoForm),
         calendarAccess: calendarAccess(req.body?.calendarAccess) ?? "none",
         reportTemplateId: optionalId(req.body?.reportTemplateId, "reportTemplateId") ?? null,
         targetConsultations: target(req.body?.targetConsultations, "targetConsultations") ?? null,
@@ -133,7 +134,7 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
 
 positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
-    const { name, collectCalls, autoReport, reportTemplateId } = req.body || {};
+    const { name, collectCalls, autoReport, alsoForm, reportTemplateId } = req.body || {};
     const templateId = optionalId(reportTemplateId, "reportTemplateId");
     const access = calendarAccess(req.body?.calendarAccess);
     const targets = {
@@ -147,6 +148,7 @@ positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
         ...(name !== undefined ? { name: cleanName(name) } : {}),
         ...(typeof collectCalls === "boolean" ? { collectCalls } : {}),
         ...(typeof autoReport === "boolean" ? { autoReport } : {}),
+        ...(typeof alsoForm === "boolean" ? { alsoForm } : {}),
         ...(access !== undefined ? { calendarAccess: access } : {}),
         ...(templateId !== undefined ? { reportTemplateId: templateId } : {}),
         ...targets,

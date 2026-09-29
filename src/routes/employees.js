@@ -38,6 +38,7 @@ function publicEmployee(employee, viewerRole, sync) {
     position: employee.position ?? null,
     collectCalls: employee.collectCalls,
     autoReport: employee.autoReport,
+    alsoForm: employee.alsoForm,
     calendarAccess: employee.calendarAccess,
     reportTemplate: employee.reportTemplate ?? null,
     createdAt: employee.createdAt,
@@ -90,6 +91,10 @@ function workSettings(body) {
     if (typeof body.autoReport !== "boolean") throw badRequest("autoReport must be true or false");
     data.autoReport = body.autoReport;
   }
+  if (body.alsoForm !== undefined) {
+    if (typeof body.alsoForm !== "boolean") throw badRequest("alsoForm must be true or false");
+    data.alsoForm = body.alsoForm;
+  }
   if (body.calendarAccess !== undefined) {
     if (!CALENDAR_ACCESS.includes(body.calendarAccess)) throw badRequest("invalid calendarAccess");
     data.calendarAccess = body.calendarAccess;
@@ -126,6 +131,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       if (!position) throw badRequest("unknown position");
       if (settings.collectCalls === undefined) settings.collectCalls = position.collectCalls;
       if (settings.autoReport === undefined) settings.autoReport = position.autoReport;
+      if (settings.alsoForm === undefined) settings.alsoForm = position.alsoForm;
       if (settings.calendarAccess === undefined) settings.calendarAccess = position.calendarAccess;
       if (settings.reportTemplateId === undefined) settings.reportTemplateId = position.reportTemplateId;
     }
@@ -149,6 +155,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         phoneNumber: optionalString(body.phoneNumber),
         collectCalls: settings.collectCalls ?? false,
         autoReport: settings.autoReport ?? false,
+        alsoForm: settings.alsoForm ?? false,
         calendarAccess: settings.calendarAccess ?? "none",
         office: connect(settings.officeId),
         position: connect(settings.positionId),
@@ -338,10 +345,16 @@ router.post("/:id/reset-password", requireRole("DEVELOPER"), async (req, res, ne
     const tempPassword = generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
 
-    const user = await prisma.user.update({
-      where: { id: employee.user.id },
-      data: { passwordHash, mustChangePassword: true, passwordChangedAt: null },
-    });
+    // A reset usually means lost access or a lost phone: every existing
+    // login — browsers and phones signed in to the app — stops working.
+    const now = new Date();
+    const [user] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: employee.user.id },
+        data: { passwordHash, mustChangePassword: true, passwordChangedAt: null, sessionsValidAfter: now },
+      }),
+      prisma.device.updateMany({ where: { userId: employee.user.id, revokedAt: null }, data: { revokedAt: now } }),
+    ]);
 
     res.json({
       employee: publicEmployee({ ...employee, user }, req.user.role),

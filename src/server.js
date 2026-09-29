@@ -2,6 +2,7 @@ const env = require("./config/env");
 const app = require("./app");
 const { describeFfmpegAvailability } = require("./utils/audioTranscode");
 const { prepareDatabase } = require("./lib/dbSetup");
+const telegram = require("./services/telegram");
 
 // Check this once, loudly, at startup — so a missing/broken ffmpeg (e.g.
 // ffmpeg-static's binary never downloaded because this server has no
@@ -29,7 +30,15 @@ process.on("unhandledRejection", (reason) => {
 prepareDatabase()
   .catch((err) => console.error("database setup:", err.message))
   .finally(() => {
-    app.listen(env.port, () => {
+    app.listen(env.port, (err) => {
+      // e.g. the port is taken by another copy: stop, so pm2 shows the real
+      // problem instead of a server that says it listens but doesn't.
+      if (err) {
+        console.error(`could not listen on port ${env.port}:`, err.message);
+        process.exit(1);
+      }
       console.log(`call-center-backend listening on port ${env.port} (${env.nodeEnv})`);
+      // The staff Telegram bot (off without TELEGRAM_BOT_TOKEN).
+      telegram.start();
     });
   });

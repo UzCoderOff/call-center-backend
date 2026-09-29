@@ -57,11 +57,14 @@ function date(value, field) {
   return value;
 }
 
+const MAX_AMOUNT = 2147483647;
+
 function amount(value, field) {
   if (value === undefined) return undefined;
   if (value === null || value === "") return null;
   const n = Number(value);
-  if (!Number.isInteger(n) || n < 0 || n > 1e12) throw new ClientError(`invalid ${field}`);
+  // The database keeps amounts as 32-bit numbers: up to 2 147 483 647 soʻm.
+  if (!Number.isInteger(n) || n < 0 || n > MAX_AMOUNT) throw new ClientError(`invalid ${field}`);
   return n;
 }
 

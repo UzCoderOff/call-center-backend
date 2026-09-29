@@ -17,7 +17,7 @@ uptime
 section "Disk and memory"
 df -h / | tail -1
 free -h 2>/dev/null | sed -n '1,2p'
-du -sh prisma storage/recordings storage/backups 2>/dev/null
+du -sh prisma storage/recordings storage/materials storage/backups 2>/dev/null
 
 section "Node and the app"
 echo "node $(node -v 2>/dev/null || echo missing), npm $(npm -v 2>/dev/null || echo missing)"

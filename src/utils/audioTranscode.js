@@ -152,9 +152,13 @@ function transcodeToMp3(sourceAbsolutePath, destAbsolutePath) {
     // output format" for every single conversion. This was the actual
     // reason AMR recordings never played even with everything else
     // (routing, caching, content-type) wired correctly.
+    // -protocol_whitelist file: ffmpeg reads the local file only — a
+    // crafted "recording" can't make it fetch URLs or other files. A minute
+    // is far more than a call needs; a stuck ffmpeg is killed.
     execFile(
       ffmpegCommand,
-      ["-y", "-i", sourceAbsolutePath, "-vn", "-ac", "1", "-ar", "44100", "-b:a", "64k", "-f", "mp3", tmpPath],
+      ["-nostdin", "-loglevel", "error", "-protocol_whitelist", "file", "-y", "-i", sourceAbsolutePath, "-vn", "-ac", "1", "-ar", "44100", "-b:a", "64k", "-f", "mp3", tmpPath],
+      { timeout: 60 * 1000, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
       (err, _stdout, stderr) => {
         if (err) {
           fs.unlink(tmpPath, () => {});

@@ -1,7 +1,7 @@
 // Call Center Backend — Prisma schema
 //
 // Design notes (read this before changing anything):
-// - Roles are plain strings ("DEVELOPER" | "BOSS" | "EMPLOYEE"), not a Prisma
+// - Roles are plain strings ("DEVELOPER" | "BOSS" | "LAWYER" | "EMPLOYEE"), not a Prisma
 //   enum. SQLite has no native enum type; keeping it a validated string
 //   avoids provider-specific quirks and keeps a future Postgres migration
 //   (via `prisma migrate`) painless. The same goes for every other
@@ -70,6 +70,24 @@ model User {
   // Shown for boss and lawyer accounts (e.g. on cases); null: the calendar
   // name, else the username.
   name String?
+
+  // The "Moliya" switch (boss and lawyer accounts): sees the money from
+  // clients — contract amounts, payments, debts — and records payments. Off
+  // until the DEVELOPER turns it on, meant for the head of the firm only.
+  // The DEVELOPER always sees money; staff never do. Rules: src/lib/finance.js.
+  seesFinance        Boolean   @default(false)
+  // Portal sessions started before this moment no longer count — set when
+  // the password is reset or changed, so an old login stops working.
+  sessionsValidAfter DateTime?
+
+  materialsCreated Material[]         @relation("MaterialCreatedBy")
+  materialAudience MaterialAudience[] @relation("MaterialAudienceUser")
+  materialReads    MaterialRead[]     @relation("MaterialReads")
+  telegram         TelegramLink?
+
+  tasksAssigned Task[] @relation("TaskAssignee")
+  tasksCreated  Task[] @relation("TaskCreatedBy")
+  tasksDone     Task[] @relation("TaskDoneBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -118,9 +136,14 @@ model Employee {
   updatedAt DateTime @updatedAt
 
   // The daily report is made automatically from their calls, bookings and
-  // clients (src/services/autoReport.js); no form is asked while this is on.
-  // The report form above is kept for when it is switched off.
+  // clients (src/services/autoReport.js). On its own, no form is asked (the
+  // report form above is kept for when it is switched off) — unless
+  // `alsoForm` is on too: then the numbers come automatically AND they fill
+  // in the form for the rest of their work (e.g. a phone that's monitored,
+  // but a different job). Four choices in all: none, form, automatic,
+  // automatic + form.
   autoReport Boolean @default(false)
+  alsoForm   Boolean @default(false)
 }
 
 // A physical location — e.g. the office by the court, the translation office.
@@ -138,21 +161,25 @@ model Office {
 // "collect calls" and the report form. It's copied onto the person, not
 // linked live — editing a position never silently changes existing staff.
 model Position {
-  id                  Int             @id @default(autoincrement())
-  name                String          @unique
-  collectCalls        Boolean         @default(false)
-  calendarAccess      String          @default("none")
+  id                  Int                @id @default(autoincrement())
+  name                String             @unique
+  collectCalls        Boolean            @default(false)
+  calendarAccess      String             @default("none")
   reportTemplateId    Int?
-  reportTemplate      ReportTemplate? @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
+  reportTemplate      ReportTemplate?    @relation(fields: [reportTemplateId], references: [id], onDelete: SetNull)
   // Monthly targets for people in this position (e.g. operators: 60
   // consultations, 30 contracts). Null: no target.
   targetConsultations Int?
   targetContracts     Int?
   employees           Employee[]
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  // Preset for new staff: their daily report is made automatically.
-  autoReport          Boolean         @default(false)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  // Preset for new staff: their daily report is made automatically (and,
+  // with alsoForm, the report form is asked as well).
+  autoReport          Boolean            @default(false)
+  alsoForm            Boolean            @default(false)
+  // Materials meant for everyone in this position.
+  materials           MaterialAudience[]
 }
 
 // A daily report form, built in the portal. `fields` is an ordered list of
@@ -274,6 +301,8 @@ model CallLog {
 
   @@unique([employeeId, deviceCallLogId, callTimestampMs])
   @@index([employeeId, callTimestampMs])
+  // The company-wide calls list and date-range statistics.
+  @@index([callTimestampMs])
   @@index([phoneKey, callTimestampMs])
   @@index([missed, followUp])
 }
@@ -429,6 +458,8 @@ model Appointment {
   // When someone other than the booker cancels (the lawyer, or an away
   // period), the booker is asked to let the client know, then ticks this.
   clientInformed Boolean   @default(false)
+  // The consultation fee paid for it (see Payment.appointmentId).
+  payments       Payment[]
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
@@ -469,6 +500,7 @@ model Client {
   linksFrom    ClientLink[]  @relation("ClientLinkFrom")
   linksTo      ClientLink[]  @relation("ClientLinkTo")
   appointments Appointment[]
+  tasks        Task[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -529,22 +561,27 @@ model ClientCase {
 }
 
 model Payment {
-  id           Int         @id @default(autoincrement())
-  clientId     Int
-  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  caseId       Int?
-  case         ClientCase? @relation(fields: [caseId], references: [id], onDelete: Cascade)
-  amount       Int
-  date         String // "YYYY-MM-DD"
-  method       String? // "cash" | "card" | "transfer"
-  kind         String      @default("contract") // "consultation" | "contract" | "other"
-  note         String?
-  recordedById Int?
-  recordedBy   User?       @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
-  createdAt    DateTime    @default(now())
+  id            Int          @id @default(autoincrement())
+  clientId      Int
+  client        Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  caseId        Int?
+  case          ClientCase?  @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  amount        Int
+  date          String // "YYYY-MM-DD"
+  method        String? // "cash" | "card" | "transfer"
+  kind          String       @default("contract") // "consultation" | "contract" | "other"
+  note          String?
+  recordedById  Int?
+  recordedBy    User?        @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  // A consultation fee taken when booking (or at the appointment): which
+  // appointment it paid for.
+  appointmentId Int?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
 
   @@index([clientId])
   @@index([caseId])
+  @@index([appointmentId])
 }
 
 // A client's timeline: notes people write, and what the system records
@@ -599,4 +636,152 @@ model AuditLog {
 
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------- materials
+// Training and reference materials for staff: the call-center script, how to
+// talk to clients, office rules. Each is shown only to the people it's for —
+// everyone, some positions, the lawyers, or named people. "Required" ones sit
+// on the person's home page until they press "I've read it", which is how a
+// new employee learns the job without being told everything by hand.
+// Rules: src/routes/materials.js.
+model Material {
+  id          Int                @id @default(autoincrement())
+  title       String
+  // Groups the list: "Skriptlar", "Mijoz bilan ishlash"…
+  category    String?
+  // Text written in the portal, with simple formatting (headings, lists,
+  // "say this" blocks) — see the portal's components/materials/RichText.jsx.
+  body        String?
+  // A video or document kept elsewhere (YouTube, Google Drive…).
+  linkUrl     String?
+  forEveryone Boolean            @default(false)
+  required    Boolean            @default(false)
+  // false: a draft only managers see.
+  published   Boolean            @default(true)
+  // Raised when a change must be read again: a read counts for the version
+  // it was made on.
+  version     Int                @default(1)
+  // Archived materials are hidden but kept and can be restored.
+  archivedAt  DateTime?
+  createdById Int?
+  createdBy   User?              @relation("MaterialCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  audience    MaterialAudience[]
+  files       MaterialFile[]
+  reads       MaterialRead[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([archivedAt])
+}
+
+// Who a material is for, one row per group or person: a position (everyone
+// in it), a role ("LAWYER": the lawyers' accounts) or one account.
+model MaterialAudience {
+  id         Int       @id @default(autoincrement())
+  materialId Int
+  material   Material  @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  positionId Int?
+  position   Position? @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  role       String?
+  userId     Int?
+  user       User?     @relation("MaterialAudienceUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([materialId])
+  @@index([positionId])
+  @@index([userId])
+}
+
+model MaterialFile {
+  id         Int      @id @default(autoincrement())
+  materialId Int
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  // The name it was uploaded with — only shown, and used as the download name.
+  name       String
+  // Where it is stored, relative to the materials folder. Generated by the
+  // server, never taken from the upload.
+  path       String
+  mimeType   String
+  size       Int
+  createdAt  DateTime @default(now())
+
+  @@index([materialId])
+}
+
+// "I've read it", for the material's version at that moment.
+model MaterialRead {
+  id         Int      @id @default(autoincrement())
+  materialId Int
+  material   Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  userId     Int
+  user       User     @relation("MaterialReads", fields: [userId], references: [id], onDelete: Cascade)
+  version    Int
+  readAt     DateTime @default(now())
+
+  @@unique([materialId, userId])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------- telegram
+// A person's Telegram chat with the firm's bot, connected from their profile
+// (routes/telegram.js, services/telegram/). The bot sends them notifications
+// there. One chat per account.
+model TelegramLink {
+  id                Int       @id @default(autoincrement())
+  userId            Int       @unique
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Set when they press Start in the bot; null until then (or after they
+  // disconnect or block the bot).
+  chatId            String?   @unique
+  // Their Telegram @username or first name — shown so they can see which
+  // Telegram is connected.
+  telegramName      String?
+  // SHA-256 of the one-time code in the "connect" link; cleared once used.
+  linkCodeHash      String?   @unique
+  linkCodeExpiresAt DateTime?
+  linkedAt          DateTime?
+  // Which notifications they want, e.g. { "missedCalls": false }. Missing
+  // keys fall back to the defaults in services/telegram/prefs.js.
+  prefs             Json?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+// Notifications already sent, by a key such as "missed:1234" or
+// "digest:17:2026-09-29" — so a restart or an overlapping check never sends
+// the same one twice.
+model TelegramNotice {
+  id     Int      @id @default(autoincrement())
+  key    String   @unique
+  sentAt DateTime @default(now())
+
+  @@index([sentAt])
+}
+
+// ------------------------------------------------------------------- tasks
+// Work the boss (or the developer) gives one person: "call this client back
+// about the documents", "bring the court papers by Friday". Due at a moment
+// in time; the person sees it on their home page and gets Telegram reminders
+// (an hour before, and when it's due), and ticks it done — in the portal or
+// right in Telegram. Rules: src/routes/tasks.js.
+model Task {
+  id          Int       @id @default(autoincrement())
+  title       String
+  notes       String?
+  assigneeId  Int
+  assignee    User      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  createdById Int?
+  createdBy   User?     @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // Optional: the client it's about.
+  clientId    Int?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  dueAt       DateTime
+  doneAt      DateTime?
+  doneById    Int?
+  doneBy      User?     @relation("TaskDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([assigneeId, doneAt, dueAt])
+  @@index([dueAt])
 }
