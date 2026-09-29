@@ -18,10 +18,17 @@ In the backend folder (the one you `git pull` in):
 git pull
 npm install
 npm run backup              # a dated copy of the database first (see Backups)
+pm2 stop all                # half a minute offline: the running server can
+                            # keep the database busy ("database is locked")
 npx prisma migrate deploy   # applies only the new migrations — keeps all data
 npx prisma generate
 pm2 restart all             # or however the server is run
 ```
+
+If `migrate deploy` stops with an error, nothing was applied. Fix the cause
+and run it again, then `npx prisma generate` and `pm2 restart all` — don't
+start the server on the new code before the migration has gone through.
+Phones keep their calls and send them again, so the pause loses nothing.
 
 The startup log should say `database: journal mode wal`, `listening on port
 …`, and where ffmpeg was found (needed to play AMR recordings).
