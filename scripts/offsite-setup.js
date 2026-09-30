@@ -35,6 +35,24 @@ const ask = (question) =>
 
 const password = () => crypto.randomBytes(24).toString("base64url");
 
+// The token rclone authorize prints: either the token JSON itself (older
+// rclone), or — newer rclone — a base64 blob of { client_id, client_secret,
+// token: "<the token JSON>" }. Returns the token (with a refresh_token) or null.
+function parseToken(raw) {
+  const tryJson = (text) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+  const text = String(raw || "").replace(/--->|<---End paste/g, "").trim();
+  let obj = text.includes("{") ? tryJson(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) : null;
+  if (!obj) obj = tryJson(Buffer.from(text.replace(/[^A-Za-z0-9+/=_-]/g, ""), "base64").toString("utf8"));
+  if (obj && typeof obj.token === "string") obj = tryJson(obj.token);
+  return obj && typeof obj.refresh_token === "string" && obj.refresh_token ? obj : null;
+}
+
 async function main() {
   const conf = rcloneConfig();
   if (fs.existsSync(conf) && !process.argv.includes("--force")) {
@@ -57,16 +75,11 @@ async function main() {
   // 2. The token
   console.log("\nOn your own computer (with a browser), run:\n");
   console.log('  rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"\n');
-  console.log("Sign in with the backup Google account and allow access. It prints a line");
-  console.log('starting with {"access_token": ... — copy that whole line and paste it here.\n');
-  const raw = await ask("Token: ");
-  let token;
-  try {
-    token = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
-  } catch {
-    token = null;
-  }
-  if (!token?.refresh_token) {
+  console.log("Sign in with the backup Google account and allow access. It then prints the");
+  console.log("token: a long line (newer rclone: between ---> and <---End paste; older: one");
+  console.log('starting with {"access_token":). Copy it and paste it here — only here, it is a password.\n');
+  const token = parseToken(await ask("Token: "));
+  if (!token) {
     console.log("\nThat doesn't look like the token (it needs a refresh_token). Nothing was saved — run this again.");
     process.exitCode = 1;
     return;
