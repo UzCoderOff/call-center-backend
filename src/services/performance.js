@@ -263,13 +263,18 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     // Client work: they book consultations, did client work this month, or
     // are call center (calls collected, the automatic report alone). A
     // monitored phone with a form to fill in is someone with another job.
-    const clientWork = Boolean(e.calendarAccess === "book" || consulted.length || signed.length || mine.length || bookingsOut.made || (e.collectCalls && mode === "auto"));
+    // The developer can settle it per person (workKind): "office" for
+    // someone whose calls are collected but whose job is the office work.
+    const kind = e.workKind || "auto";
+    const clientActivity = Boolean(consulted.length || signed.length || mine.length || bookingsOut.made);
+    const guessedClient = Boolean(e.calendarAccess === "book" || clientActivity || (e.collectCalls && mode === "auto"));
+    const clientWork = kind === "client" || (kind === "auto" && guessedClient);
     // Office work: they fill in a report form (or sent reports this month
     // without doing client work). A form left on someone switched to the
     // automatic report alone doesn't count.
     const asksForm = mode === "form" || mode === "auto+form";
     const form = e.reportTemplateId && asksForm ? templateById.get(e.reportTemplateId) : null;
-    const officeWork = Boolean(form || (myReports.length && !clientWork));
+    const officeWork = kind === "office" || Boolean(form || (myReports.length && !clientWork));
     const builtinValue = {
       consultations: consulted.length,
       contracts: signed.length,
@@ -290,7 +295,9 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     const metrics = keys.map(measure);
 
     const row = {
-      work: { client: clientWork, office: officeWork },
+      // clientActivity: they did some client work (shown on their page) even
+      // when it isn't what they're measured on.
+      work: { kind, client: clientWork, office: officeWork, clientActivity },
       metrics,
       employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, workDays: e.workDays, holidaysOff: e.holidaysOff },
       workDays: { total: workMine.length, soFar: workMineSoFar.length, away: mineCal.off.filter((o) => o.kind !== "weekly" && o.date >= joined).map((o) => ({ date: o.date, kind: o.kind, name: o.name ?? null })) },

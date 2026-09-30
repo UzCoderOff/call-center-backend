@@ -34,6 +34,7 @@ const EMPLOYEE_SELECT = {
   createdAt: true,
   collectCalls: true,
   calendarAccess: true,
+  workKind: true,
   autoReport: true,
   alsoForm: true,
   reportTemplateId: true,

@@ -132,6 +132,11 @@ model Employee {
   // "book" (also book client appointments into published free time).
   calendarAccess String @default("none")
 
+  // What Natijalar measures them on: "auto" (guessed from their settings
+  // and work) | "client" (calls, bookings, consultations, contracts) |
+  // "office" (their report form's numbers; calls still shown, not the goal).
+  workKind String @default("auto")
+
   calls   CallLog[]
   reports Report[]
   cases   ClientCase[]

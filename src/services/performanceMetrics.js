@@ -111,9 +111,11 @@ async function targetsFor(employees, month, db = prisma) {
 // work, and the questions of their report form (and any form they already
 // have a target from).
 async function catalogFor(employee, db = prisma) {
-  // Same rule as the performance page (services/performance.js).
+  // Same rule as the performance page (services/performance.js), unless the
+  // developer settled it (workKind).
   const autoOnly = employee.autoReport && !employee.alsoForm;
-  const clientWork = employee.calendarAccess === "book" || (employee.collectCalls && autoOnly) || employee.clientWork;
+  const kind = employee.workKind || "auto";
+  const clientWork = kind === "client" || (kind === "auto" && (employee.calendarAccess === "book" || (employee.collectCalls && autoOnly)));
   // Calls only for people whose calls are collected.
   const builtin = (clientWork ? BUILTIN.filter((k) => k !== "calls_answered" || employee.collectCalls) : []).map((key) => ({ key, builtin: true, unit: MONEY.has(key) ? "money" : "count" }));
   const own = await db.target.findMany({ where: { employeeId: employee.id }, select: { metric: true } });

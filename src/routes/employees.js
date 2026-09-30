@@ -40,6 +40,7 @@ function publicEmployee(employee, viewerRole, sync) {
     autoReport: employee.autoReport,
     alsoForm: employee.alsoForm,
     calendarAccess: employee.calendarAccess,
+    workKind: employee.workKind,
     workDays: employee.workDays,
     holidaysOff: employee.holidaysOff,
     reportTemplate: employee.reportTemplate ?? null,
@@ -75,6 +76,7 @@ function optionalId(value, field) {
 }
 
 const CALENDAR_ACCESS = ["none", "view", "book"];
+const WORK_KINDS = ["auto", "client", "office"];
 const { normalizePattern } = require("../services/workdays");
 
 // The job-related settings shared by create and update.
@@ -101,6 +103,11 @@ function workSettings(body) {
   if (body.calendarAccess !== undefined) {
     if (!CALENDAR_ACCESS.includes(body.calendarAccess)) throw badRequest("invalid calendarAccess");
     data.calendarAccess = body.calendarAccess;
+  }
+  // What Natijalar measures them on (see schema: Employee.workKind).
+  if (body.workKind !== undefined) {
+    if (!WORK_KINDS.includes(body.workKind)) throw badRequest("invalid workKind");
+    data.workKind = body.workKind;
   }
   // When they work: weekdays ("123456") and whether holidays are days off.
   if (body.workDays !== undefined) {
@@ -172,6 +179,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         autoReport: settings.autoReport ?? false,
         alsoForm: settings.alsoForm ?? false,
         calendarAccess: settings.calendarAccess ?? "none",
+        workKind: settings.workKind ?? "auto",
         // Without a position: call-center staff (calls collected) work every
         // day, holidays included; everyone else Monday–Saturday.
         workDays: settings.workDays ?? (settings.collectCalls ? "1234567" : "123456"),
