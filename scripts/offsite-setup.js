@@ -33,7 +33,9 @@ const ask = (question) =>
     });
   });
 
-const password = () => crypto.randomBytes(24).toString("base64url");
+// Letters and digits only: a password starting with "-" would be read by
+// rclone as an option.
+const password = () => crypto.randomBytes(24).toString("hex");
 
 // The token rclone authorize prints: either the token JSON itself (older
 // rclone), or — newer rclone — a base64 blob of { client_id, client_secret,
@@ -77,7 +79,7 @@ async function main() {
   console.log('  rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"\n');
   console.log("Sign in with the backup Google account and allow access. It then prints the");
   console.log("token: a long line (newer rclone: between ---> and <---End paste; older: one");
-  console.log('starting with {"access_token":). Copy it and paste it here — only here, it is a password.\n');
+  console.log('starting with {"access_token":). Paste it here and press Enter.\n');
   const token = parseToken(await ask("Token: "));
   if (!token) {
     console.log("\nThat doesn't look like the token (it needs a refresh_token). Nothing was saved — run this again.");
