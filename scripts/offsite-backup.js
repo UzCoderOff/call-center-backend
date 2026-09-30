@@ -51,8 +51,11 @@ async function main() {
     return;
   }
 
-  const steps = await sendOffsite(local, { files: !dbOnly });
-  for (const s of steps) console.log(`offsite ${s.label}: ${s.ok ? "ok" : `FAILED — ${s.error}`}`);
+  // Each step as it happens (uploading recordings can take minutes).
+  const steps = await sendOffsite(local, {
+    files: !dbOnly,
+    onStep: (s) => console.log(s.started ? `offsite ${s.label}: …` : `offsite ${s.label}: ${s.ok ? "ok" : `FAILED — ${s.error}`} (${s.seconds}s)`),
+  });
   const failed = steps.filter((s) => !s.ok);
   const took = Math.round((Date.now() - started) / 1000);
   if (failed.length === 0) {
@@ -69,9 +72,14 @@ async function main() {
   }
 }
 
+// Always ends — an open connection must not keep a nightly job alive.
 main()
   .catch((err) => {
     console.error(err);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(async () => {
+    await prisma.$disconnect().catch(() => {});
+    console.log(process.exitCode ? "done, with problems (see above)" : "done");
+    process.exit(process.exitCode ?? 0);
+  });

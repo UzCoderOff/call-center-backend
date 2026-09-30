@@ -96,18 +96,25 @@ const offsiteConfigured = () => fs.existsSync(rcloneConfig());
 
 // Tonight's copy to Drive: the day's file, this month's file (the latest of
 // the month stays), old dailies pruned; then new recordings and materials.
-// Returns what happened, step by step, for the log and the Telegram note.
-async function sendOffsite(local, { files = true } = {}) {
+// Returns what happened, step by step, for the log and the Telegram note;
+// onStep hears about each one as it starts and ends (for the terminal).
+async function sendOffsite(local, { files = true, onStep = () => {} } = {}) {
   const name = path.basename(local.file); // ledger-YYYY-MM-DD.db
   const month = name.slice(7, 14);
   const steps = [];
   const step = async (label, fn) => {
+    const started = Date.now();
+    onStep({ label, started: true });
+    let result;
     try {
       await fn();
-      steps.push({ label, ok: true });
+      result = { label, ok: true };
     } catch (err) {
-      steps.push({ label, ok: false, error: err.message });
+      result = { label, ok: false, error: err.message };
     }
+    result.seconds = Math.round((Date.now() - started) / 1000);
+    steps.push(result);
+    onStep(result);
   };
   await step("database", () => rclone(["copyto", local.file, `${REMOTE}:daily/${name}`]));
   await step("month", () => rclone(["copyto", local.file, `${REMOTE}:monthly/ledger-${month}.db`]));
