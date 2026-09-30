@@ -44,19 +44,21 @@ async function clientIndex(db, keys) {
   return index;
 }
 
-// A booking made in the calendar belongs to a client: the one with that phone
-// number, or a new one (with a consultation case, so it counts toward the
-// booking operator's monthly target). The case goes to the lawyer whose
-// calendar it is (lawyerId: the calendar's owner), so they see the client.
-// Without a phone number there's nothing reliable to match on, so no client
-// is created.
-async function clientForBooking(db, { name, phone, matter, date, user, lawyerId = null }) {
+// A booking IS a consultation: every appointment belongs to a client and a
+// consultation case. The client is the one given (`clientId`, booking from
+// the client's page), else the one with that phone number, else a new one
+// with a consultation case (so it counts toward the booking operator's
+// monthly target). The case goes to the lawyer whose calendar it is
+// (lawyerId: the calendar's owner), so they see the client. Without a
+// client or a phone number there's nothing reliable to match on, so no
+// client is created.
+async function clientForBooking(db, { name, phone, matter, date, user, lawyerId = null, clientId = null }) {
   const key = phoneKey(phone);
-  if (!key) return null;
+  if (!clientId && !key) return null;
   const operatorId = user.employee?.id ?? null;
   const lawyer = lawyerId ? await lawyerById(lawyerId, db) : null;
   const assigned = lawyer ? { lawyerId: lawyer.id, lawyer: lawyer.name } : {};
-  const [existing] = await clientsByPhoneKeys(db, [key]);
+  const existing = clientId ? { client: { id: clientId } } : (await clientsByPhoneKeys(db, [key]))[0];
   if (existing) {
     // Booked again: an archived client is active again.
     const current = await db.client.findUnique({ where: { id: existing.client.id }, select: { archivedAt: true } });
@@ -71,16 +73,28 @@ async function clientForBooking(db, { name, phone, matter, date, user, lawyerId 
     const open = await db.clientCase.findFirst({
       where: { clientId: existing.client.id, status: { in: cl.OPEN_STATUSES } },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, lawyerId: true },
+      select: { id: true, lawyerId: true, operatorId: true, status: true, consultationDate: true },
     });
     if (!open) {
       await db.clientCase.create({
         data: { clientId: existing.client.id, matter: cl.text(matter, 500), operatorId, startDate: date, consultationDate: date, ...assigned },
       });
-    } else if (!open.lawyerId && lawyer) {
-      // Their open case had no lawyer yet: it's this one's now.
-      await db.clientCase.update({ where: { id: open.id }, data: assigned });
+      return existing.client.id;
     }
+    const data = {};
+    // Their open case had no lawyer yet: it's this one's now.
+    if (!open.lawyerId && lawyer) Object.assign(data, assigned);
+    // Nobody was their operator yet: whoever booked them is now.
+    if (!open.operatorId && operatorId) data.operatorId = operatorId;
+    // "Call again" and now booked in: it's a consultation (and counts as one).
+    if (open.status === "call_again") {
+      data.status = "consultation";
+      if (!open.consultationDate) data.consultationDate = date;
+      await db.clientEvent.create({
+        data: { clientId: existing.client.id, caseId: open.id, kind: "status", text: "call_again>consultation", authorId: user.id },
+      });
+    }
+    if (Object.keys(data).length > 0) await db.clientCase.update({ where: { id: open.id }, data });
     return existing.client.id;
   }
   const client = await db.client.create({

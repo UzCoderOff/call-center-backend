@@ -6,6 +6,7 @@ const m = require("../materials");
 const f = require("./format");
 const { isManagerUser, ownsCalendar, booksAppointments } = require("./prefs");
 const { canSeeFinance } = require("../../lib/finance");
+const { clientScope } = require("../../lib/clientAccess");
 
 // "My day" for one person — the morning message and the bot's "Bugun"
 // button: their appointments, clients to call, missed calls to return,
@@ -46,16 +47,11 @@ async function appointmentLines(user, date, now) {
 async function clientLines(user, date) {
   if (!canSeeClients(user)) return [];
   const end = new Date(firmDayRange(date).to);
-  const base = { archivedAt: null, nextCallAt: { not: null, lte: end } };
-  const where = user.role === "LAWYER" ? { ...base, cases: { some: { lawyerId: user.id } } } : base;
+  // Only the clients this person may see (their own, for staff and lawyers).
+  const where = { AND: [{ archivedAt: null, nextCallAt: { not: null, lte: end } }, clientScope(user)] };
   const total = await prisma.client.count({ where });
   if (total === 0) return [];
-  let line = `📞 Bugun qoʻngʻiroq qilinadigan mijozlar: <b>${total}</b> ta`;
-  if (user.employee && user.role === "EMPLOYEE") {
-    const mine = await prisma.client.count({ where: { ...base, cases: { some: { operatorId: user.employee.id } } } });
-    if (mine > 0 && mine !== total) line += ` (sizniki: ${mine})`;
-  }
-  return [line];
+  return [`📞 Bugun qoʻngʻiroq qilinadigan mijozlar: <b>${total}</b> ta`];
 }
 
 // Missed calls on their own phone that still wait for a call back.

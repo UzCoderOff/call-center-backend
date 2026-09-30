@@ -10,6 +10,7 @@ const importer = require("../services/clientImport");
 const { buildXlsx } = require("../lib/xlsx");
 const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
 const { canSeeFinance, financeForbidden, caseWithoutMoney, visiblePayments, isConsultation, CONSULTATION } = require("../lib/finance");
+const { clientScope, ownCaseWhere, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
 const env = require("../config/env");
 
 // The clients database (replaces the firm's Excel CRM).
@@ -27,7 +28,8 @@ const env = require("../config/env");
 //   POST /api/clients/:id/merge  fold a duplicate into this client (managers)
 //
 // Who: managers, and staff who deal with clients — call-center staff and
-// anyone who books appointments. Archiving, merging, deleting cases/payments,
+// anyone who books appointments — but staff only see THEIR clients: the ones
+// they are the operator of, or added themselves (src/lib/clientAccess.js). Archiving, merging, deleting cases/payments,
 // importing and exporting: managers only — each recorded in the audit log.
 // Lawyers (LAWYER accounts) see only their own clients — those with a case
 // assigned to them — and only their own cases of those; they can move their
@@ -57,10 +59,6 @@ function lawyerGate(req, res, next) {
 function noLawyers(req, res, next) {
   if (isLawyer(req.user)) return res.status(403).json({ error: "forbidden" });
   next();
-}
-// A lawyer's own client: at least one case assigned to them.
-async function isLawyersClient(user, clientId) {
-  return (await prisma.clientCase.count({ where: { clientId, lawyerId: user.id } })) > 0;
 }
 function managersOnly(req, res, next) {
   if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
@@ -184,7 +182,7 @@ clients.use(requireAuth, gate, lawyerGate);
 // (no section: everyone, e.g. when searching). A lawyer: by their own cases.
 const CONTRACT_STATUSES = ["contract", "done"];
 function sectionWhere(section, user) {
-  const own = isLawyer(user) ? { lawyerId: user.id } : {};
+  const own = ownCaseWhere(user);
   if (section === "clients") return { cases: { some: { ...own, status: { in: CONTRACT_STATUSES } } } };
   if (section === "consultations") return { cases: { none: { ...own, status: { in: CONTRACT_STATUSES } } } };
   return null;
@@ -196,7 +194,8 @@ function sectionWhere(section, user) {
 // "archived". A lawyer: only clients with a case of theirs, filtered by those.
 async function listQuery(q, user) {
   const and = [q.filter === "archived" && isManager(user) ? { archivedAt: { not: null } } : { archivedAt: null }];
-  if (isLawyer(user)) and.push({ cases: { some: { lawyerId: user.id } } });
+  // Staff and lawyers: only the clients they may see.
+  if (!isManager(user)) and.push(clientScope(user));
   for (const word of cl.searchable(q.q || "").split(" ").filter(Boolean)) {
     and.push({ searchText: { contains: word } });
   }
@@ -208,7 +207,7 @@ async function listQuery(q, user) {
   if (q.lawyerId) caseWhere.lawyerId = q.lawyerId === "none" ? null : parseId(q.lawyerId, "lawyerId");
   if (q.lawyer) caseWhere.lawyer = String(q.lawyer);
   if (q.filter === "active") caseWhere.status = caseWhere.status || { in: cl.OPEN_STATUSES };
-  if (isLawyer(user) && Object.keys(caseWhere).length > 0) caseWhere.lawyerId = user.id;
+  if (!isManager(user) && Object.keys(caseWhere).length > 0) Object.assign(caseWhere, ownCaseWhere(user));
   if (Object.keys(caseWhere).length > 0) and.push({ cases: { some: caseWhere } });
 
   let orderBy = [{ updatedAt: "desc" }];
@@ -354,8 +353,9 @@ clients.get("/lookup", async (req, res, next) => {
   try {
     const key = phoneKey(String(req.query.phone || ""));
     if (!key) return res.json([]);
-    const rows = await clientsByPhoneKeys(prisma, [key]);
-    res.json(rows.map((r) => r.client));
+    // Someone else's client: only that the number is taken, and by whom.
+    const found = (await clientIndexFor(req.user, [key])).get(key);
+    res.json(found ? [found] : []);
   } catch (err) {
     next(err);
   }
@@ -421,7 +421,7 @@ clients.post("/", async (req, res, next) => {
     const phones = cl.normalizePhones(b.phones || []);
     if (b.force !== true) {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey));
-      if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: clash[0].client });
+      if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: (await clientIndexFor(req.user, [clash[0].phoneKey])).get(clash[0].phoneKey) });
     }
     const firstCase = b.case ? { ...cl.normalizeCase(caseInput(req, b.case), {}, today()), ...((await lawyerFor(b.case.lawyerId, req)) || {}) } : null;
     const operatorId = b.case ? ((await operatorFor(req, b.case.operatorId)) ?? req.user.employee?.id ?? null) : null;
@@ -450,7 +450,7 @@ clients.get("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     const lawyer = isLawyer(req.user);
-    if (lawyer && !(await isLawyersClient(req.user, id))) return res.status(404).json({ error: "not_found" });
+    await requireClientAccess(req.user, id);
     const client = await prisma.client.findUnique({
       where: { id },
       include: {
@@ -503,6 +503,9 @@ clients.get("/:id", async (req, res, next) => {
     ]);
 
     const { linksFrom, linksTo, searchText, extra, ...rest } = client;
+    // Connected clients the viewer may not open show only as "a client".
+    const visibleLinked = await accessibleClientIds(req.user, [...linksFrom.map((l) => l.to.id), ...linksTo.map((l) => l.from.id)]);
+    const shownLink = (other) => (visibleLinked.has(other.id) ? linkedSummary(other) : { id: null, name: null, phone: null, status: null, archived: false, restricted: true });
     // A lawyer sees their own cases (and those cases' history, plus notes
     // about the client), not the rest of the file. Money: only with Moliya.
     const ownCases = lawyer ? client.cases.filter((k) => k.lawyerId === req.user.id) : client.cases;
@@ -517,8 +520,8 @@ clients.get("/:id", async (req, res, next) => {
       links: lawyer
         ? []
         : [
-            ...linksFrom.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "from", other: linkedSummary(l.to) })),
-            ...linksTo.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "to", other: linkedSummary(l.from) })),
+            ...linksFrom.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "from", other: shownLink(l.to) })),
+            ...linksTo.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "to", other: shownLink(l.from) })),
           ],
       calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
       appointments,
@@ -534,12 +537,13 @@ clients.patch("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     await loadClient(id);
+    await requireClientAccess(req.user, id);
     const b = req.body || {};
     const data = clientFields(b);
     const phones = cl.normalizePhones(b.phones);
     if (phones && b.force !== true) {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey), { exceptId: id });
-      if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: clash[0].client });
+      if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: (await clientIndexFor(req.user, [clash[0].phoneKey])).get(clash[0].phoneKey) });
     }
     const client = await prisma.$transaction(async (tx) => {
       const updated = await tx.client.update({ where: { id }, data });
@@ -663,6 +667,7 @@ clients.post("/:id/cases", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
+    await requireClientAccess(req.user, clientId);
     const b = caseInput(req, req.body);
     const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId, req)) || {}) };
     const operatorId = (await operatorFor(req, b.operatorId)) ?? req.user.employee?.id ?? null;
@@ -692,6 +697,7 @@ cases.patch("/:id", async (req, res, next) => {
     const current = await prisma.clientCase.findUnique({ where: { id } });
     if (!current) return res.status(404).json({ error: "not_found" });
     let b = caseInput(req, req.body);
+    if (!isLawyer(req.user)) await requireClientAccess(req.user, current.clientId);
     if (isLawyer(req.user)) {
       if (current.lawyerId !== req.user.id) return res.status(404).json({ error: "not_found" });
       if (Object.keys(b).some((k) => !LAWYER_CASE_FIELDS.includes(k))) return res.status(403).json({ error: "forbidden" });
@@ -741,6 +747,7 @@ clients.post("/:id/payments", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
+    await requireClientAccess(req.user, clientId);
     const b = { ...(req.body || {}) };
     if (!canSeeFinance(req.user)) {
       if (b.kind !== undefined && b.kind !== CONSULTATION) throw financeForbidden();
@@ -784,7 +791,7 @@ clients.post("/:id/notes", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    if (isLawyer(req.user) && !(await isLawyersClient(req.user, clientId))) return res.status(404).json({ error: "not_found" });
+    await requireClientAccess(req.user, clientId);
     const note = cl.text(req.body?.text, 4000);
     if (!note) throw badRequest("text is required");
     const event = await prisma.clientEvent.create({
@@ -821,6 +828,7 @@ clients.post("/:id/links", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     await loadClient(id);
+    await requireClientAccess(req.user, id);
     const b = req.body || {};
     const kind = cl.oneOf(b.kind, cl.LINK_KINDS, "kind");
     if (!kind) throw badRequest("kind is required");
@@ -830,9 +838,14 @@ clients.post("/:id/links", async (req, res, next) => {
     if (b.otherId != null) {
       otherId = parseId(b.otherId, "otherId");
       await loadClient(otherId);
+      await requireClientAccess(req.user, otherId);
     } else if (b.newClient?.name) {
       const phones = cl.normalizePhones(b.newClient.phone ? [b.newClient.phone] : []);
       const [clash] = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey));
+      // The number belongs to someone else's client: say so, don't connect.
+      if (clash && !(await accessibleClientIds(req.user, [clash.client.id])).has(clash.client.id)) {
+        return res.status(409).json({ error: "phone_exists", client: (await clientIndexFor(req.user, [clash.phoneKey])).get(clash.phoneKey) });
+      }
       if (clash) otherId = clash.client.id;
       else {
         const created = await prisma.client.create({
@@ -865,7 +878,11 @@ const links = express.Router();
 links.use(requireAuth, gate, noLawyers);
 links.delete("/:id", async (req, res, next) => {
   try {
-    await prisma.clientLink.delete({ where: { id: parseId(req.params.id) } });
+    const link = await prisma.clientLink.findUnique({ where: { id: parseId(req.params.id) } });
+    if (!link) return res.status(404).json({ error: "not_found" });
+    const mine = await accessibleClientIds(req.user, [link.fromId, link.toId]);
+    if (mine.size === 0) return res.status(404).json({ error: "not_found" });
+    await prisma.clientLink.delete({ where: { id: link.id } });
     res.status(204).end();
   } catch (err) {
     sendError(err, res, next);

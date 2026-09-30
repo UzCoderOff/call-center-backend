@@ -35,7 +35,29 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release: materials, Telegram bot, Moliya, tasks, fee in bookings, security fixes
+### This release: each client only for their own people; a booking is a consultation
+
+- No new migrations — the usual steps above are enough (`npm run backup`,
+  `pm2 stop all`, `npx prisma migrate deploy` says "No pending migrations",
+  `npx prisma generate`, `pm2 restart all`).
+- **Who sees a client** (it was everyone who works with clients): you, the
+  head of the firm, the lawyer on one of its cases, and the employee who is
+  its operator. Whoever added a client sees it until someone else is made
+  its operator. Everyone else doesn't find it in lists or search and can't
+  open it; in calls, "this number already exists" and connections they see
+  only "Boshqa xodimning mijozi (name)", so they know whom to ask.
+- **Calendar**: someone else's booking shows only as "Band" (no name, phone
+  or matter) and can't be opened, changed or cancelled by them.
+- **A booking is a consultation**: booking a "call again" client makes it a
+  consultation; a client with no operator gets whoever booked them. The
+  client page has **"Konsultatsiyaga yozish"**, and after adding a client
+  or a consultation the portal asks (optional) whether to book it too.
+- After deploying, operators will see fewer clients — only their own. If a
+  client is missing for someone, make them its operator: Mijozlar → the
+  client → Ishni tahrirlash → Masʼul operator (or tick several clients in
+  the list → Operator biriktirish).
+
+### Previous release (2026-09-29): materials, Telegram bot, Moliya, tasks, fee in bookings, security fixes
 
 - `npm run backup` first, then `npx prisma migrate deploy` and `npx prisma
   generate` as above. Two migrations, both only adding:

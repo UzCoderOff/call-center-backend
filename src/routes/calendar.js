@@ -6,6 +6,7 @@ const { phoneKey } = require("../lib/phone");
 const { firmNow, isValidDate, isoWeekday, shiftDate, weekStartOf } = require("../lib/firmTime");
 const cal = require("../services/calendar");
 const { clientForBooking } = require("../lib/clientsDb");
+const { accessibleClientIds, requireClientAccess } = require("../lib/clientAccess");
 const { events } = require("../lib/events");
 const fee = require("../services/consultationFee");
 
@@ -63,6 +64,42 @@ async function loadCalendar(req, id, { manage = false } = {}) {
 }
 
 const hasStarted = (a, now) => a.date < now.date || (a.date === now.date && a.start <= now.minutes);
+
+// Staff see the details of bookings they made, or of their own clients;
+// anyone else's booking is only "busy" (who and what stays hidden — the
+// firm's clients are only for their operator, lawyer and the boss).
+function busyOnly(a) {
+  return {
+    id: a.id,
+    calendarId: a.calendarId,
+    date: a.date,
+    start: a.start,
+    end: a.end,
+    status: a.status,
+    masked: true,
+    clientName: null,
+    clientPhone: null,
+    phoneKey: null,
+    matter: null,
+    notes: null,
+    clientId: null,
+    callLogId: null,
+    payments: [],
+    calendar: a.calendar,
+  };
+}
+
+async function shownAppointments(user, list, { manage = false } = {}) {
+  if (manage || isManager(user)) return list;
+  const mine = await accessibleClientIds(user, list.map((a) => a.clientId));
+  return list.map((a) => (a.bookedById === user.id || (a.clientId && mine.has(a.clientId)) ? a : busyOnly(a)));
+}
+
+// May this person open this appointment (its details, act on it)?
+async function mayOpen(user, appointment) {
+  if (isManager(user) || appointment.calendar?.ownerId === user.id || appointment.bookedById === user.id) return true;
+  return Boolean(appointment.clientId) && (await accessibleClientIds(user, [appointment.clientId])).has(appointment.clientId);
+}
 
 // The first free time from now on, looking through the next published
 // weeks — so someone booking a client isn't left on a full or closed day.
@@ -205,7 +242,7 @@ calendars.get("/:id/weeks/:weekStart", async (req, res, next) => {
       status: week?.status || "none",
       publishedAt: week?.publishedAt || null,
       blocks: visible ? blocks : [],
-      appointments: visible ? (manage ? appointments : appointments.filter(cal.isActive)) : [],
+      appointments: visible ? await shownAppointments(req.user, manage ? appointments : appointments.filter(cal.isActive), { manage }) : [],
       free: visible ? cal.freeSlots({ blocks, appointments, slotMinutes: calendar.slotMinutes, now }) : [],
       canManage: manage,
       canBook: (canBook(req.user) || manage) && Boolean(week) && visible,
@@ -305,8 +342,15 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     let feeTaken = null;
     if (b.feeReceived === true) {
       if (isLawyer(req.user)) return res.status(403).json({ error: "forbidden" });
-      if (!phoneKey(clientPhone)) return res.status(400).json({ error: "phone_required_for_fee" });
+      if (!phoneKey(clientPhone) && b.clientId == null) return res.status(400).json({ error: "phone_required_for_fee" });
       feeTaken = fee.normalizeFee(b);
+    }
+
+    // Booked from the client's page: that client (one the booker may see).
+    let clientId = null;
+    if (b.clientId != null) {
+      clientId = parseId(b.clientId, "clientId");
+      await requireClientAccess(req.user, clientId);
     }
 
     let callLogId = null;
@@ -348,18 +392,19 @@ calendars.post("/:id/appointments", async (req, res, next) => {
       });
       // The booking belongs to a client in the clients database — found by
       // phone number, or added (with a consultation case for the booker).
-      const clientId = await clientForBooking(tx, {
+      const bookedFor = await clientForBooking(tx, {
         name: clientName,
         phone: clientPhone,
         matter: appointment.matter,
         date: b.date,
         user: req.user,
         lawyerId: calendar.ownerId,
+        clientId,
       });
-      if (clientId) {
-        await tx.appointment.update({ where: { id: appointment.id }, data: { clientId } });
-        appointment.clientId = clientId;
-        if (feeTaken) appointment.payments = [await fee.recordFee(tx, { appointment, clientId, user: req.user, ...feeTaken })];
+      if (bookedFor) {
+        await tx.appointment.update({ where: { id: appointment.id }, data: { clientId: bookedFor } });
+        appointment.clientId = bookedFor;
+        if (feeTaken) appointment.payments = [await fee.recordFee(tx, { appointment, clientId: bookedFor, user: req.user, ...feeTaken })];
       }
       // A client booked again has clearly been told about the cancelled
       // appointment — take it off the "tell the client" list.
@@ -374,11 +419,10 @@ calendars.post("/:id/appointments", async (req, res, next) => {
 
     if (result.error) return res.status(409).json({ error: result.error });
     events.emit("appointment.booked", { appointmentId: result.appointment.id });
-    // A lawyer learns the client record only if it's one of theirs — not
-    // whether some phone number belongs to one of the firm's clients.
-    if (isLawyer(req.user) && result.appointment.clientId) {
-      const theirs = await prisma.clientCase.count({ where: { clientId: result.appointment.clientId, lawyerId: req.user.id } });
-      if (!theirs) result.appointment.clientId = null;
+    // The client record only if it's one the booker may see — not whether
+    // some phone number belongs to one of the firm's clients.
+    if (result.appointment.clientId && !(await accessibleClientIds(req.user, [result.appointment.clientId])).has(result.appointment.clientId)) {
+      result.appointment.clientId = null;
     }
     res.status(201).json(result.appointment);
   } catch (err) {
@@ -420,7 +464,7 @@ appointments.get("/", async (req, res, next) => {
       orderBy: [{ date: "asc" }, { start: "asc" }],
       take: 20,
     });
-    res.json(rows);
+    res.json((await shownAppointments(req.user, rows)).filter((a) => !a.masked));
   } catch (err) {
     next(err);
   }
@@ -437,6 +481,7 @@ appointments.patch("/:id", async (req, res, next) => {
       include: { calendar: true },
     });
     if (!appointment || (!canView(req.user) && appointment.calendar.ownerId !== req.user.id)) return res.status(404).json({ error: "not_found" });
+    if (!(await mayOpen(req.user, appointment))) return res.status(404).json({ error: "not_found" });
 
     const manage = canManage(req.user, appointment.calendar);
     const isBooker = appointment.bookedById === req.user.id;
@@ -506,8 +551,11 @@ appointments.patch("/:id", async (req, res, next) => {
 appointments.post("/:id/fee", async (req, res, next) => {
   try {
     if (isLawyer(req.user) || (!canBook(req.user) && !isManager(req.user))) return res.status(403).json({ error: "forbidden" });
-    const appointment = await prisma.appointment.findUnique({ where: { id: parseId(req.params.id) }, include: { payments: { where: { kind: "consultation" } } } });
-    if (!appointment) return res.status(404).json({ error: "not_found" });
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: parseId(req.params.id) },
+      include: { payments: { where: { kind: "consultation" } }, calendar: { select: { ownerId: true } } },
+    });
+    if (!appointment || !(await mayOpen(req.user, appointment))) return res.status(404).json({ error: "not_found" });
     if (appointment.status === "cancelled") return res.status(409).json({ error: "cancelled" });
     if (appointment.payments.length > 0) return res.status(409).json({ error: "fee_already_recorded" });
     const taken = fee.normalizeFee(req.body || {});

@@ -4,7 +4,7 @@ const { requireAuth, isManager } = require("../middleware/auth");
 const { resolveRecordingPath } = require("../utils/fileStorage");
 const { resolvePlayableRecording } = require("../utils/audioTranscode");
 const { badRequest, parseMs, parseId } = require("../utils/params");
-const { clientIndex } = require("../lib/clientsDb");
+const { clientIndexFor } = require("../lib/clientAccess");
 const {
   FOLLOW_UP_WINDOW_MS,
   NEEDS_CALLBACK_STATUSES,
@@ -109,7 +109,7 @@ router.get("/", async (req, res, next) => {
     ]);
 
     // The client behind each number, when the number is in the clients database.
-    const clients = await clientIndex(prisma, calls.map((c) => c.phoneKey));
+    const clients = await clientIndexFor(req.user, calls.map((c) => c.phoneKey));
     res.json({
       calls: calls.map((c) => ({ ...c, client: clients.get(c.phoneKey) || null })),
       // Totals for the whole filtered list, not just this page.
@@ -146,7 +146,7 @@ async function loadCallDetail(req, id) {
       })
     : [];
 
-  const clients = await clientIndex(prisma, [call.phoneKey]);
+  const clients = await clientIndexFor(req.user, [call.phoneKey]);
   return { ...call, history, client: clients.get(call.phoneKey) || null };
 }
 
