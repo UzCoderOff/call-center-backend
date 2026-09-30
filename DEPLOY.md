@@ -35,7 +35,76 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release: each client only for their own people; a booking is a consultation
+### This release: detailed Moliya, report money, online consultations, Natijalar, days off, payment schedules, Kassa, backups
+
+- `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
+  generate`, `pm2 restart all` as above. Three migrations, all only adding:
+  - `20260930120000_appointment_format` — whether a consultation is in the
+    office or online (a plain `ADD COLUMN`; every existing one is "office").
+  - `20260930180000_employee_cost` — a new table for what each person costs
+    per month (nothing existing changes).
+  - `20260930200000_work_schedule_and_money` — work patterns on staff and
+    positions (plain `ADD COLUMN`s; call-center staff — calls collected — are
+    set to every day, holidays worked; everyone else Mon–Sat, holidays off),
+    and new tables: holidays, days away, contract payment schedules, cash
+    handovers.
+- **Right after deploying (developer):** open **Dam olish** — Ledger suggests
+  Uzbekistan's fixed holidays; **confirm 1 October** (and the others you
+  agree with; "Bayram emas" for any that aren't). Only confirmed ones count.
+  Add Ramazon / Qurbon hayiti when their dates are announced. Check each
+  person's work pattern in **Xodimlar → the person → Edit** (weekdays, and
+  "Bayramlarda dam oladi").
+- **Dam olish** (new menu item): staff ask for a day off, report sick, or say
+  they worked away from the office; the boss or the developer approves.
+  Approved days (and holidays, for people they apply to) are left out of
+  Natijalar targets, "reports due", the reports-of-the-day list and the 17:30
+  Telegram reminder.
+- **Payment schedules** (Moliya only): on a contract case → "Toʻlov jadvali".
+  Moliya → Qarzlar then splits debt into overdue / next 14 days / later /
+  no schedule, with the overdue list.
+- **Kassa** (Moliya tab): cash staff took (recorded as cash payments) and
+  handed over — "Qabul qildim". Counted from 1 October 2026
+  (`CASH_TRACKING_FROM` in `.env` changes it). Cash the boss or the developer
+  records counts as already in the cash box.
+- **Where clients come from** (Moliya → Umumiy) and **Excel** buttons on Moliya
+  and Natijalar.
+- **Backups to Google Drive:** see "Backups" below — set it up once after this
+  update (`npm run backup:offsite-setup`).
+- **Natijalar** (new menu item): each person's month — calls, consultations
+  they booked and what came of them, consultations and contracts against
+  their position's target (and where they should be by today), conversion,
+  money they brought in and the cash they took, reports and tasks on time,
+  six months back; charts on each person's page. Managers see everyone,
+  staff only themselves (no contract money, no cost).
+- **Monthly cost per person** (Moliya only): on a person's Natijalar page →
+  **Oylik xarajat** — salary + bonuses + taxes as one amount, from a month
+  on (kept until changed; old months keep their figure). Then the page shows
+  the return (money brought in ÷ cost) and cost per consultation/contract.
+- **The consultation fee no longer counts towards the contract**: a client
+  who paid 450 000 for a consultation and signed a 10 000 000 contract owes
+  10 000 000. Debts on the client page, in the list and on Moliya follow.
+- **Moliya** now has tabs — Umumiy, Konsultatsiyalar, Shartnomalar, Qarzlar,
+  Barcha yozuvlar — and shows where every soʻm came from: consultation fees,
+  contract payments (new contracts vs. installments), other payments, and
+  money written in staff reports; expenses and net; by payment method, by
+  person, by day, by lawyer; consultations (came, paid, not paid, online,
+  went on to a contract); debts by how old they are. "Bu raqamlar qanday
+  hisoblanadi?" at the bottom explains each figure.
+- **Money in reports counts only once you mark it.** Right after deploying:
+  **Sozlamalar → Hisobot shakllari →** each form **→** each money question
+  (and money column of a table) **→ "Moliyada"**: *Tushum* (money the firm
+  received), *Xarajat* (money spent), or *Hisoblanmasin* — for money that's
+  also recorded as a client payment in Ledger (the consultation fee), so it
+  isn't counted twice. Until then Moliya lists them as "not marked yet".
+  Marking a question also counts the reports sent before.
+- Booking: **Ofisda / Onlayn**; the calendar shows "Onlayn" and whether the
+  consultation fee is paid ("Toʻlangan" / "Toʻlanmagan") on every booking.
+- A consultation fee recorded on the client's page now belongs to their
+  appointment (the calendar shows it paid). On first start the server ties
+  the fees recorded earlier to the nearest appointment of that client
+  (within 60 days) — the log says how many.
+
+### Previous release (2026-09-30): each client only for their own people; a booking is a consultation
 
 - No new migrations — the usual steps above are enough (`npm run backup`,
   `pm2 stop all`, `npx prisma migrate deploy` says "No pending migrations",
@@ -57,7 +126,7 @@ The startup log should say `database: journal mode wal`, `listening on port
   client → Ishni tahrirlash → Masʼul operator (or tick several clients in
   the list → Operator biriktirish).
 
-### Previous release (2026-09-29): materials, Telegram bot, Moliya, tasks, fee in bookings, security fixes
+### Earlier release (2026-09-29): materials, Telegram bot, Moliya, tasks, fee in bookings, security fixes
 
 - `npm run backup` first, then `npx prisma migrate deploy` and `npx prisma
   generate` as above. Two migrations, both only adding:
@@ -164,31 +233,61 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 ### Backups
 
-`npm run backup` writes `storage/backups/ledger-YYYY-MM-DD.db` — a
-consistent copy even while the server runs — and keeps the last 14. Run it
-every night: `crontab -e` and add (use your folder; `which node` shows node's
-path):
+Every night at 03:00 (Tashkent) the server makes a copy of the database
+(`storage/backups/ledger-YYYY-MM-DD.db`, the last 14 kept) and sends it —
+**encrypted** — to the firm's backup Google account's Drive, with the new
+call recordings and materials. Drive keeps every day for a month and the last
+copy of each month for a year. The developer gets a line on Telegram each
+night: "✅ Zaxira nusxa …" or what went wrong.
+
+**Setting it up (once):**
+
+1. On the server: `sudo apt update && sudo apt install -y rclone`
+2. On your own computer (Windows): `winget install Rclone.Rclone`, open a
+   new terminal, and run
+   `rclone authorize "drive" "eyJzY29wZSI6ImRyaXZlLmZpbGUifQ"`.
+   A browser opens: sign in with the **backup Google account** and allow.
+   The terminal then prints a line starting `{"access_token":` — copy all of
+   it. (This lets the backup see only the files it creates in that account.)
+3. On the server, in the backend folder: `npm run backup:offsite-setup`,
+   paste the line. It tests Drive, **prints two passwords — save them outside
+   the server** (password manager or paper; without them the backups can't
+   be opened, and nobody can recover them), and adds the nightly job to cron.
+4. `npm run backup:offsite` — the first run (uploads all recordings once, so
+   it can take a while).
+
+`npm run backup` alone still makes a local copy (do it before every update,
+as above).
+
+**Getting a backup back:** `npm run backup:restore` lists what's on Drive;
+`npm run backup:restore -- ledger-2026-10-01.db` downloads and checks one into
+`storage/backups/restored/` — it never touches the live database. To use it:
+`pm2 stop all`, `npm run backup` (a copy of the current one first), copy it
+over the database file (the one `DATABASE_URL` points to, usually
+`prisma/dev.db`), delete `dev.db-wal` and `dev.db-shm` next to it if they
+exist, `pm2 restart all`. Don't copy the live database with `cp` while the
+server runs — use `npm run backup`.
+
+**If the server is gone:** on a new machine, install rclone, run the setup's
+step 2 again to get a token, and write `storage/offsite/rclone.conf` with the
+same two passwords (`rclone obscure <password>` for each):
 
 ```
-0 3 * * * cd /path/to/call-center-backend && /usr/bin/node scripts/backup-db.js >> storage/backups/backup.log 2>&1
+[gdrive]
+type = drive
+scope = drive.file
+token = <the line from rclone authorize>
+
+[ledger-backup]
+type = crypt
+remote = gdrive:ledger-backups
+filename_encryption = standard
+directory_name_encryption = true
+password = <obscured password>
+password2 = <obscured password2>
 ```
 
-These copies live on the same server — if its disk dies, they go with it.
-About once a week copy the newest one to your computer (from your computer,
-not inside the SSH session):
-
-```bash
-scp root@82.115.51.61:/path/to/call-center-backend/storage/backups/ledger-2026-10-01.db .
-```
-
-**Restoring** a backup: `pm2 stop all`; copy it over the database file
-(the one `DATABASE_URL` points to, usually `prisma/dev.db`) and delete
-`dev.db-wal` and `dev.db-shm` next to it if they exist; `pm2 start all`.
-Don't copy the live database file with `cp` while the server runs — use
-`npm run backup`.
-
-Recordings (`storage/recordings`) are plain files; copy that folder the same
-way now and then.
+then `npm run backup:restore`.
 
 ## 2. Portal (Vercel)
 

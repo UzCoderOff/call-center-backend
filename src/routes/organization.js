@@ -1,4 +1,5 @@
 const express = require("express");
+const { normalizePattern } = require("../services/workdays");
 const prisma = require("../lib/prisma");
 const { requireAuth, requireRole, MANAGER_ROLES } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
@@ -111,6 +112,14 @@ positions.get("/", async (req, res, next) => {
   }
 });
 
+// Weekdays as digits ("123456"); undefined when not given or not valid.
+function workPattern(value) {
+  if (value === undefined) return undefined;
+  const pattern = normalizePattern(value);
+  if (!pattern) throw badRequest("invalid workDays");
+  return pattern;
+}
+
 positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
     const position = await prisma.position.create({
@@ -121,6 +130,8 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         alsoForm: Boolean(req.body?.alsoForm),
         calendarAccess: calendarAccess(req.body?.calendarAccess) ?? "none",
         reportTemplateId: optionalId(req.body?.reportTemplateId, "reportTemplateId") ?? null,
+        workDays: workPattern(req.body?.workDays) ?? (req.body?.collectCalls ? "1234567" : "123456"),
+        holidaysOff: typeof req.body?.holidaysOff === "boolean" ? req.body.holidaysOff : !req.body?.collectCalls,
         targetConsultations: target(req.body?.targetConsultations, "targetConsultations") ?? null,
         targetContracts: target(req.body?.targetContracts, "targetContracts") ?? null,
       },
@@ -151,6 +162,8 @@ positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
         ...(typeof alsoForm === "boolean" ? { alsoForm } : {}),
         ...(access !== undefined ? { calendarAccess: access } : {}),
         ...(templateId !== undefined ? { reportTemplateId: templateId } : {}),
+        ...(workPattern(req.body?.workDays) ? { workDays: workPattern(req.body.workDays) } : {}),
+        ...(typeof req.body?.holidaysOff === "boolean" ? { holidaysOff: req.body.holidaysOff } : {}),
         ...targets,
       },
       include: POSITION_INCLUDE,

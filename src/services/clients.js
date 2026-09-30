@@ -153,8 +153,12 @@ const COUNTS_AS_CONSULTATION = ["consultation", "contract", "done"];
 const COUNTS_AS_CONTRACT = ["contract", "done"];
 
 // Money for one case: contract amount, paid so far, what's left.
+// Paid towards the contract: every payment on the case except the
+// consultation fee, which pays for the consultation itself (so a client who
+// paid 450 000 for a consultation and then signed a 10 000 000 contract still
+// owes 10 000 000). `payments` need their `kind`.
 function paymentSummary(contractAmount, payments) {
-  const paid = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  const paid = payments.filter((p) => p.kind !== "consultation").reduce((sum, p) => sum + (p.amount || 0), 0);
   // No contract amount: nothing to compare against — no "fully paid" claim.
   if (!contractAmount) return { paid, remaining: 0, state: "none" };
   const remaining = Math.max(0, contractAmount - paid);

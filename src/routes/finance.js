@@ -1,156 +1,196 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
-const { requireAuth, isLawyer } = require("../middleware/auth");
+const { requireAuth, isLawyer, isManager } = require("../middleware/auth");
+const { buildWorkbook } = require("../lib/xlsx");
+const { cashBalances } = require("../services/cash");
+const { financeSheets } = require("../services/financeExport");
 const { badRequest } = require("../utils/params");
-const { firmNow } = require("../lib/firmTime");
+const { firmNow, firmDayRange } = require("../lib/firmTime");
 const { canSeeFinance } = require("../lib/finance");
-const cl = require("../services/clients");
+const { DEFAULT_FEE } = require("../services/consultationFee");
+const { reportMoney } = require("../services/reportMoney");
+const { buildFinance, shiftMonth, monthOf } = require("../services/financeReport");
 
-// The firm's money from clients at a glance — only for the DEVELOPER and
-// accounts with the "Moliya" switch (src/lib/finance.js).
+// The firm's money at a glance — only for the DEVELOPER and accounts with the
+// "Moliya" switch (src/lib/finance.js).
 //
 //   GET /api/finance?month=YYYY-MM
-//     received    payments that month: total, count, by kind and by method
-//     contracted  contracts signed that month: count and total amount
-//     owed        what clients still owe on all contracts, and who owes most
-//     lawyers     per lawyer: signed and received that month, still owed
-//     trend       the last six months: received and contracted
-//     payments    that month's payments, newest first
+//     summary        income (clients + reports), expenses, net, contracted,
+//                    owed — and last month's, to compare
+//     sources        where the money came from: client payments by kind (and
+//                    new contracts vs. earlier ones), report money by
+//                    question/service, by payment method, by person, by day
+//     consultations  that month's appointments: held, paid, not paid, online,
+//                    who came and then signed a contract, per lawyer
+//     contracts      contracts signed that month, paid so far, remaining
+//     owed           what clients still owe, by how old the contract is, and
+//                    who owes most
+//     lawyers        per lawyer: signed, received, owed, consultations
+//     trend          the last six months
+//     payments       that month's client payments; reportEntries: its report money
 //
-// A lawyer with the switch sees the same for their own cases only.
+// How each figure is counted: src/services/financeReport.js. A lawyer with
+// the switch sees the same for their own cases and calendar only, without
+// report money (staff reports aren't theirs).
 const router = express.Router();
 router.use(requireAuth, (req, res, next) => {
   if (!canSeeFinance(req.user)) return res.status(403).json({ error: "finance_forbidden" });
   next();
 });
 
-const monthOf = (date) => date.slice(0, 7);
-function shiftMonth(month, by) {
+const range = (from, to) => ({ gte: `${from}-01`, lte: `${to}-31` });
+// "2026-09" -> "2026-09-30".
+function lastDayOf(month) {
   const [y, m] = month.split("-").map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + by, 1));
-  return d.toISOString().slice(0, 7);
+  return `${month}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
 }
-const range = (month) => ({ gte: `${month}-01`, lte: `${month}-31` });
+
+// Everything the page shows for a month (also what the Excel export holds).
+async function financeData(user, monthParam) {
+  const today = firmNow().date;
+  const current = monthOf(today);
+  const month = monthParam === undefined ? current : String(monthParam);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest("invalid month");
+
+  const lawyer = isLawyer(user);
+  const caseScope = lawyer ? { lawyerId: user.id } : {};
+  const paymentScope = lawyer ? { OR: [{ case: { lawyerId: user.id } }, { appointment: { calendar: { ownerId: user.id } } }] } : {};
+  const firstMonth = shiftMonth(month, -5);
+
+  const [payments, trendPayments, cases, appointments, reports, templates] = await Promise.all([
+    prisma.payment.findMany({
+      where: { date: range(month, month), ...paymentScope },
+      orderBy: [{ date: "desc" }, { id: "desc" }],
+      include: {
+        client: { select: { id: true, name: true, source: true } },
+        case: { select: { id: true, matter: true, lawyer: true, lawyerId: true, contractDate: true } },
+        recordedBy: { select: { username: true, name: true, employee: { select: { name: true } } } },
+        appointment: { select: { format: true, calendar: { select: { ownerId: true } } } },
+      },
+    }),
+    prisma.payment.findMany({
+      where: { date: range(firstMonth, month), ...paymentScope },
+      select: { date: true, amount: true, kind: true },
+    }),
+    prisma.clientCase.findMany({
+      where: { contractAmount: { gt: 0 }, ...caseScope },
+      select: {
+        id: true,
+        contractAmount: true,
+        contractDate: true,
+        lawyer: true,
+        lawyerId: true,
+        matter: true,
+        client: { select: { id: true, name: true, archivedAt: true, source: true } },
+        payments: { select: { amount: true, date: true, kind: true } },
+        installments: { select: { id: true, dueDate: true, amount: true, note: true } },
+      },
+    }),
+    prisma.appointment.findMany({
+      where: { date: range(month, month), ...(lawyer ? { calendar: { ownerId: user.id } } : {}) },
+      select: {
+        id: true,
+        date: true,
+        start: true,
+        status: true,
+        format: true,
+        clientId: true,
+        clientName: true,
+        calendar: { select: { name: true, ownerId: true } },
+        payments: { where: { kind: "consultation" }, select: { amount: true } },
+      },
+    }),
+    // Report money: not in a lawyer's view.
+    lawyer
+      ? []
+      : prisma.report.findMany({
+          where: { date: range(firstMonth, month) },
+          select: { id: true, date: true, templateId: true, employeeId: true, fields: true, answers: true, employee: { select: { name: true } }, template: { select: { name: true } } },
+        }),
+    lawyer ? [] : prisma.reportTemplate.findMany({ select: { id: true, name: true, fields: true } }),
+  ]);
+
+  // Where clients come from (Client.source): new clients and this month's
+  // consultations by source — the firm's view only.
+  const [newClients, consultCases] = lawyer
+    ? [[], []]
+    : await Promise.all([
+        prisma.client.findMany({
+          where: { createdAt: { gte: new Date(firmDayRange(`${month}-01`).from), lte: new Date(firmDayRange(lastDayOf(month)).to) } },
+          select: { source: true },
+        }),
+        prisma.clientCase.findMany({ where: { consultationDate: range(month, month) }, select: { client: { select: { source: true } } } }),
+      ]);
+
+  // Who came to a consultation this month and signed a contract after.
+  const attendedIds = [...new Set(appointments.filter((a) => a.status === "attended" && a.clientId).map((a) => a.clientId))];
+  const signed = attendedIds.length
+    ? await prisma.clientCase.findMany({ where: { clientId: { in: attendedIds }, contractDate: { not: null } }, select: { clientId: true, contractDate: true } })
+    : [];
+  const contractDates = new Map();
+  for (const k of signed) contractDates.set(k.clientId, [...(contractDates.get(k.clientId) || []), k.contractDate]);
+
+  // Lawyers' names (cases and calendars point at their accounts).
+  const lawyerIds = [...new Set([...cases.map((k) => k.lawyerId), ...payments.map((p) => p.case?.lawyerId), ...appointments.map((a) => a.calendar.ownerId)].filter(Boolean))];
+  const users = lawyerIds.length ? await prisma.user.findMany({ where: { id: { in: lawyerIds } }, select: { id: true, name: true, username: true } }) : [];
+  const names = new Map(users.map((u) => [u.id, u.name || u.username]));
+
+  const monthReports = reports.filter((r) => monthOf(r.date) === month);
+  const data = buildFinance({
+    month,
+    today,
+    fee: DEFAULT_FEE,
+    payments: payments.map((p) => ({
+      id: p.id,
+      date: p.date,
+      amount: p.amount,
+      kind: p.kind,
+      method: p.method,
+      note: p.note,
+      client: p.client,
+      case: p.case,
+      recordedBy: p.recordedBy ? p.recordedBy.employee?.name || p.recordedBy.name || p.recordedBy.username : null,
+      appointment: p.appointment ? { format: p.appointment.format, ownerId: p.appointment.calendar?.ownerId ?? null } : null,
+    })),
+    trendPayments,
+    cases,
+    appointments: appointments.map((a) => ({
+      id: a.id,
+      date: a.date,
+      start: a.start,
+      status: a.status,
+      format: a.format,
+      clientId: a.clientId,
+      clientName: a.clientName,
+      ownerId: a.calendar.ownerId,
+      calendarName: a.calendar.name,
+      paid: a.payments.length ? { amount: a.payments.reduce((s, p) => s + p.amount, 0) } : null,
+    })),
+    contractDates,
+    report: lawyer ? null : reportMoney(monthReports, templates),
+    reportTrend: lawyer ? [] : reportMoney(reports, templates).entries,
+    names,
+    channels: lawyer ? null : { newClients: newClients.map((c) => c.source), consultations: consultCases.map((k) => k.client.source) },
+  });
+
+  return { month, current, today, scope: lawyer ? "lawyer" : "firm", ...data };
+}
 
 router.get("/", async (req, res, next) => {
   try {
-    const current = monthOf(firmNow().date);
-    const month = req.query.month === undefined ? current : String(req.query.month);
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest("invalid month");
+    res.json(await financeData(req.user, req.query.month));
+  } catch (err) {
+    next(err);
+  }
+});
 
-    // A lawyer: their own cases (and payments on them) only.
-    const caseScope = isLawyer(req.user) ? { lawyerId: req.user.id } : {};
-    const paymentScope = isLawyer(req.user) ? { case: { lawyerId: req.user.id } } : {};
-    const firstMonth = shiftMonth(month, -5);
-
-    const [payments, trendPayments, cases] = await Promise.all([
-      prisma.payment.findMany({
-        where: { date: range(month), ...paymentScope },
-        orderBy: [{ date: "desc" }, { id: "desc" }],
-        include: {
-          client: { select: { id: true, name: true } },
-          case: { select: { id: true, matter: true, lawyer: true } },
-          recordedBy: { select: { username: true, name: true, employee: { select: { name: true } } } },
-        },
-      }),
-      prisma.payment.findMany({
-        where: { date: { gte: `${firstMonth}-01`, lte: `${month}-31` }, ...paymentScope },
-        select: { date: true, amount: true },
-      }),
-      prisma.clientCase.findMany({
-        where: { contractAmount: { gt: 0 }, ...caseScope },
-        select: {
-          id: true,
-          contractAmount: true,
-          contractDate: true,
-          lawyer: true,
-          matter: true,
-          client: { select: { id: true, name: true, archivedAt: true } },
-          payments: { select: { amount: true, date: true } },
-        },
-      }),
-    ]);
-
-    // Received this month.
-    const byKind = {};
-    const byMethod = {};
-    let received = 0;
-    for (const p of payments) {
-      received += p.amount;
-      byKind[p.kind || "other"] = (byKind[p.kind || "other"] || 0) + p.amount;
-      byMethod[p.method || "none"] = (byMethod[p.method || "none"] || 0) + p.amount;
-    }
-
-    // Contracts signed this month, what's owed, and per lawyer.
-    const lawyers = new Map();
-    const lawyerRow = (name) => {
-      const key = name || "";
-      if (!lawyers.has(key)) lawyers.set(key, { lawyer: name || null, contracts: 0, contracted: 0, received: 0, owed: 0 });
-      return lawyers.get(key);
-    };
-    const owedBy = new Map();
-    let contracted = 0;
-    let contractCount = 0;
-    let owed = 0;
-    for (const k of cases) {
-      const row = lawyerRow(k.lawyer);
-      if (k.contractDate && monthOf(k.contractDate) === month) {
-        contracted += k.contractAmount;
-        contractCount += 1;
-        row.contracts += 1;
-        row.contracted += k.contractAmount;
-      }
-      const { remaining } = cl.paymentSummary(k.contractAmount, k.payments);
-      if (remaining > 0) {
-        owed += remaining;
-        row.owed += remaining;
-        const c = owedBy.get(k.client.id) || { client: { id: k.client.id, name: k.client.name, archived: Boolean(k.client.archivedAt) }, owed: 0, lawyers: new Set() };
-        c.owed += remaining;
-        if (k.lawyer) c.lawyers.add(k.lawyer);
-        owedBy.set(k.client.id, c);
-      }
-    }
-    for (const p of payments) if (p.case) lawyerRow(p.case.lawyer).received += p.amount;
-
-    const trend = [];
-    for (let i = 0; i < 6; i++) trend.push({ month: shiftMonth(firstMonth, i), received: 0, contracted: 0 });
-    for (const p of trendPayments) {
-      const t = trend.find((x) => x.month === monthOf(p.date));
-      if (t) t.received += p.amount;
-    }
-    for (const k of cases) {
-      const t = k.contractDate && trend.find((x) => x.month === monthOf(k.contractDate));
-      if (t) t.contracted += k.contractAmount;
-    }
-
-    res.json({
-      month,
-      current,
-      received: { total: received, count: payments.length, byKind, byMethod },
-      contracted: { total: contracted, count: contractCount },
-      owed: {
-        total: owed,
-        clients: owedBy.size,
-        top: [...owedBy.values()]
-          .sort((a, b) => b.owed - a.owed)
-          .slice(0, 20)
-          .map((c) => ({ ...c, lawyers: [...c.lawyers] })),
-      },
-      lawyers: [...lawyers.values()].filter((r) => r.contracted || r.received || r.owed).sort((a, b) => b.contracted + b.received - (a.contracted + a.received) || b.owed - a.owed),
-      trend,
-      payments: payments.slice(0, 200).map((p) => ({
-        id: p.id,
-        date: p.date,
-        amount: p.amount,
-        kind: p.kind,
-        method: p.method,
-        note: p.note,
-        client: p.client,
-        matter: p.case?.matter ?? null,
-        lawyer: p.case?.lawyer ?? null,
-        recordedBy: p.recordedBy ? p.recordedBy.employee?.name || p.recordedBy.name || p.recordedBy.username : null,
-      })),
-    });
+router.get("/export", async (req, res, next) => {
+  try {
+    const data = await financeData(req.user, req.query.month);
+    const cash = isManager(req.user) ? await cashBalances() : null;
+    const file = buildWorkbook(financeSheets(data, cash));
+    res.set("Content-Disposition", `attachment; filename="moliya-${data.month}.xlsx"`);
+    res.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(file);
   } catch (err) {
     next(err);
   }

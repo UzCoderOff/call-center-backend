@@ -38,7 +38,7 @@ async function appointmentLines(user, date, now) {
   return [
     `🗓 <b>Uchrashuvlar (${upcoming.length})</b>`,
     ...upcoming.map((a) => {
-      const bits = [f.escapeHtml(a.clientName), a.matter ? f.escapeHtml(a.matter) : null, showCalendar ? f.escapeHtml(a.calendar.name) : null].filter(Boolean);
+      const bits = [f.escapeHtml(a.clientName), a.format === "online" ? "onlayn" : null, a.matter ? f.escapeHtml(a.matter) : null, showCalendar ? f.escapeHtml(a.calendar.name) : null].filter(Boolean);
       return `${f.clock(a.start)} — ${bits.join(" · ")}`;
     }),
   ];

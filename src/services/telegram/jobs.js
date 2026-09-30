@@ -1,4 +1,5 @@
 const prisma = require("../../lib/prisma");
+const { worksOn } = require("../workdays");
 const env = require("../../config/env");
 const { firmNow, shiftDate, isoWeekday, weekStartOf } = require("../../lib/firmTime");
 const f = require("./format");
@@ -77,13 +78,16 @@ async function digests(now) {
 
 // 17:30 (until 21:00): the daily report form hasn't been sent yet.
 async function reportReminders(now) {
-  if (!WORK_DAYS.includes(isoWeekday(now.date)) || now.minutes < at(17, 30) || now.minutes >= at(21)) return;
+  // Each person on their own working days (checked below), not just Mon–Sat.
+  if (now.minutes < at(17, 30) || now.minutes >= at(21)) return;
   // Everyone asked to fill in a form: form only, or automatic + form.
   const people = await linkedUsers({
     employee: { is: { active: true, reportTemplateId: { not: null }, OR: [{ autoReport: false }, { alsoForm: true }] } },
   });
   for (const user of people) {
     if (!wants(user, "reportReminder")) continue;
+    // Not on their day off, a holiday off for them, or a day away.
+    if (!(await worksOn(user.employee, now.date))) continue;
     const template = await prisma.reportTemplate.findUnique({ where: { id: user.employee.reportTemplateId } });
     if (!template?.active) continue;
     const sent = await prisma.report.findUnique({

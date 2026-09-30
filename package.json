@@ -14,7 +14,10 @@
     "seed:demo": "node prisma/seed-demo.js",
     "followups:rebuild": "node scripts/rebuild-follow-ups.js",
     "test": "node --test \"test/*.test.js\"",
-    "backup": "node scripts/backup-db.js"
+    "backup": "node scripts/backup-db.js",
+    "backup:offsite": "node scripts/offsite-backup.js",
+    "backup:offsite-setup": "node scripts/offsite-setup.js",
+    "backup:restore": "node scripts/offsite-restore.js"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

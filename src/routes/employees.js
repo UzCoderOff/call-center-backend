@@ -40,6 +40,8 @@ function publicEmployee(employee, viewerRole, sync) {
     autoReport: employee.autoReport,
     alsoForm: employee.alsoForm,
     calendarAccess: employee.calendarAccess,
+    workDays: employee.workDays,
+    holidaysOff: employee.holidaysOff,
     reportTemplate: employee.reportTemplate ?? null,
     createdAt: employee.createdAt,
   };
@@ -73,6 +75,7 @@ function optionalId(value, field) {
 }
 
 const CALENDAR_ACCESS = ["none", "view", "book"];
+const { normalizePattern } = require("../services/workdays");
 
 // The job-related settings shared by create and update.
 function workSettings(body) {
@@ -98,6 +101,16 @@ function workSettings(body) {
   if (body.calendarAccess !== undefined) {
     if (!CALENDAR_ACCESS.includes(body.calendarAccess)) throw badRequest("invalid calendarAccess");
     data.calendarAccess = body.calendarAccess;
+  }
+  // When they work: weekdays ("123456") and whether holidays are days off.
+  if (body.workDays !== undefined) {
+    const pattern = normalizePattern(body.workDays);
+    if (!pattern) throw badRequest("invalid workDays");
+    data.workDays = pattern;
+  }
+  if (body.holidaysOff !== undefined) {
+    if (typeof body.holidaysOff !== "boolean") throw badRequest("holidaysOff must be true or false");
+    data.holidaysOff = body.holidaysOff;
   }
   return data;
 }
@@ -134,6 +147,8 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       if (settings.alsoForm === undefined) settings.alsoForm = position.alsoForm;
       if (settings.calendarAccess === undefined) settings.calendarAccess = position.calendarAccess;
       if (settings.reportTemplateId === undefined) settings.reportTemplateId = position.reportTemplateId;
+      if (settings.workDays === undefined) settings.workDays = position.workDays;
+      if (settings.holidaysOff === undefined) settings.holidaysOff = position.holidaysOff;
     }
 
     const existingUsername = await prisma.user.findUnique({ where: { username } });
@@ -157,6 +172,10 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         autoReport: settings.autoReport ?? false,
         alsoForm: settings.alsoForm ?? false,
         calendarAccess: settings.calendarAccess ?? "none",
+        // Without a position: call-center staff (calls collected) work every
+        // day, holidays included; everyone else Monday–Saturday.
+        workDays: settings.workDays ?? (settings.collectCalls ? "1234567" : "123456"),
+        holidaysOff: settings.holidaysOff ?? !settings.collectCalls,
         office: connect(settings.officeId),
         position: connect(settings.positionId),
         reportTemplate: connect(settings.reportTemplateId),

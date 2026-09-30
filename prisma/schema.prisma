@@ -57,12 +57,18 @@ model User {
 
   // The lawyer's appointment calendar, for a BOSS account that has one.
   calendar           Calendar?
-  bookedAppointments Appointment[] @relation("AppointmentBookedBy")
-  clientsCreated     Client[]      @relation("ClientCreatedBy")
-  paymentsRecorded   Payment[]     @relation("PaymentRecordedBy")
-  clientEvents       ClientEvent[] @relation("ClientEventAuthor")
-  auditLogs          AuditLog[]    @relation("AuditUser")
-  lawyerCases        ClientCase[]  @relation("CaseLawyer")
+  bookedAppointments Appointment[]  @relation("AppointmentBookedBy")
+  clientsCreated     Client[]       @relation("ClientCreatedBy")
+  paymentsRecorded   Payment[]      @relation("PaymentRecordedBy")
+  employeeCostsSet   EmployeeCost[] @relation("EmployeeCostSetBy")
+  holidaysConfirmed  Holiday[]      @relation("HolidayConfirmedBy")
+  absencesRequested  Absence[]      @relation("AbsenceRequestedBy")
+  absencesDecided    Absence[]      @relation("AbsenceDecidedBy")
+  cashHandedOver     CashHandover[] @relation("CashHandoverBy")
+  cashReceived       CashHandover[] @relation("CashHandoverReceivedBy")
+  clientEvents       ClientEvent[]  @relation("ClientEventAuthor")
+  auditLogs          AuditLog[]     @relation("AuditUser")
+  lawyerCases        ClientCase[]   @relation("CaseLawyer")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -128,6 +134,7 @@ model Employee {
   calls   CallLog[]
   reports Report[]
   cases   ClientCase[]
+  costs   EmployeeCost[]
 
   // Flexible metadata escape hatch — see schema-level note above.
   customFields Json?
@@ -144,6 +151,14 @@ model Employee {
   // automatic + form.
   autoReport Boolean @default(false)
   alsoForm   Boolean @default(false)
+
+  // When they work (src/services/workdays.js): the ISO weekdays as digits
+  // ("123456" = Monday–Saturday; call-center staff, who work from their own
+  // phone, "1234567"), and whether public holidays are days off for them.
+  // Their approved days off (Absence) come on top.
+  workDays    String    @default("123456")
+  holidaysOff Boolean   @default(true)
+  absences    Absence[]
 }
 
 // A physical location — e.g. the office by the court, the translation office.
@@ -178,6 +193,9 @@ model Position {
   // with alsoForm, the report form is asked as well).
   autoReport          Boolean            @default(false)
   alsoForm            Boolean            @default(false)
+  // Preset work pattern for new staff (see Employee.workDays).
+  workDays            String             @default("123456")
+  holidaysOff         Boolean            @default(true)
   // Materials meant for everyone in this position.
   materials           MaterialAudience[]
 }
@@ -446,6 +464,9 @@ model Appointment {
   phoneKey       String?
   matter         String? // what it's about
   notes          String?
+  // Where the consultation happens: "office" (the client comes in) or
+  // "online" (a video/phone call).
+  format         String    @default("office")
   status         String    @default("booked") // "booked" | "attended" | "no_show" | "cancelled"
   bookedById     Int
   bookedBy       User      @relation("AppointmentBookedBy", fields: [bookedById], references: [id])
@@ -525,9 +546,9 @@ model ClientPhone {
 // again, contract, done, declined) — and, once there's a contract,
 // `legalStage` — where the case stands (inquiry … Supreme Court review).
 model ClientCase {
-  id               Int           @id @default(autoincrement())
+  id               Int               @id @default(autoincrement())
   clientId         Int
-  client           Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client           Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
   matter           String?
   number           String?
   // The lawyer by name, as shown and exported. Kept in step with lawyerId
@@ -535,8 +556,8 @@ model ClientCase {
   lawyer           String?
   // The operator responsible — their monthly targets count this case.
   operatorId       Int?
-  operator         Employee?     @relation(fields: [operatorId], references: [id], onDelete: SetNull)
-  status           String        @default("consultation")
+  operator         Employee?         @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  status           String            @default("consultation")
   legalStage       String?
   // "YYYY-MM-DD". consultationDate/contractDate are set when the status first
   // reaches them — the monthly targets count by these.
@@ -545,9 +566,10 @@ model ClientCase {
   contractDate     String?
   contractAmount   Int?
   payments         Payment[]
+  installments     CaseInstallment[]
   events           ClientEvent[]
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   // The lawyer account the case is assigned to. A LAWYER account sees
   // exactly the clients with a case assigned to them.
@@ -784,4 +806,98 @@ model Task {
 
   @@index([assigneeId, doneAt, dueAt])
   @@index([dueAt])
+}
+
+// What a person costs the firm per month — salary, bonuses, taxes, as one
+// figure — from `fromMonth` until the next entry (set once, it holds until
+// changed; an old month keeps the figure it had). Money: only for people with
+// Moliya (src/lib/finance.js). The performance page compares it with what the
+// person brought in (services/performance.js).
+model EmployeeCost {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  fromMonth  String // "YYYY-MM"
+  amount     Int
+  note       String?
+  setById    Int?
+  setBy      User?    @relation("EmployeeCostSetBy", fields: [setById], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@unique([employeeId, fromMonth])
+}
+
+// A public holiday (Uzbekistan). The fixed-date ones are suggested by Ledger
+// (src/services/workdays.js) and count only once the developer confirms them;
+// the movable ones (Ramazon and Qurbon hayiti) and extra days off the
+// government announces are added by hand. status: "suggested" | "confirmed" |
+// "rejected" (a suggestion the developer said isn't a day off — not suggested
+// again).
+model Holiday {
+  id            Int       @id @default(autoincrement())
+  date          String    @unique // "YYYY-MM-DD"
+  name          String
+  status        String    @default("suggested")
+  confirmedById Int?
+  confirmedBy   User?     @relation("HolidayConfirmedBy", fields: [confirmedById], references: [id], onDelete: SetNull)
+  confirmedAt   DateTime?
+  createdAt     DateTime  @default(now())
+}
+
+// A person's days away: kind "day_off" | "sick" | "vacation" — not a working
+// day — or "remote": worked, but not at the office (a working day). Staff ask
+// (status "pending"); the boss or the developer approves. Only approved ones
+// count.
+model Absence {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  from          String // "YYYY-MM-DD"
+  to            String // inclusive
+  kind          String
+  note          String?
+  status        String    @default("pending")
+  requestedById Int?
+  requestedBy   User?     @relation("AbsenceRequestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  decidedById   Int?
+  decidedBy     User?     @relation("AbsenceDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([employeeId, from])
+  @@index([status])
+}
+
+// A contract's payment schedule: what's due when. Payments towards the
+// contract are applied to the installments in date order (src/services/
+// installments.js) — so each one is paid, part-paid, due or overdue. Money:
+// Moliya only.
+model CaseInstallment {
+  id        Int        @id @default(autoincrement())
+  caseId    Int
+  case      ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  dueDate   String // "YYYY-MM-DD"
+  amount    Int
+  note      String?
+  createdAt DateTime   @default(now())
+
+  @@index([caseId])
+  @@index([dueDate])
+}
+
+// Cash someone took from clients and handed over (to the boss / the firm's
+// cash box). What they hold = the cash payments they recorded − what they
+// handed over (src/services/cash.js).
+model CashHandover {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation("CashHandoverBy", fields: [userId], references: [id], onDelete: Cascade)
+  amount       Int
+  date         String // "YYYY-MM-DD"
+  note         String?
+  receivedById Int?
+  receivedBy   User?    @relation("CashHandoverReceivedBy", fields: [receivedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+
+  @@index([userId, date])
 }

@@ -20,6 +20,9 @@ const materialRoutes = require("./routes/materials");
 const telegramRoutes = require("./routes/telegram");
 const financeRoutes = require("./routes/finance");
 const taskRoutes = require("./routes/tasks");
+const performanceRoutes = require("./routes/performance");
+const daysOffRoutes = require("./routes/daysOff");
+const cashRoutes = require("./routes/cash");
 
 const app = express();
 
@@ -111,6 +114,10 @@ app.use("/api/materials", materialRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/performance", performanceRoutes);
+app.use("/api/holidays", daysOffRoutes.holidays);
+app.use("/api/absences", daysOffRoutes.absences);
+app.use("/api/cash", cashRoutes);
 
 // Android app: sign-in with a portal account, device-token session refresh,
 // "collect calls?" config. Authenticated by device token, not the cookie.

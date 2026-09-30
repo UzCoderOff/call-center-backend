@@ -11,6 +11,8 @@ const { buildXlsx } = require("../lib/xlsx");
 const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
 const { canSeeFinance, financeForbidden, caseWithoutMoney, visiblePayments, isConsultation, CONSULTATION } = require("../lib/finance");
 const { clientScope, ownCaseWhere, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
+const { linkConsultationFees } = require("../services/consultationFee");
+const { scheduleOf, normalizeSchedule } = require("../services/installments");
 const env = require("../config/env");
 
 // The clients database (replaces the firm's Excel CRM).
@@ -167,9 +169,15 @@ function audit(db, req, action, entity, entityId, detail) {
   return db.auditLog.create({ data: { userId: req.user.id, action, entity, entityId, detail } });
 }
 
-// Case numbers with the payment summary the portal shows.
+// Case numbers with the payment summary the portal shows — and, when the
+// contract has a payment schedule, where each installment stands.
 function withMoney(c) {
-  return { ...c, ...cl.paymentSummary(c.contractAmount, c.payments || []) };
+  const out = { ...c, ...cl.paymentSummary(c.contractAmount, c.payments || []) };
+  if (Array.isArray(c.installments)) {
+    const { installments, ...rest } = out;
+    return { ...rest, schedule: scheduleOf(installments, c.payments || [], today()) };
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ list
@@ -262,7 +270,7 @@ clients.get("/", async (req, res, next) => {
               lawyerId: true,
               contractAmount: money,
               operator: { select: { id: true, name: true } },
-              ...(money ? { payments: { select: { amount: true } } } : {}),
+              ...(money ? { payments: { select: { amount: true, kind: true } } } : {}),
             },
           },
         },
@@ -289,7 +297,7 @@ clients.get("/", async (req, res, next) => {
 async function clientIdsWithDebt(lawyerId = null) {
   const cases = await prisma.clientCase.findMany({
     where: { contractAmount: { gt: 0 }, ...(lawyerId ? { lawyerId } : {}) },
-    select: { clientId: true, contractAmount: true, payments: { select: { amount: true } } },
+    select: { clientId: true, contractAmount: true, payments: { select: { amount: true, kind: true } } },
   });
   return [...new Set(cases.filter((k) => cl.paymentSummary(k.contractAmount, k.payments).remaining > 0).map((k) => k.clientId))];
 }
@@ -317,7 +325,7 @@ clients.get("/export", managersOnly, async (req, res, next) => {
       orderBy: { name: "asc" },
       include: {
         phones: { orderBy: { id: "asc" } },
-        cases: { orderBy: { createdAt: "asc" }, include: { operator: { select: { name: true } }, payments: { select: { amount: true } } } },
+        cases: { orderBy: { createdAt: "asc" }, include: { operator: { select: { name: true } }, payments: { select: { amount: true, kind: true } } } },
       },
     });
     // "2026-09-28 14:30" in the firm's time, whatever the server's clock.
@@ -458,7 +466,7 @@ clients.get("/:id", async (req, res, next) => {
         createdBy: PERSON,
         cases: {
           orderBy: { createdAt: "desc" },
-          include: { operator: { select: { id: true, name: true } }, payments: { orderBy: { date: "desc" } } },
+          include: { operator: { select: { id: true, name: true } }, payments: { orderBy: { date: "desc" } }, installments: true },
         },
         payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
         events: { orderBy: { createdAt: "desc" }, take: 300, include: { author: PERSON } },
@@ -724,6 +732,29 @@ cases.patch("/:id", async (req, res, next) => {
   }
 });
 
+// The contract's payment schedule, replaced as a whole: { items: [{ dueDate,
+// amount, note? }] } ([] removes it). Contract money — Moliya only.
+cases.put("/:id/installments", async (req, res, next) => {
+  try {
+    if (!canSeeFinance(req.user)) throw financeForbidden();
+    const id = parseId(req.params.id);
+    const current = await prisma.clientCase.findUnique({ where: { id }, select: { id: true, clientId: true, lawyerId: true } });
+    if (!current) return res.status(404).json({ error: "not_found" });
+    if (isLawyer(req.user) ? current.lawyerId !== req.user.id : false) return res.status(404).json({ error: "not_found" });
+    if (!isLawyer(req.user)) await requireClientAccess(req.user, current.clientId);
+    const items = normalizeSchedule(req.body?.items);
+    await prisma.$transaction([
+      prisma.caseInstallment.deleteMany({ where: { caseId: id } }),
+      ...(items.length ? [prisma.caseInstallment.createMany({ data: items.map((i) => ({ ...i, caseId: id })) })] : []),
+      prisma.clientEvent.create({ data: { clientId: current.clientId, caseId: id, kind: "note", text: items.length ? `Toʻlov jadvali: ${items.length} ta toʻlov` : "Toʻlov jadvali olib tashlandi", authorId: req.user.id } }),
+    ]);
+    const k = await prisma.clientCase.findUnique({ where: { id }, include: { operator: { select: { id: true, name: true } }, payments: { orderBy: { date: "desc" } }, installments: true } });
+    res.json(withMoney(k));
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
 cases.delete("/:id", managersOnly, async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -760,8 +791,13 @@ clients.post("/:id/payments", async (req, res, next) => {
       if (!k) throw badRequest("case is not this client's");
       caseId = k.id;
     }
-    const payment = await prisma.payment.create({ data: { ...data, clientId, caseId, recordedById: req.user.id } });
+    let payment = await prisma.payment.create({ data: { ...data, clientId, caseId, recordedById: req.user.id } });
     await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+    // A consultation fee: tie it to the client's appointment, so the
+    // calendar shows it as paid.
+    if (isConsultation(payment) && (await linkConsultationFees(prisma, clientId)) > 0) {
+      payment = await prisma.payment.findUnique({ where: { id: payment.id } });
+    }
     res.status(201).json(payment);
   } catch (err) {
     sendError(err, res, next);

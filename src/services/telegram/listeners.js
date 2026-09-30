@@ -28,6 +28,7 @@ async function onBooked({ appointmentId }) {
     "🗓 <b>Yangi uchrashuv</b>",
     `<b>${when(a, today)}</b>`,
     `Mijoz: ${f.escapeHtml(a.clientName)}`,
+    a.format === "online" ? "💻 Onlayn konsultatsiya" : null,
     a.matter ? `Masala: ${f.escapeHtml(a.matter)}` : null,
     `Yozdi: ${f.escapeHtml(f.personName(a.bookedBy))}`,
     f.portalLink("/calendar", "Kalendarni ochish"),

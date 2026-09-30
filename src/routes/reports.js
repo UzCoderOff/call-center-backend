@@ -8,6 +8,7 @@ const { buildXlsx } = require("../lib/xlsx");
 const { computeCallStats } = require("../services/stats");
 const { autoReportDays, addUp, checkRange, asksForm, MAX_DAYS } = require("../services/autoReport");
 const { canSeeFinance, consultationPaymentsOnly, allPayments } = require("../lib/finance");
+const { workingDates } = require("../services/workdays");
 
 // The payments line of automatic reports: all payments for people with
 // Moliya, the consultation fees only for everyone else (src/lib/finance.js).
@@ -32,6 +33,8 @@ const AUTO_EMPLOYEE = {
   autoReport: true,
   alsoForm: true,
   reportTemplateId: true,
+  workDays: true,
+  holidaysOff: true,
   office: { select: { id: true, name: true } },
 };
 
@@ -135,10 +138,14 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
     ]);
 
     const reportFor = (employeeId, templateId) => reports.find((r) => r.employeeId === employeeId && r.templateId === templateId);
+    // Not a working day for them (their weekly day off, a holiday, a day
+    // away): shown as such, and no report is expected.
+    const { byEmployee: days } = await workingDates(employees, date, date);
+    const offOf = (id) => days.get(id)?.off[0] || null;
     const automatic = employees.filter((e) => e.autoReport);
     const autoDays = await Promise.all(automatic.map((e) => autoReportDays(e, date, date).then(([day]) => day)));
     const rows = [
-      ...automatic.map((e, i) => ({ employee: { id: e.id, name: e.name, office: e.office }, template: null, report: null, auto: moneyFor(req)(autoDays[i]) })),
+      ...automatic.map((e, i) => ({ employee: { id: e.id, name: e.name, office: e.office }, template: null, report: null, off: offOf(e.id), auto: moneyFor(req)(autoDays[i]) })),
       ...employees
         .filter((e) => asksForm(e) && e.reportTemplate?.active)
         .map((e) => {
@@ -147,6 +154,7 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
             employee: { id: e.id, name: e.name, office: e.office },
             template: { id: e.reportTemplate.id, name: e.reportTemplate.name },
             report: report ? summaryOf(report) : null,
+            off: offOf(e.id),
           };
         }),
     ];
@@ -164,7 +172,8 @@ router.get("/day", requireRole(...MANAGER_ROLES), async (req, res, next) => {
     for (const row of rows) {
       if (!row.template) continue;
       if (!byTemplate.has(row.template.id)) byTemplate.set(row.template.id, { template: row.template, expected: 0, reports: [] });
-      byTemplate.get(row.template.id).expected += 1;
+      // Someone off that day isn't expected (unless they sent one anyway).
+      if (!row.off || row.report) byTemplate.get(row.template.id).expected += 1;
     }
     for (const r of reports) byTemplate.get(r.templateId)?.reports.push(r);
 

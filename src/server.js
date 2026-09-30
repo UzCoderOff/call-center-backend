@@ -3,6 +3,8 @@ const app = require("./app");
 const { describeFfmpegAvailability } = require("./utils/audioTranscode");
 const { prepareDatabase } = require("./lib/dbSetup");
 const telegram = require("./services/telegram");
+const prisma = require("./lib/prisma");
+const { linkAllConsultationFees } = require("./services/consultationFee");
 
 // Check this once, loudly, at startup — so a missing/broken ffmpeg (e.g.
 // ffmpeg-static's binary never downloaded because this server has no
@@ -38,6 +40,11 @@ prepareDatabase()
         process.exit(1);
       }
       console.log(`call-center-backend listening on port ${env.port} (${env.nodeEnv})`);
+      // Consultation fees recorded on a client's page before they were tied
+      // to appointments: tie them now (harmless to repeat).
+      linkAllConsultationFees(prisma)
+        .then((n) => n > 0 && console.log(`consultation fees tied to appointments: ${n}`))
+        .catch((err) => console.error("tying consultation fees:", err.message));
       // The staff Telegram bot (off without TELEGRAM_BOT_TOKEN).
       telegram.start();
     });

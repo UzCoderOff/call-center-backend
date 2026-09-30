@@ -20,11 +20,18 @@ const crypto = require("crypto");
 //
 // Adding a type means: add it here (validation + summary) and to the
 // portal's field editor and form renderer. Nothing in the database changes.
+//
+// A money question (or money column) can also say how the Moliya page counts
+// it: `finance: "income"` (money the firm received — e.g. translation fees)
+// or "expense" (money spent — taxi, stamps). Without it the amount isn't
+// counted: it may already be in Ledger as a client payment. The developer
+// sets it in the form editor (services/reportMoney.js adds it up).
 
 const FIELD_TYPES = ["text", "textarea", "number", "money", "yesno", "select", "checklist", "table"];
 const COLUMN_TYPES = ["text", "number", "money", "select"];
 const NUMERIC_TYPES = ["number", "money"];
 const OPTION_TYPES = ["select", "checklist"];
+const FINANCE_KINDS = ["income", "expense"];
 
 const MAX_FIELDS = 40;
 const MAX_OPTIONS = 30;
@@ -65,6 +72,7 @@ function normalizeColumns(raw, where) {
     seen.add(id);
     const column = { id, label, type: c.type };
     if (c.type === "select") column.options = cleanOptions(c.options, `${where}, column ${j + 1}`);
+    if (c.type === "money" && FINANCE_KINDS.includes(c.finance)) column.finance = c.finance;
     return column;
   });
 }
@@ -111,6 +119,7 @@ function normalizeFields(input) {
 
     if (OPTION_TYPES.includes(raw.type)) field.options = cleanOptions(raw.options, `question ${i + 1}`);
     if (raw.type === "table") field.columns = normalizeColumns(raw.columns, `question ${i + 1}`);
+    if (raw.type === "money" && FINANCE_KINDS.includes(raw.finance)) field.finance = raw.finance;
     return field;
   });
 }
@@ -258,4 +267,4 @@ function tableTotals(field, rows) {
   return out;
 }
 
-module.exports = { FIELD_TYPES, COLUMN_TYPES, FieldError, normalizeFields, validateAnswers, summarize, tableTotals };
+module.exports = { FIELD_TYPES, COLUMN_TYPES, FINANCE_KINDS, FieldError, normalizeFields, validateAnswers, summarize, tableTotals };

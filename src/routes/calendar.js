@@ -63,6 +63,14 @@ async function loadCalendar(req, id, { manage = false } = {}) {
   return calendar;
 }
 
+// Where the consultation happens (Appointment.format).
+const FORMATS = ["office", "online"];
+function parseFormat(value) {
+  if (value === undefined || value === null || value === "") return "office";
+  if (!FORMATS.includes(value)) throw badRequest("invalid format");
+  return value;
+}
+
 const hasStarted = (a, now) => a.date < now.date || (a.date === now.date && a.start <= now.minutes);
 
 // Staff see the details of bookings they made, or of their own clients;
@@ -336,6 +344,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     const clientName = typeof b.clientName === "string" ? b.clientName.trim().slice(0, 120) : "";
     if (!clientName) throw badRequest("clientName is required");
     const clientPhone = typeof b.clientPhone === "string" && b.clientPhone.trim() ? b.clientPhone.trim().slice(0, 40) : null;
+    const format = parseFormat(b.format);
     // "Fee received": the consultation fee, recorded with the booking. It
     // goes on the client's record, so it needs a phone number to find or
     // create the client by. Lawyers don't record payments.
@@ -385,6 +394,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
           phoneKey: phoneKey(clientPhone),
           matter: typeof b.matter === "string" && b.matter.trim() ? b.matter.trim().slice(0, 300) : null,
           notes: typeof b.notes === "string" && b.notes.trim() ? b.notes.trim().slice(0, 2000) : null,
+          format,
           bookedById: req.user.id,
           callLogId,
         },
@@ -404,7 +414,11 @@ calendars.post("/:id/appointments", async (req, res, next) => {
       if (bookedFor) {
         await tx.appointment.update({ where: { id: appointment.id }, data: { clientId: bookedFor } });
         appointment.clientId = bookedFor;
-        if (feeTaken) appointment.payments = [await fee.recordFee(tx, { appointment, clientId: bookedFor, user: req.user, ...feeTaken })];
+        if (feeTaken) await fee.recordFee(tx, { appointment, clientId: bookedFor, user: req.user, ...feeTaken });
+        // A fee already recorded on the client's page now belongs to this
+        // appointment (the calendar shows it as paid).
+        await fee.linkConsultationFees(tx, bookedFor);
+        appointment.payments = await tx.payment.findMany({ where: { appointmentId: appointment.id, kind: "consultation" }, select: { id: true, amount: true, method: true, date: true } });
       }
       // A client booked again has clearly been told about the cancelled
       // appointment — take it off the "tell the client" list.
@@ -514,6 +528,10 @@ appointments.patch("/:id", async (req, res, next) => {
 
     // Details: owner, or whoever booked it while it's still booked.
     const mayEdit = manage || (isBooker && appointment.status === "booked");
+    if (b.format !== undefined) {
+      if (!mayEdit) return res.status(403).json({ error: "forbidden" });
+      data.format = parseFormat(b.format);
+    }
     for (const field of ["clientName", "clientPhone", "matter", "notes"]) {
       if (b[field] === undefined) continue;
       if (!mayEdit) return res.status(403).json({ error: "forbidden" });
@@ -533,7 +551,13 @@ appointments.patch("/:id", async (req, res, next) => {
         });
         if (others.some((a) => cal.overlaps(a, appointment))) return null;
       }
-      return tx.appointment.update({ where: { id: appointment.id }, data, include: APPOINTMENT_INCLUDE });
+      const changed = await tx.appointment.update({ where: { id: appointment.id }, data, include: APPOINTMENT_INCLUDE });
+      // Cancelled (or brought back): its fee may belong to another of the
+      // client's appointments now.
+      if (data.status && changed.clientId && (await fee.linkConsultationFees(tx, changed.clientId)) > 0) {
+        return tx.appointment.findUnique({ where: { id: appointment.id }, include: APPOINTMENT_INCLUDE });
+      }
+      return changed;
     });
     if (!updated) return res.status(409).json({ error: "slot_taken" });
     if (data.status === "cancelled" && appointment.status !== "cancelled") {

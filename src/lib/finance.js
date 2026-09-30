@@ -61,7 +61,7 @@ function allPayments(day) {
 // of its payments only the consultation fees.
 function caseWithoutMoney(k) {
   if (!k || typeof k !== "object") return k;
-  const { contractAmount, payments, paid, remaining, state, ...rest } = k;
+  const { contractAmount, payments, paid, remaining, state, installments, schedule, ...rest } = k;
   return Array.isArray(payments) ? { ...rest, payments: payments.filter(isConsultation) } : rest;
 }
 
