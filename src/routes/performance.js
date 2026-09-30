@@ -7,6 +7,7 @@ const { canSeeFinance } = require("../lib/finance");
 const { monthPerformance, history } = require("../services/performance");
 const { cashBalances } = require("../services/cash");
 const { buildWorkbook } = require("../lib/xlsx");
+const { parseKey, formMeasures, catalogFor, targetsFor } = require("../services/performanceMetrics");
 
 // Natijalar — each person's month at work (src/services/performance.js).
 //
@@ -32,6 +33,7 @@ const EMPLOYEE_SELECT = {
   active: true,
   createdAt: true,
   collectCalls: true,
+  calendarAccess: true,
   autoReport: true,
   alsoForm: true,
   reportTemplateId: true,
@@ -166,7 +168,13 @@ function performanceSheets(data, finance) {
   }
   const away = [["Xodim", "Sana", "Sabab"]];
   for (const r of data.rows) for (const a of r.workDays.away) away.push([r.employee.name, a.date, a.name ? `${AWAY_NAME[a.kind]}: ${a.name}` : AWAY_NAME[a.kind] || a.kind]);
+  const plans = [["Xodim", "Nima", "Shakl", "Qilingani", "Reja", "Bugungacha kerak", "Bajarildi %"]];
+  const BUILTIN_NAME = { consultations: "Konsultatsiyalar", contracts: "Shartnomalar", bookings: "Kalendarga yozgan", calls_answered: "Javob berilgan qoʻngʻiroqlar", fees: "Konsultatsiya toʻlovlari" };
+  for (const r of data.rows) {
+    for (const m of r.metrics) plans.push([r.employee.name, m.builtin ? BUILTIN_NAME[m.key] : m.label, m.form || "", m.value, m.target ?? "", m.expected ?? "", m.pct ?? ""]);
+  }
   return [
+    { name: "Rejalar", rows: plans, widths: [24, 34, 26, 12, 10, 16, 12] },
     { name: "Jamoa", rows: team, widths: [24, 22, ...team[0].slice(2).map(() => 14)] },
     { name: "Kunlar", rows: days, widths: [24, 12, 14, 16, 10, 16, 12, 18, 14] },
     { name: "Dam olish", rows: away, widths: [24, 12, 40] },
@@ -210,6 +218,74 @@ router.get("/:employeeId", async (req, res, next) => {
       // Cash in their hands now (Kassa).
       cash: employee.userId ? ((await cashBalances({ userIds: [employee.userId] }))[0] ?? { taken: 0, handed: 0, holding: 0 }) : null,
     });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// --------------------------------------------------------------- targets
+// A person's targets: what they can be measured on (built-ins for client
+// work, their report form's numbers), what's set for the month, and every
+// entry (a target holds from its month until changed).
+//
+//   GET    /api/performance/:employeeId/targets?month=
+//   PUT    /api/performance/:employeeId/targets   { metric, amount, fromMonth? } (managers; 0 = no target from then)
+//   DELETE /api/performance/:employeeId/targets/:id (managers)
+router.get("/:employeeId/targets", async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    const month = monthParam(req.query.month);
+    const [catalog, current, entries] = await Promise.all([
+      catalogFor(employee),
+      targetsFor([employee], month),
+      prisma.target.findMany({ where: { employeeId: employee.id }, orderBy: [{ fromMonth: "desc" }, { id: "desc" }], include: { setBy: { select: { username: true, name: true } } } }),
+    ]);
+    res.json({
+      month,
+      canSet: isManager(req.user),
+      catalog,
+      current: [...current.get(employee.id)].map(([metric, amount]) => ({ metric, amount })),
+      position: { consultations: employee.position?.targetConsultations ?? null, contracts: employee.position?.targetContracts ?? null },
+      entries: entries.map((t) => ({ id: t.id, metric: t.metric, amount: t.amount, fromMonth: t.fromMonth, setBy: t.setBy ? t.setBy.name || t.setBy.username : null })),
+    });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+router.put("/:employeeId/targets", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
+    const employee = await loadEmployee(req);
+    const b = req.body || {};
+    const key = parseKey(b.metric);
+    if (!key) throw badRequest("invalid metric");
+    if (!key.builtin) {
+      const template = await prisma.reportTemplate.findUnique({ where: { id: key.templateId }, select: { id: true, name: true, fields: true } });
+      if (!template || !formMeasures(template).some((m) => m.key === b.metric)) throw badRequest("unknown metric");
+    }
+    const amount = Number(String(b.amount ?? "").replace(/[\s ]/g, ""));
+    if (!Number.isInteger(amount) || amount < 0 || amount > 10_000_000_000) throw badRequest("invalid amount");
+    const fromMonth = monthParam(b.fromMonth);
+    const row = await prisma.target.upsert({
+      where: { employeeId_metric_fromMonth: { employeeId: employee.id, metric: b.metric, fromMonth } },
+      create: { employeeId: employee.id, metric: b.metric, amount, fromMonth, setById: req.user.id },
+      update: { amount, setById: req.user.id },
+    });
+    res.json(row);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+router.delete("/:employeeId/targets/:id", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
+    const employee = await loadEmployee(req);
+    const row = await prisma.target.findFirst({ where: { id: parseId(req.params.id), employeeId: employee.id } });
+    if (!row) return res.status(404).json({ error: "not_found" });
+    await prisma.target.delete({ where: { id: row.id } });
+    res.status(204).end();
   } catch (err) {
     sendError(err, res, next);
   }

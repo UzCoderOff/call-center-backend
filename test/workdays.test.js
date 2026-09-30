@@ -70,3 +70,47 @@ test("an Excel workbook with several sheets", () => {
   assert.ok(files["xl/worksheets/sheet2.xml"]);
   assert.match(strFromU8(files["xl/workbook.xml"]), /name="Umumiy".*name="Umumiy 2"/);
 });
+
+test("what a person is measured on: their report form's numbers, added up", () => {
+  const m = require("../src/services/performanceMetrics");
+  const form = {
+    id: 3,
+    name: "Hujjatlar",
+    fields: [
+      { id: "docs", type: "number", label: "Hujjatlar soni" },
+      { id: "notes", type: "textarea", label: "Izoh" },
+      { id: "svc", type: "table", label: "Xizmatlar", columns: [{ id: "kind", type: "select", label: "Xizmat" }, { id: "people", type: "number", label: "Mijozlar" }, { id: "cash", type: "money", label: "Tushum" }] },
+    ],
+  };
+  assert.deepEqual(m.formMeasures(form).map((x) => [x.key, x.label, x.unit]), [
+    ["report:3:docs", "Hujjatlar soni", "count"],
+    ["report:3:svc:people", "Xizmatlar → Mijozlar", "count"],
+    ["report:3:svc:cash", "Xizmatlar → Tushum", "money"],
+  ]);
+  const reports = [
+    { date: "2026-10-01", templateId: 3, fields: form.fields, answers: { docs: 4, svc: [{ kind: "Notarius", people: 2, cash: 100000 }, { kind: "Tarjima", people: 1, cash: 50000 }] } },
+    { date: "2026-10-02", templateId: 3, fields: form.fields, answers: { docs: 6, svc: [{ kind: "Notarius", people: 3, cash: 150000 }] } },
+  ];
+  const v = m.reportValues(reports);
+  assert.equal(v.get("report:3:docs").total, 10);
+  assert.equal(v.get("report:3:svc:people").total, 6);
+  assert.deepEqual([...v.get("report:3:svc:people").groups], [["Notarius", 5], ["Tarjima", 1]]);
+  assert.equal(v.get("report:3:svc:cash").byDate.get("2026-10-02"), 150000);
+  assert.deepEqual(m.parseKey("report:3:svc:cash"), { templateId: 3, fieldId: "svc", columnId: "cash" });
+  assert.deepEqual(m.parseKey("contracts"), { builtin: "contracts" });
+  assert.equal(m.parseKey("report:x:y"), null);
+});
+
+test("targets: a person's own, latest from that month on; the position's as the default", async () => {
+  const m = require("../src/services/performanceMetrics");
+  const rows = [
+    { employeeId: 1, metric: "report:3:docs", amount: 150, fromMonth: "2026-11" },
+    { employeeId: 1, metric: "report:3:docs", amount: 120, fromMonth: "2026-10" },
+    { employeeId: 1, metric: "contracts", amount: 0, fromMonth: "2026-10" }, // "no target" beats the position's
+  ];
+  const db = { target: { findMany: async ({ where }) => rows.filter((r) => r.fromMonth <= where.fromMonth.lte).sort((a, b) => (a.fromMonth < b.fromMonth ? 1 : -1)) } };
+  const people = [{ id: 1, position: { targetConsultations: 60, targetContracts: 30 } }];
+  const oct = (await m.targetsFor(people, "2026-10", db)).get(1);
+  assert.deepEqual([...oct].sort(), [["consultations", 60], ["report:3:docs", 120]]);
+  assert.equal((await m.targetsFor(people, "2026-12", db)).get(1).get("report:3:docs"), 150);
+});

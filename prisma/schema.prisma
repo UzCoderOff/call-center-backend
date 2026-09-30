@@ -66,6 +66,7 @@ model User {
   absencesDecided    Absence[]      @relation("AbsenceDecidedBy")
   cashHandedOver     CashHandover[] @relation("CashHandoverBy")
   cashReceived       CashHandover[] @relation("CashHandoverReceivedBy")
+  targetsSet         Target[]       @relation("TargetSetBy")
   clientEvents       ClientEvent[]  @relation("ClientEventAuthor")
   auditLogs          AuditLog[]     @relation("AuditUser")
   lawyerCases        ClientCase[]   @relation("CaseLawyer")
@@ -159,6 +160,7 @@ model Employee {
   workDays    String    @default("123456")
   holidaysOff Boolean   @default(true)
   absences    Absence[]
+  targets     Target[]
 }
 
 // A physical location — e.g. the office by the court, the translation office.
@@ -900,4 +902,25 @@ model CashHandover {
   createdAt    DateTime @default(now())
 
   @@index([userId, date])
+}
+
+// A person's monthly target on one measure (services/performanceMetrics.js):
+// a built-in one ("consultations", "contracts", "bookings",
+// "calls_answered", "fees") or a number from their daily report form
+// ("report:<form id>:<question id>[:<column id>]" — e.g. pages translated).
+// From `fromMonth` until changed; an old month keeps the figure it had.
+// amount 0: no target from that month. The position's consultations /
+// contracts targets are the default when a person has none of their own.
+model Target {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  metric     String
+  amount     Int
+  fromMonth  String // "YYYY-MM"
+  setById    Int?
+  setBy      User?    @relation("TargetSetBy", fields: [setById], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  @@unique([employeeId, metric, fromMonth])
 }

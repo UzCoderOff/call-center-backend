@@ -4,6 +4,7 @@ const { computeCallStats } = require("./stats");
 const { autoReportDays } = require("./autoReport");
 const { reportMoney } = require("./reportMoney");
 const { workingDates } = require("./workdays");
+const { BUILTIN, MONEY, parseKey, formMeasures, reportValues, targetsFor } = require("./performanceMetrics");
 
 // Each person's month at work, for the performance page ("Natijalar"):
 //
@@ -23,6 +24,13 @@ const { workingDates } = require("./workdays");
 //   cost         what they cost that month (EmployeeCost), per consultation,
 //                per contract, and against the money brought in — Moliya only
 //   discipline   daily reports sent on working days; tasks done on time
+//
+// Not everyone works with clients: each person is measured by the work they
+// do (services/performanceMetrics.js). "Client work" (calls, bookings,
+// consultations, contracts) for call-center staff and whoever books
+// consultations; "office work" — the numbers in their daily report form
+// (documents translated, people served, money taken…) — for everyone who
+// fills one in. Targets are per person on any of those measures.
 //
 // A month is counted by dates in the firm's timezone. "So far" stops at
 // today for the current month. Working days are each person's own
@@ -103,7 +111,7 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     // Taken: payments they recorded.
     prisma.payment.findMany({ where: { date: dateRange, recordedById: { in: userIds } }, select: { amount: true, kind: true, method: true, recordedById: true } }),
     prisma.report.findMany({ where: { employeeId: { in: ids }, date: dateRange }, select: { id: true, employeeId: true, date: true, templateId: true, fields: true, answers: true } }),
-    finance ? prisma.reportTemplate.findMany({ select: { id: true, name: true, fields: true } }) : [],
+    prisma.reportTemplate.findMany({ select: { id: true, name: true, fields: true } }),
     prisma.task.findMany({ where: { assigneeId: { in: userIds }, dueAt: { gte: new Date(msFrom), lte: new Date(msTo) } }, select: { assigneeId: true, dueAt: true, doneAt: true } }),
     finance ? costsFor(ids, month) : new Map(),
     // Day by day (calls in/out, bookings made, clients added): only up to today.
@@ -112,6 +120,15 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
 
   const byUser = new Map(employees.map((e) => [e.userId, e.id]));
   const money = finance ? reportMoney(reports, templates).entries : [];
+  const targets = await targetsFor(employees, month);
+  const templateById = new Map(templates.map((t) => [t.id, t]));
+  // A report measure's name: from the form as it is now (or as it was).
+  const labelOf = (key) => {
+    const k = parseKey(key);
+    const form = k && templateById.get(k.templateId);
+    const m = form && formMeasures(form).find((x) => x.key === key);
+    return m ? { label: m.label, unit: m.unit, form: m.form } : { label: key, unit: "count", form: null };
+  };
   const now = Date.now();
 
   const rows = employees.map((e, index) => {
@@ -169,8 +186,9 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     const workMine = mineCal.work.filter((d) => d >= joined);
     const workMineSoFar = workMine.filter((d) => d <= today);
     const expected = (target) => (target ? Math.round((target * workMineSoFar.length) / Math.max(1, workMine.length)) : null);
-    const targetC = e.position?.targetConsultations ?? null;
-    const targetK = e.position?.targetContracts ?? null;
+    const myTargets = targets.get(e.id) || new Map();
+    const targetC = myTargets.get("consultations") ?? null;
+    const targetK = myTargets.get("contracts") ?? null;
     const consultations = { count: consulted.length, target: targetC, expected: expected(targetC), pct: pct(consulted.length, targetC) };
     const contracts = { count: signed.length, target: targetK, expected: expected(targetK), pct: pct(signed.length, targetK) };
     if (finance) contracts.amount = signed.reduce((t, k) => t + (k.contractAmount || 0), 0);
@@ -239,7 +257,41 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
       overdue: myTasks.filter((t) => !t.doneAt && t.dueAt.getTime() < now).length,
     };
 
+    // --------------------------------------------- what they're measured on
+    const myReports = own(reports, (r) => r.employeeId);
+    const values = reportValues(myReports);
+    // Client work: they book consultations, did client work this month, or
+    // are call center (calls collected, the automatic report alone). A
+    // monitored phone with a form to fill in is someone with another job.
+    const clientWork = Boolean(e.calendarAccess === "book" || consulted.length || signed.length || mine.length || bookingsOut.made || (e.collectCalls && mode === "auto"));
+    // Office work: they fill in a report form (or sent reports this month
+    // without doing client work). A form left on someone switched to the
+    // automatic report alone doesn't count.
+    const asksForm = mode === "form" || mode === "auto+form";
+    const form = e.reportTemplateId && asksForm ? templateById.get(e.reportTemplateId) : null;
+    const officeWork = Boolean(form || (myReports.length && !clientWork));
+    const builtinValue = {
+      consultations: consulted.length,
+      contracts: signed.length,
+      bookings: bookingsOut.made,
+      calls_answered: calls?.answered ?? 0,
+      fees: moneyOut.brought.consultation,
+    };
+    const measure = (key) => {
+      const target = myTargets.get(key) ?? null;
+      const value = BUILTIN.includes(key) ? builtinValue[key] : values.get(key)?.total || 0;
+      const info = BUILTIN.includes(key) ? { label: null, unit: MONEY.has(key) ? "money" : "count", form: null } : labelOf(key);
+      return { key, builtin: BUILTIN.includes(key), ...info, value, target, expected: expected(target), pct: pct(value, target) };
+    };
+    // Targets first; then what fits their work.
+    const keys = [...myTargets.keys()];
+    if (clientWork) for (const k of ["consultations", "contracts"]) if (!keys.includes(k)) keys.push(k);
+    if (officeWork && form) for (const m of formMeasures(form)) if (!keys.includes(m.key)) keys.push(m.key);
+    const metrics = keys.map(measure);
+
     const row = {
+      work: { client: clientWork, office: officeWork },
+      metrics,
       employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, workDays: e.workDays, holidaysOff: e.holidaysOff },
       workDays: { total: workMine.length, soFar: workMineSoFar.length, away: mineCal.off.filter((o) => o.kind !== "weekly" && o.date >= joined).map((o) => ({ date: o.date, kind: o.kind, name: o.name ?? null })) },
       calls,
@@ -272,8 +324,22 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
         if (p.kind === "consultation") x.fees += p.amount;
         if (finance) x.brought += p.amount;
       }
+      for (const x of perDay.values()) {
+        x.measures = {};
+        for (const [key, v] of values) if (v.byDate.has(x.date)) x.measures[key] = v.byDate.get(x.date);
+      }
       row.days = [...perDay.values()];
       row.workDates = workMine;
+      // Office work: each report measure's month total, its daily average
+      // over the days they worked, and (tables) by service.
+      row.office = officeWork
+        ? metrics
+            .filter((m) => !m.builtin)
+            .map((m) => {
+              const v = values.get(m.key);
+              return { ...m, perWorkDay: workMineSoFar.length ? Math.round((m.value / workMineSoFar.length) * 10) / 10 : null, groups: v ? [...v.groups].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total) : [] };
+            })
+        : [];
     }
     return row;
   });
@@ -281,12 +347,12 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
   return { month, today, workDays: officeWork.length, workDaysSoFar: officeWork.filter((d) => d <= today).length, rows };
 }
 
-// Six months up to `month` for one person: consultations, contracts, and
-// money brought in (contract money only with Moliya).
+// Six months up to `month` for one person: consultations, contracts, money
+// brought in (contract money only with Moliya), and their report measures.
 async function history(employee, month, finance) {
   const first = shiftMonth(month, -5);
   const range = { gte: `${first}-01`, lte: `${month}-31` };
-  const [cases, brought] = await Promise.all([
+  const [cases, brought, reports] = await Promise.all([
     prisma.clientCase.findMany({
       where: { operatorId: employee.id, OR: [{ consultationDate: range }, { contractDate: range }] },
       select: { consultationDate: true, contractDate: true, contractAmount: true },
@@ -295,8 +361,12 @@ async function history(employee, month, finance) {
       where: { date: range, OR: [{ case: { operatorId: employee.id } }, ...(employee.userId ? [{ caseId: null, appointment: { bookedById: employee.userId } }] : [])] },
       select: { date: true, amount: true, kind: true },
     }),
+    prisma.report.findMany({ where: { employeeId: employee.id, date: range }, select: { date: true, templateId: true, fields: true, answers: true } }),
   ]);
-  const months = Array.from({ length: 6 }, (_, i) => ({ month: shiftMonth(first, i), consultations: 0, contracts: 0, ...(finance ? { contracted: 0, brought: 0 } : {}), fees: 0 }));
+  const months = Array.from({ length: 6 }, (_, i) => ({ month: shiftMonth(first, i), consultations: 0, contracts: 0, ...(finance ? { contracted: 0, brought: 0 } : {}), fees: 0, measures: {} }));
+  for (const m of months) {
+    for (const [key, v] of reportValues(reports.filter((r) => r.date.startsWith(m.month)))) m.measures[key] = v.total;
+  }
   const at = (date) => date && months.find((m) => m.month === date.slice(0, 7));
   for (const k of cases) {
     const c = at(k.consultationDate);
