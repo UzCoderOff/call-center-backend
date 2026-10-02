@@ -7,7 +7,8 @@ const { canSeeFinance } = require("../lib/finance");
 const { monthPerformance, history } = require("../services/performance");
 const { cashBalances } = require("../services/cash");
 const { buildWorkbook } = require("../lib/xlsx");
-const { parseKey, formMeasures, catalogFor, targetsFor } = require("../services/performanceMetrics");
+const { events } = require("../lib/events");
+const { BUILTIN_NAMES, FINANCE_ONLY, parseKey, formMeasures, catalogFor, targetsFor } = require("../services/performanceMetrics");
 
 // Natijalar — each person's month at work (src/services/performance.js).
 //
@@ -35,6 +36,7 @@ const EMPLOYEE_SELECT = {
   collectCalls: true,
   calendarAccess: true,
   workKind: true,
+  job: true,
   autoReport: true,
   alsoForm: true,
   reportTemplateId: true,
@@ -72,7 +74,7 @@ router.get("/", async (req, res, next) => {
       select: EMPLOYEE_SELECT,
       orderBy: { name: "asc" },
     });
-    const data = await monthPerformance({ month, employees, finance: withMoney(req.user) });
+    const data = await monthPerformance({ month, employees, finance: withMoney(req.user), selfId: req.user.employee?.id ?? null });
     res.json({ ...data, current: firmDate().slice(0, 7), finance: withMoney(req.user), mineOnly: !isManager(req.user) });
   } catch (err) {
     next(err);
@@ -132,6 +134,8 @@ function performanceSheets(data, finance) {
       "Hisobot (kerak)",
       "Vazifalar (oʻz vaqtida)",
       "Vazifalar (jami)",
+      "Ogohlantirishlar",
+      "Jarima (chegaradan oshgani)",
       "Dam olish/kasal/taʼtil kunlari",
     ],
   ];
@@ -158,6 +162,8 @@ function performanceSheets(data, finance) {
       r.reports.due || "",
       r.tasks.total ? r.tasks.onTime : "",
       r.tasks.total || "",
+      r.strikes ? `${r.strikes.count} / ${r.strikes.limit}` : "",
+      r.strikes?.fine || "",
       r.workDays.away.filter((a) => a.kind !== "holiday").length,
     ]);
   }
@@ -170,9 +176,8 @@ function performanceSheets(data, finance) {
   const away = [["Xodim", "Sana", "Sabab"]];
   for (const r of data.rows) for (const a of r.workDays.away) away.push([r.employee.name, a.date, a.name ? `${AWAY_NAME[a.kind]}: ${a.name}` : AWAY_NAME[a.kind] || a.kind]);
   const plans = [["Xodim", "Nima", "Shakl", "Qilingani", "Reja", "Bugungacha kerak", "Bajarildi %"]];
-  const BUILTIN_NAME = { consultations: "Konsultatsiyalar", contracts: "Shartnomalar", bookings: "Kalendarga yozgan", calls_answered: "Javob berilgan qoʻngʻiroqlar", fees: "Konsultatsiya toʻlovlari" };
   for (const r of data.rows) {
-    for (const m of r.metrics) plans.push([r.employee.name, m.builtin ? BUILTIN_NAME[m.key] : m.label, m.form || "", m.value, m.target ?? "", m.expected ?? "", m.pct ?? ""]);
+    for (const m of r.metrics) plans.push([r.employee.name, m.builtin ? BUILTIN_NAMES[m.key] : m.label, m.form || "", m.value ?? "", m.target ?? "", m.expected ?? "", m.pct ?? ""]);
   }
   return [
     { name: "Rejalar", rows: plans, widths: [24, 34, 26, 12, 10, 16, 12] },
@@ -205,7 +210,10 @@ router.get("/:employeeId", async (req, res, next) => {
     const month = monthParam(req.query.month);
     const employee = await loadEmployee(req);
     const finance = withMoney(req.user);
-    const data = await monthPerformance({ month, employees: [employee], finance, detail: true });
+    const data = await monthPerformance({ month, employees: [employee], finance, detail: true, selfId: req.user.employee?.id ?? null });
+    // Strikes: the person sees theirs, the fine only managers.
+    const row = data.rows[0];
+    if (row.strikes && !isManager(req.user)) row.strikes = { ...row.strikes, fine: undefined };
     res.json({
       month,
       current: firmDate().slice(0, 7),
@@ -226,54 +234,97 @@ router.get("/:employeeId", async (req, res, next) => {
 
 // --------------------------------------------------------------- targets
 // A person's targets: what they can be measured on (built-ins for client
-// work, their report form's numbers), what's set for the month, and every
-// entry (a target holds from its month until changed).
+// work, their report form's numbers, all income with Moliya), what's set for
+// the month, and every entry (a target holds from its month until changed).
+// The person sees their own; all income without soʻm unless the viewer has
+// Moliya.
 //
 //   GET    /api/performance/:employeeId/targets?month=
-//   PUT    /api/performance/:employeeId/targets   { metric, amount, fromMonth? } (managers; 0 = no target from then)
-//   DELETE /api/performance/:employeeId/targets/:id (managers)
+//   PUT    /api/performance/:employeeId/targets        { metric, amount, fromMonth? } (managers; 0 = no target from then)
+//   PUT    /api/performance/:employeeId/targets/many   { fromMonth?, targets: [{ metric, amount }] } (managers; one save, one message)
+//   DELETE /api/performance/:employeeId/targets/:id     (managers)
+//
+// The person hears about a new plan in Telegram (kind "targets").
 router.get("/:employeeId/targets", async (req, res, next) => {
   try {
     const employee = await loadEmployee(req);
     const month = monthParam(req.query.month);
+    const finance = withMoney(req.user);
     const [catalog, current, entries] = await Promise.all([
-      catalogFor(employee),
+      catalogFor(employee, { finance }),
       targetsFor([employee], month),
       prisma.target.findMany({ where: { employeeId: employee.id }, orderBy: [{ fromMonth: "desc" }, { id: "desc" }], include: { setBy: { select: { username: true, name: true } } } }),
     ]);
+    const shown = (metric, amount) => (FINANCE_ONLY.has(metric) && !finance ? null : amount);
     res.json({
       month,
       canSet: isManager(req.user),
+      finance,
       catalog,
-      current: [...current.get(employee.id)].map(([metric, amount]) => ({ metric, amount })),
+      current: [...current.get(employee.id)].map(([metric, amount]) => ({ metric, amount: shown(metric, amount), hidden: shown(metric, amount) === null })),
       position: { consultations: employee.position?.targetConsultations ?? null, contracts: employee.position?.targetContracts ?? null },
-      entries: entries.map((t) => ({ id: t.id, metric: t.metric, amount: t.amount, fromMonth: t.fromMonth, setBy: t.setBy ? t.setBy.name || t.setBy.username : null })),
+      entries: entries.map((t) => ({ id: t.id, metric: t.metric, amount: shown(t.metric, t.amount), hidden: shown(t.metric, t.amount) === null, fromMonth: t.fromMonth, setBy: t.setBy ? t.setBy.name || t.setBy.username : null })),
     });
   } catch (err) {
     sendError(err, res, next);
   }
 });
 
+// One target, checked: a measure that exists (all income with Moliya only)
+// and a whole number of soʻm or pieces.
+async function checkedTarget(req, b) {
+  const key = parseKey(b.metric);
+  if (!key) throw badRequest("invalid metric");
+  // All income and money collected on contracts: set with Moliya.
+  if ((FINANCE_ONLY.has(b.metric) || b.metric === "collected") && !withMoney(req.user)) {
+    const err = new Error("finance_forbidden");
+    err.status = 403;
+    throw err;
+  }
+  if (!key.builtin) {
+    const template = await prisma.reportTemplate.findUnique({ where: { id: key.templateId }, select: { id: true, name: true, fields: true } });
+    if (!template || !formMeasures(template).some((m) => m.key === b.metric)) throw badRequest("unknown metric");
+  }
+  const amount = Number(String(b.amount ?? "").replace(/[\s ]/g, ""));
+  if (!Number.isInteger(amount) || amount < 0 || amount > 10_000_000_000) throw badRequest("invalid amount");
+  return { metric: b.metric, amount };
+}
+
+const upsertTarget = (employeeId, fromMonth, { metric, amount }, userId) =>
+  prisma.target.upsert({
+    where: { employeeId_metric_fromMonth: { employeeId, metric, fromMonth } },
+    create: { employeeId, metric, amount, fromMonth, setById: userId },
+    update: { amount, setById: userId },
+  });
+
 router.put("/:employeeId/targets", async (req, res, next) => {
   try {
     if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
     const employee = await loadEmployee(req);
     const b = req.body || {};
-    const key = parseKey(b.metric);
-    if (!key) throw badRequest("invalid metric");
-    if (!key.builtin) {
-      const template = await prisma.reportTemplate.findUnique({ where: { id: key.templateId }, select: { id: true, name: true, fields: true } });
-      if (!template || !formMeasures(template).some((m) => m.key === b.metric)) throw badRequest("unknown metric");
-    }
-    const amount = Number(String(b.amount ?? "").replace(/[\s ]/g, ""));
-    if (!Number.isInteger(amount) || amount < 0 || amount > 10_000_000_000) throw badRequest("invalid amount");
+    const target = await checkedTarget(req, b);
     const fromMonth = monthParam(b.fromMonth);
-    const row = await prisma.target.upsert({
-      where: { employeeId_metric_fromMonth: { employeeId: employee.id, metric: b.metric, fromMonth } },
-      create: { employeeId: employee.id, metric: b.metric, amount, fromMonth, setById: req.user.id },
-      update: { amount, setById: req.user.id },
-    });
+    const row = await upsertTarget(employee.id, fromMonth, target, req.user.id);
+    events.emit("targets.set", { employeeId: employee.id, fromMonth, byUserId: req.user.id });
     res.json(row);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+router.put("/:employeeId/targets/many", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
+    const employee = await loadEmployee(req);
+    const b = req.body || {};
+    if (!Array.isArray(b.targets) || b.targets.length === 0 || b.targets.length > 60) throw badRequest("invalid targets");
+    const fromMonth = monthParam(b.fromMonth);
+    const targets = [];
+    for (const t of b.targets) targets.push(await checkedTarget(req, t || {}));
+    if (new Set(targets.map((t) => t.metric)).size !== targets.length) throw badRequest("duplicate metric");
+    const rows = await prisma.$transaction(targets.map((t) => upsertTarget(employee.id, fromMonth, t, req.user.id)));
+    events.emit("targets.set", { employeeId: employee.id, fromMonth, byUserId: req.user.id });
+    res.json(rows);
   } catch (err) {
     sendError(err, res, next);
   }
@@ -285,6 +336,7 @@ router.delete("/:employeeId/targets/:id", async (req, res, next) => {
     const employee = await loadEmployee(req);
     const row = await prisma.target.findFirst({ where: { id: parseId(req.params.id), employeeId: employee.id } });
     if (!row) return res.status(404).json({ error: "not_found" });
+    if (FINANCE_ONLY.has(row.metric) && !withMoney(req.user)) return res.status(403).json({ error: "finance_forbidden" });
     await prisma.target.delete({ where: { id: row.id } });
     res.status(204).end();
   } catch (err) {

@@ -23,6 +23,14 @@ const LEGAL_STAGES = [
   "review",
   "supreme_review",
 ];
+// The dates that matter in a case (CaseDate.kind): a court hearing, an
+// investigator's summons, a deadline (appeal by…), a meeting.
+const DATE_KINDS = ["hearing", "summons", "deadline", "meeting", "other"];
+const CLOSED_STATUSES = ["done", "declined"];
+// Why a consultation didn't continue ("declined"): the price, still thinking
+// it over (and stopped answering), didn't trust us, went to another lawyer,
+// couldn't be reached, no longer needed, not a matter the firm takes.
+const LOST_REASONS = ["price", "thinking", "trust", "other_lawyer", "unreachable", "no_need", "not_our_field", "other"];
 const SOURCES = ["call", "telegram", "instagram", "referral", "walk_in", "other"];
 const LINK_KINDS = ["family", "referral", "same_case", "work", "other"];
 const PAYMENT_METHODS = ["cash", "card", "transfer"];
@@ -133,6 +141,10 @@ function normalizeCase(input, current = {}, today) {
   set("consultationDate", date(input.consultationDate, "consultationDate"));
   set("contractDate", date(input.contractDate, "contractDate"));
   set("contractAmount", amount(input.contractAmount, "contractAmount"));
+  set("court", text(input.court, 200));
+  set("closedDate", date(input.closedDate, "closedDate"));
+  set("lostReason", oneOf(input.lostReason, LOST_REASONS, "lostReason"));
+  set("lostNote", text(input.lostNote, 500));
 
   // A new case starts today unless told otherwise.
   if (!current.id && !data.startDate) data.startDate = today;
@@ -146,6 +158,11 @@ function normalizeCase(input, current = {}, today) {
   if (COUNTS_AS_CONTRACT.includes(status) && !current.contractDate && !data.contractDate) {
     data.contractDate = today;
   }
+  // Finished or stopped: when. Opened again: no longer closed.
+  if (data.status && CLOSED_STATUSES.includes(data.status) && !current.closedDate && data.closedDate === undefined) data.closedDate = today;
+  if (data.status && !CLOSED_STATUSES.includes(data.status) && current.closedDate && data.closedDate === undefined) data.closedDate = null;
+  // Going on after all: no longer "lost" (the timeline keeps why it was).
+  if (data.status && data.status !== "declined" && current.lostReason && data.lostReason === undefined) Object.assign(data, { lostReason: null, lostNote: null });
   return data;
 }
 
@@ -180,6 +197,9 @@ function normalizePayment(input) {
 }
 
 module.exports = {
+  LOST_REASONS,
+  DATE_KINDS,
+  CLOSED_STATUSES,
   STATUSES,
   OPEN_STATUSES,
   LEGAL_STAGES,

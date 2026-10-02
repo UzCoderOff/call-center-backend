@@ -12,6 +12,10 @@
 // staff never see it, and only people who see it can set contract amounts or
 // record contract payments.
 //
+// A coordinator (2026-10-02) sees the money of the cases assigned to them —
+// that's their job after the contract: the schedule, what's paid and
+// overdue — and records the payments on them. Nothing of any other case.
+//
 // The consultation fee (e.g. 450 000 soʻm) is the exception: staff check it
 // before booking the client in, so payments of kind "consultation" are
 // visible to everyone who sees the client, and staff can record them.
@@ -34,6 +38,14 @@ function visiblePayments(user, payments) {
 function canSeeFinance(user) {
   if (!user || user.active === false) return false;
   return user.role === "DEVELOPER" || (FINANCE_ROLES.includes(user.role) && user.seesFinance === true);
+}
+
+// Whether this person sees one case's money: Moliya, or it's a case they
+// coordinate. `kase` needs coordinatorId.
+function canSeeCaseMoney(user, kase) {
+  if (canSeeFinance(user)) return true;
+  const me = user?.employee?.id;
+  return Boolean(me && kase && kase.coordinatorId === me && user.active !== false);
 }
 
 function financeForbidden() {
@@ -67,6 +79,7 @@ function caseWithoutMoney(k) {
 
 module.exports = {
   canSeeFinance,
+  canSeeCaseMoney,
   financeForbidden,
   isConsultation,
   visiblePayments,

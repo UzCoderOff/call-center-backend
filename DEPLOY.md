@@ -12,7 +12,15 @@ Order: backend → portal → check on a phone → (Android app, when it changed
 
 ## 1. Backend (on the VPS)
 
-In the backend folder (the one you `git pull` in):
+In the backend folder (the one you `git pull` in), either run the script
+that does all of the steps below in order — it backs up first, and if the
+database update fails it goes back to the old version and starts it again:
+
+```bash
+bash scripts/deploy.sh
+```
+
+or do them by hand:
 
 ```bash
 git pull
@@ -35,7 +43,134 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release: detailed Moliya, report money, online consultations, Natijalar, days off, payment schedules, Kassa, backups
+### This release (2026-10-02/03): jobs, coordinators and case history; plans for any income; phones that don't record; simpler Moliya; Russian
+
+- **Who does what (Ish turi):** call center, coordinator, office, other. The
+  call-back list, booking counts and missed-call Telegram are the call
+  center's; Calls and Home show it by default, with switches for the rest.
+- **The handover at the contract:** the operator owns the consultation; once
+  the client signs, the boss or developer assigns a coordinator and a lawyer
+  (Telegram tells them; managers hear "contract signed — assign"). The
+  operator keeps a result view. The coordinator sees the whole case, its
+  money too (payments, schedule, what's overdue) and records payments on it;
+  a lawyer sees the whole case without money (unless the Moliya switch).
+- **Case history:** stages with dates (past dates allowed, for a case
+  brought in from before), key dates (hearings, summons, deadlines — with
+  what happened), the case's milestones (came in, consultation, contract,
+  closed) and every change on the client's timeline. Notes can be edited and
+  removed — removed ones are hidden, kept, and in the audit log.
+- **The client page** is rebuilt around this: people on each case, stage
+  history, key dates, money, and one filterable timeline. Coordinators get
+  their own home page (my cases: overdue, due soon, dates coming up).
+- **Booking:** "Ofisda / Onlayn" must be chosen each time (no default).
+
+- `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
+  generate`, `pm2 restart all` as above. Two migrations, both only adding
+  (no table is rebuilt, no existing value changes):
+  - `20261002000000_recording_health` — one empty column on the sync log
+    (whether the app may read the phone's files).
+  - `20261003000000_jobs_coordinator_case_history` — each person's job, the
+    coordinator on a case, a case's court and closing date, stage history and
+    key dates, edit/remove marks on notes. It fills in each person's job from
+    their settings (operators → call center, report-form staff → office) and
+    gives every case that has a stage its first history row (date
+    approximate).
+- **Right after deploying (developer):**
+  1. **Xodimlar → each person → Ish sozlamalari → «Ish turi»**: check it
+     (call center / coordinator / office / other) and set your coordinators.
+     Only the call center's missed calls go on the call-back list and to
+     Telegram; Calls and Home show the call center by default (the others are
+     switches on those pages).
+  2. **Mijozlar → «Tayinlash kerak»**: every contract that has no
+     coordinator or lawyer yet. «Tanlash» → «Koordinator biriktirish» puts one
+     coordinator on many at once.
+  3. Operators now see their signed clients only as results (name, number,
+     dates, their own calls) under **Mijozlar → «Natijalarim»** — tell them
+     before the update.
+  4. A case's stages are now a dated history. The current stage of each case
+     became its first row, with an approximate date — correct the ones that
+     matter on the case («Ish bosqichlari» → ✎), and add earlier stages with
+     their own dates.
+- Deploy the backend first, then the portal (it uses the new endpoints), then
+  the 2.3.0 app (`UPDATE-APP-ON-SERVER.cmd`: set NAME=2.3.0, CODE=5 at the
+  top). Older apps keep working; they just don't report file access.
+- **All income as a target** (Natijalar → a person → "Reja qoʻyish"): the
+  sheet now lists everything the person can be measured on — type how much
+  per month next to each, save once. "Jami tushum" (all money they brought
+  in: payments on their clients plus report income marked Tushum) is offered
+  to people with Moliya. Staff see that one only in percent — never soʻm.
+- **Staff see their plan:** a "Bu oygi rejangiz" card on their home page, and
+  a Telegram message when a plan is set or changed (new kind "Oylik reja").
+- **Phones that don't record calls:** Ledger can't record calls itself —
+  it sends what the phone's own recorder saves. Over the last 7 days each
+  phone's answered calls are compared with the recordings that arrived:
+  managers see a red list on the home page and a badge in Xodimlar; the
+  person sees a red card with the fix (in the app it opens the setup guide);
+  both get a Telegram note at 10:00 while it lasts (new kind "Qoʻngʻiroq
+  yozuvlari"). App 2.3.0 adds a setup step: switch on automatic recording
+  in the Phone app.
+- **Disk space:** the developer's home page and Telegram (9:00) warn when
+  the server has under 5 GB or 10% free — recordings are never deleted.
+- **Moliya → Umumiy** shows the month's money first (with six months as
+  small columns), then debts / new contracts / consultations (each opens its
+  tab), warnings only when something needs doing; the long breakdown and the
+  other tables fold away.
+- **Russian** in the portal (Profile → language, and on the sign-in page).
+  Uzbek stays the default. The Telegram bot and the app's own screens are
+  still in Uzbek.
+- **New look:** Ledger's own colours instead of the stock iPhone ones, a
+  graphite dark mode, and a floating tab bar on phones.
+
+#### Same release, part 2: follow-ups, connected people, documents, the funnel, strikes
+
+- **Next steps (follow-ups) on each client:** call, waiting for a decision
+  (1/2/3/7/14 days, one tap), meeting, documents, payment — with whom (the
+  client or a connected person), when, who does it. When it's due the person
+  gets it on Home ("Bugun qilinadigan ishlar") and in Telegram (new kind
+  "Keyingi qadamlar", with a "Bajarildi" button). Closing one asks how it went
+  (talked / no answer / yes / no / another time) and offers the next step;
+  "said no" can close the consultation with a reason. The old "call again"
+  date is now just the earliest open follow-up.
+- **Family and representatives** on each client (father, spouse,
+  representative… who decides ★). Calls from their numbers show on the
+  client.
+- **Why a consultation didn't continue:** choosing "Davom etmadi" asks for a
+  reason (price, will think, other lawyer, couldn't reach…). Reasons show in
+  the funnel.
+- **Clients with no next step** (Home): open consultations with nothing
+  planned and no appointment coming.
+- **Documents** on each client (contract, power of attorney, court
+  decision…), up to 50 MB each, stored in `CLIENT_FILES_DIR` (default
+  `storage/client-files`), included in the off-site backup.
+- **Notes say how a talk happened:** Telegram, meeting, another phone, SMS.
+- **From calls to contracts (funnel)** under the call numbers on Home and on
+  a person's page: different numbers (people, not calls) → talked to →
+  booked → came → signed, who was never talked to, and (managers) an
+  estimate of what that cost.
+- **Who is the call center** (Settings → Call-markaz): pick people one by
+  one or a whole position / office / report form at once. Home's call
+  numbers, the funnel and strikes count only them.
+- **Strikes for late call-backs** (Settings → Ogohlantirishlar): **off until
+  the developer switches it on**, and it only ever counts calls after that
+  moment. A missed call (in working hours, on the person's working days) not
+  called back within N minutes is a strike; over the monthly limit the
+  managers get a Telegram message, with the fine if one is set. A strike
+  removes itself if an in-time call-back turns up later; managers can remove
+  one with a reason (Natijalar → the person). Staff see their count, not the
+  fine. Daily reports, Natijalar and its Excel show them.
+- Migration `20261004000000_contacts_followups_strikes_files` — only adds
+  (5 new tables, 2 empty columns on cases). It turns every client's current
+  "call again" date into an open follow-up for that client's operator.
+- **Right after deploying (developer):**
+  1. Settings → **Call-markaz**: check the list (it starts from each
+     person's «Ish turi»).
+  2. Settings → **Ogohlantirishlar**: set the minutes, working hours, the
+     monthly limit (and a fine, if the firm wants one), tell the call center,
+     then switch it on.
+  3. Home → **Bugun qilinadigan ishlar** will show old "call again" dates
+     that already passed as late — the operators can close or move them.
+
+### Previous release (2026-09-30): detailed Moliya, report money, online consultations, Natijalar, days off, payment schedules, Kassa, backups
 
 - `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
   generate`, `pm2 restart all` as above. Three migrations, all only adding:

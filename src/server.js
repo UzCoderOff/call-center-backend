@@ -5,6 +5,7 @@ const { prepareDatabase } = require("./lib/dbSetup");
 const telegram = require("./services/telegram");
 const prisma = require("./lib/prisma");
 const { linkAllConsultationFees } = require("./services/consultationFee");
+const scheduler = require("./services/scheduler");
 
 // Check this once, loudly, at startup — so a missing/broken ffmpeg (e.g.
 // ffmpeg-static's binary never downloaded because this server has no
@@ -47,5 +48,7 @@ prepareDatabase()
         .catch((err) => console.error("tying consultation fees:", err.message));
       // The staff Telegram bot (off without TELEGRAM_BOT_TOKEN).
       telegram.start();
+      // Late call-back strikes and other work on a clock.
+      scheduler.start();
     });
   });

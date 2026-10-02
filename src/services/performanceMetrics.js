@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { jobOf } = require("../lib/jobs");
 
 // What a person can be measured on (Natijalar), and their targets.
 //
@@ -9,6 +10,18 @@ const prisma = require("../lib/prisma");
 //   consultations   their cases whose consultation date is this month
 //   contracts       their cases signed this month
 //   fees            consultation fees from their clients (soʻm)
+//   income          all the money they brought in, wherever it came from:
+//                   payments on their clients' cases (consultation fees,
+//                   contract payments…) and the money their daily reports
+//                   mark as income (Tushum). It holds contract money, so
+//                   only Moliya sees it in soʻm — the person themself (and
+//                   a manager without Moliya) sees how far along they are
+//                   in percent.
+//
+// Coordinators (Employee.job "coordinator") — the cases handed to them:
+//   collected       contract money paid this month on their cases (soʻm;
+//                   theirs to see, and Moliya's)
+//   cases           the contracts they look after now
 //
 // Report measures — for everyone who fills in a daily report form: each
 // number or money question (and each number/money column of a table
@@ -21,9 +34,26 @@ const prisma = require("../lib/prisma");
 // position's consultations / contracts targets stay the default for people
 // without their own.
 
-const BUILTIN = ["consultations", "contracts", "bookings", "calls_answered", "fees"];
-const MONEY = new Set(["fees"]);
+const BUILTIN = ["consultations", "contracts", "bookings", "calls_answered", "fees", "income", "collected", "cases"];
+const MONEY = new Set(["fees", "income", "collected"]);
+const CLIENT_KEYS = ["consultations", "contracts", "bookings", "calls_answered", "fees"];
+const COORDINATOR_KEYS = ["collected", "cases"];
+// Shown in soʻm only with Moliya (src/lib/finance.js); set only with Moliya.
+const FINANCE_ONLY = new Set(["income"]);
 const NUMERIC = ["number", "money"];
+
+// The built-in measures' names in Uzbek, for Excel and the Telegram bot (the
+// portal has its own translated ones, i18n "perf.measure.*").
+const BUILTIN_NAMES = {
+  consultations: "Konsultatsiyalar",
+  contracts: "Shartnomalar",
+  bookings: "Kalendarga yozgan",
+  calls_answered: "Javob berilgan qoʻngʻiroqlar",
+  fees: "Konsultatsiya toʻlovlari",
+  income: "Jami tushum",
+  collected: "Undirilgan toʻlovlar",
+  cases: "Qaraydigan ishlari",
+};
 
 const reportKey = (templateId, fieldId, columnId) => (columnId ? `report:${templateId}:${fieldId}:${columnId}` : `report:${templateId}:${fieldId}`);
 
@@ -109,15 +139,15 @@ async function targetsFor(employees, month, db = prisma) {
 
 // The measures to offer when setting someone's target: built-ins for client
 // work, and the questions of their report form (and any form they already
-// have a target from).
-async function catalogFor(employee, db = prisma) {
-  // Same rule as the performance page (services/performance.js), unless the
-  // developer settled it (workKind).
-  const autoOnly = employee.autoReport && !employee.alsoForm;
-  const kind = employee.workKind || "auto";
-  const clientWork = kind === "client" || (kind === "auto" && (employee.calendarAccess === "book" || (employee.collectCalls && autoOnly)));
-  // Calls only for people whose calls are collected.
-  const builtin = (clientWork ? BUILTIN.filter((k) => k !== "calls_answered" || employee.collectCalls) : []).map((key) => ({ key, builtin: true, unit: MONEY.has(key) ? "money" : "count" }));
+// have a target from). All income — for anyone, client or office work — only
+// to whoever sees Moliya.
+async function catalogFor(employee, { finance = false } = {}, db = prisma) {
+  // By their job (src/lib/jobs.js), as on the performance page. Calls only
+  // for people whose calls are collected.
+  const job = jobOf(employee);
+  const keys =
+    job === "call_center" ? CLIENT_KEYS.filter((k) => k !== "calls_answered" || employee.collectCalls) : job === "coordinator" ? COORDINATOR_KEYS : [];
+  const builtin = [...(finance ? ["income"] : []), ...keys].map((key) => ({ key, builtin: true, unit: MONEY.has(key) ? "money" : "count" }));
   const own = await db.target.findMany({ where: { employeeId: employee.id }, select: { metric: true } });
   const asksForm = employee.reportTemplateId && (!employee.autoReport || employee.alsoForm);
   const templateIds = new Set([asksForm ? employee.reportTemplateId : null, ...own.map((t) => parseKey(t.metric)?.templateId)].filter(Boolean));
@@ -125,4 +155,4 @@ async function catalogFor(employee, db = prisma) {
   return [...builtin, ...templates.flatMap(formMeasures)];
 }
 
-module.exports = { BUILTIN, MONEY, parseKey, reportKey, formMeasures, reportValues, targetsFor, catalogFor };
+module.exports = { BUILTIN, BUILTIN_NAMES, MONEY, FINANCE_ONLY, parseKey, reportKey, formMeasures, reportValues, targetsFor, catalogFor };

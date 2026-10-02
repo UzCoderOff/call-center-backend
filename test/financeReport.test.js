@@ -60,7 +60,8 @@ test("report money counts only marked questions, as the form is set NOW", () => 
   assert.equal(income.reduce((s, e) => s + e.amount, 0), 200000 + 150000 + 300000 + 50000 + 100000);
   assert.equal(expense.reduce((s, e) => s + e.amount, 0), 20000);
   // The unmarked consultation question isn't counted, but it's listed.
-  assert.deepEqual(unclassified, [{ form: "Hujjatlar", label: "Konsultatsiya", column: null, amount: 450000, count: 1 }]);
+  // (and whose it is, for that person's page in Natijalar)
+  assert.deepEqual(unclassified, [{ form: "Hujjatlar", label: "Konsultatsiya", column: null, amount: 450000, count: 1, byEmployee: { 3: 450000 } }]);
   // Grouped by question and service, with who wrote it; today's label.
   const items = groupEntries(income);
   assert.deepEqual(items.find((i) => i.service === "Tarjima"), { form: "Hujjatlar", label: "Xizmatlar", column: "Summa", service: "Tarjima", amount: 250000, count: 2, people: ["Nodira", "Sardor"] });

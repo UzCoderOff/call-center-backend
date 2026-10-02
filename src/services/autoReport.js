@@ -16,8 +16,13 @@ const MAX_DAYS = 62;
 function blankDay(date) {
   return {
     date,
-    calls: { total: 0, incoming: 0, outgoing: 0, answered: 0, missed: 0, reached: 0, needsCallback: 0, talkSeconds: 0 },
+    // numbers: different people (phone numbers) that day, however many calls.
+    calls: { total: 0, numbers: 0, incoming: 0, outgoing: 0, answered: 0, missed: 0, reached: 0, needsCallback: 0, talkSeconds: 0 },
     booked: 0,
+    // Follow-ups they finished, and late call-back strikes for that day's
+    // missed calls (cancelled ones don't count).
+    followUpsDone: 0,
+    strikes: 0,
     newClients: 0,
     consultations: 0,
     contracts: 0,
@@ -61,11 +66,11 @@ async function autoReportDays(employee, from, to) {
     return bounds.find((b) => ms >= b.from && ms <= b.to)?.day;
   };
 
-  const [calls, booked, clients, consultations, contracts, payments] = await Promise.all([
+  const [calls, booked, clients, consultations, contracts, payments, followUpsDone, strikes] = await Promise.all([
     employee.collectCalls
       ? prisma.callLog.findMany({
           where: { employeeId: employee.id, callTimestampMs: { gte: BigInt(start), lte: BigInt(end) } },
-          select: { callTimestampMs: true, callType: true, missed: true, durationSeconds: true, followUp: true },
+          select: { callTimestampMs: true, callType: true, missed: true, durationSeconds: true, followUp: true, phoneKey: true },
         })
       : [],
     prisma.appointment.findMany({ where: { bookedById: userId, createdAt: created }, select: { createdAt: true } }),
@@ -73,13 +78,20 @@ async function autoReportDays(employee, from, to) {
     prisma.clientCase.findMany({ where: { operatorId: employee.id, consultationDate: { gte: from, lte: to } }, select: { consultationDate: true } }),
     prisma.clientCase.findMany({ where: { operatorId: employee.id, contractDate: { gte: from, lte: to } }, select: { contractDate: true } }),
     prisma.payment.findMany({ where: { recordedById: userId, date: { gte: from, lte: to } }, select: { date: true, amount: true, kind: true } }),
+    prisma.clientFollowUp.findMany({ where: { doneById: userId, status: "done", doneAt: created }, select: { doneAt: true } }),
+    prisma.strike.findMany({ where: { employeeId: employee.id, cancelledAt: null, missedAt: created }, select: { missedAt: true } }),
   ]);
+  const numbersByDay = new Map();
 
   for (const c of calls) {
     const day = dayOf(Number(c.callTimestampMs));
     if (!day) continue;
     const s = day.calls;
     s.total += 1;
+    if (c.phoneKey) {
+      if (!numbersByDay.has(day)) numbersByDay.set(day, new Set());
+      numbersByDay.get(day).add(c.phoneKey);
+    }
     s.talkSeconds += c.durationSeconds || 0;
     if (c.missed) {
       s.missed += 1;
@@ -90,6 +102,15 @@ async function autoReportDays(employee, from, to) {
       if (c.callType === "incoming") s.incoming += 1;
       if (c.callType === "outgoing") s.outgoing += 1;
     }
+  }
+  for (const [day, set] of numbersByDay) day.calls.numbers = set.size;
+  for (const f of followUpsDone) {
+    const day = dayOf(f.doneAt);
+    if (day) day.followUpsDone += 1;
+  }
+  for (const k of strikes) {
+    const day = dayOf(k.missedAt);
+    if (day) day.strikes += 1;
   }
   for (const a of booked) {
     const day = dayOf(a.createdAt);
@@ -124,9 +145,9 @@ function addUp(reports) {
   for (const r of reports) {
     if (r.calls) {
       withCalls = true;
-      for (const key of Object.keys(total.calls)) total.calls[key] += r.calls[key];
+      for (const key of Object.keys(total.calls)) total.calls[key] += r.calls[key] || 0;
     }
-    for (const key of ["booked", "newClients", "consultations", "contracts"]) total[key] += r[key];
+    for (const key of ["booked", "newClients", "consultations", "contracts", "followUpsDone", "strikes"]) total[key] += r[key] || 0;
     total.payments.count += r.payments.count;
     total.payments.amount += r.payments.amount;
     total.consultationPayments.count += r.consultationPayments?.count || 0;

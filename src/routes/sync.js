@@ -286,6 +286,7 @@ router.post("/sync", (req, res) => {
         appVersion: typeof payload.appVersion === "string" ? payload.appVersion.slice(0, 40) : null,
         integrityFlag: typeof payload.logIntegrity === "string" ? payload.logIntegrity.slice(0, 80) : null,
         missingEntries: optionalInt(payload.missingEntries),
+        filesAccess: typeof payload.filesAccess === "boolean" ? payload.filesAccess : null,
       });
 
       res.json({ ok: true, ...result });

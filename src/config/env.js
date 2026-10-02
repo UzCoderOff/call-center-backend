@@ -27,10 +27,17 @@ const materialsDir = process.env.MATERIALS_DIR
   ? path.resolve(process.env.MATERIALS_DIR)
   : path.join(path.dirname(storageRoot), "materials");
 
+// Files kept on clients (contracts, court decisions, receipts…), next to the
+// recordings unless CLIENT_FILES_DIR says otherwise.
+const clientFilesDir = process.env.CLIENT_FILES_DIR
+  ? path.resolve(process.env.CLIENT_FILES_DIR)
+  : path.join(path.dirname(storageRoot), "client-files");
+
 module.exports = {
   port: Number(process.env.PORT) || 4000,
   downloadsDir,
   materialsDir,
+  clientFilesDir,
   // The portal's address, for links in Telegram messages ("open in Ledger").
   // Without it, messages simply have no link.
   portalUrl: (process.env.PORTAL_URL || "").replace(/\/+$/, "") || null,

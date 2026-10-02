@@ -41,6 +41,7 @@ function publicEmployee(employee, viewerRole, sync) {
     alsoForm: employee.alsoForm,
     calendarAccess: employee.calendarAccess,
     workKind: employee.workKind,
+    job: employee.job,
     workDays: employee.workDays,
     holidaysOff: employee.holidaysOff,
     reportTemplate: employee.reportTemplate ?? null,
@@ -77,6 +78,7 @@ function optionalId(value, field) {
 
 const CALENDAR_ACCESS = ["none", "view", "book"];
 const WORK_KINDS = ["auto", "client", "office"];
+const { JOBS } = require("../lib/jobs");
 const { normalizePattern } = require("../services/workdays");
 
 // The job-related settings shared by create and update.
@@ -104,7 +106,13 @@ function workSettings(body) {
     if (!CALENDAR_ACCESS.includes(body.calendarAccess)) throw badRequest("invalid calendarAccess");
     data.calendarAccess = body.calendarAccess;
   }
-  // What Natijalar measures them on (see schema: Employee.workKind).
+  // What they do (see schema: Employee.job) — decides the call-back list,
+  // the Calls/Home default and what Natijalar measures them on.
+  if (body.job !== undefined) {
+    if (!JOBS.includes(body.job)) throw badRequest("invalid job");
+    data.job = body.job;
+  }
+  // Older portals: what Natijalar measures them on (Employee.workKind).
   if (body.workKind !== undefined) {
     if (!WORK_KINDS.includes(body.workKind)) throw badRequest("invalid workKind");
     data.workKind = body.workKind;
@@ -156,6 +164,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       if (settings.reportTemplateId === undefined) settings.reportTemplateId = position.reportTemplateId;
       if (settings.workDays === undefined) settings.workDays = position.workDays;
       if (settings.holidaysOff === undefined) settings.holidaysOff = position.holidaysOff;
+      if (settings.job === undefined) settings.job = position.job;
     }
 
     const existingUsername = await prisma.user.findUnique({ where: { username } });
@@ -180,6 +189,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         alsoForm: settings.alsoForm ?? false,
         calendarAccess: settings.calendarAccess ?? "none",
         workKind: settings.workKind ?? "auto",
+        job: settings.job ?? "other",
         // Without a position: call-center staff (calls collected) work every
         // day, holidays included; everyone else Monday–Saturday.
         workDays: settings.workDays ?? (settings.collectCalls ? "1234567" : "123456"),

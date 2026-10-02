@@ -323,7 +323,7 @@ function buildFinance({ month, today, fee, payments, trendPayments, cases, appoi
         ? {
             income: { total: reportIncome, count: income.length, items: groupEntries(income) },
             expense: { total: expenses, count: expense.length, items: groupEntries(expense) },
-            unclassified: report.unclassified,
+            unclassified: report.unclassified.map(({ byEmployee, ...u }) => u),
           }
         : null,
       methods: [...methods.values()].sort(byAmount),

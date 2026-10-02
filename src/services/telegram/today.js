@@ -6,7 +6,8 @@ const m = require("../materials");
 const f = require("./format");
 const { isManagerUser, ownsCalendar, booksAppointments } = require("./prefs");
 const { canSeeFinance } = require("../../lib/finance");
-const { clientScope } = require("../../lib/clientAccess");
+const { workScope } = require("../../lib/clientAccess");
+const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 
 // "My day" for one person — the morning message and the bot's "Bugun"
 // button: their appointments, clients to call, missed calls to return,
@@ -14,7 +15,7 @@ const { clientScope } = require("../../lib/clientAccess");
 // only what the portal already shows them.
 
 const canSeeClients = (user) =>
-  isManagerUser(user) || user.role === "LAWYER" || Boolean(user.employee?.collectCalls) || user.employee?.calendarAccess === "book";
+  isManagerUser(user) || user.role === "LAWYER" || Boolean(user.employee?.collectCalls) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
 
 // A day's appointments: in their own calendar (the lawyer), or the ones
 // they booked (staff).
@@ -44,11 +45,30 @@ async function appointmentLines(user, date, now) {
   ];
 }
 
+const FU_WORDS = { call: "qoʻngʻiroq", decision: "qaror muddati", meeting: "uchrashuv", documents: "hujjatlar", payment: "toʻlov", other: "eslatma" };
+
+// Their follow-ups due today (and overdue), with whom.
+async function followUpLines(user, date) {
+  const end = new Date(firmDayRange(date).to);
+  const rows = await prisma.clientFollowUp.findMany({
+    where: { assigneeId: user.id, status: "open", dueAt: { lte: end }, client: { archivedAt: null } },
+    orderBy: { dueAt: "asc" },
+    take: 15,
+    select: { kind: true, dueAt: true, client: { select: { name: true } }, contact: { select: { name: true } } },
+  });
+  if (rows.length === 0) return [];
+  const late = rows.filter((r) => r.dueAt.getTime() < Date.now()).length;
+  return [
+    `📝 <b>Eslatmalar (${rows.length})</b>${late ? ` — muddati oʻtgan: ${late}` : ""}`,
+    ...rows.map((r) => `${f.moment(r.dueAt, date)} — ${FU_WORDS[r.kind] || FU_WORDS.other}: ${f.escapeHtml(r.client.name)}${r.contact ? ` (${f.escapeHtml(r.contact.name)})` : ""}`),
+  ];
+}
+
 async function clientLines(user, date) {
   if (!canSeeClients(user)) return [];
   const end = new Date(firmDayRange(date).to);
-  // Only the clients this person may see (their own, for staff and lawyers).
-  const where = { AND: [{ archivedAt: null, nextCallAt: { not: null, lte: end } }, clientScope(user)] };
+  // Only the clients this person works on (their own, for staff and lawyers).
+  const where = { AND: [{ archivedAt: null, nextCallAt: { not: null, lte: end } }, workScope(user)] };
   const total = await prisma.client.count({ where });
   if (total === 0) return [];
   return [`📞 Bugun qoʻngʻiroq qilinadigan mijozlar: <b>${total}</b> ta`];
@@ -56,12 +76,37 @@ async function clientLines(user, date) {
 
 // Missed calls on their own phone that still wait for a call back.
 async function missedLines(user, now) {
-  if (!user.employee?.collectCalls) return [];
+  // The call-back list is the call center's (Employee.job).
+  if (!user.employee?.collectCalls || !isCallCenter(user.employee)) return [];
   const since = BigInt(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const count = await prisma.callLog.count({
     where: { employeeId: user.employee.id, missed: true, followUp: "pending", callTimestampMs: { gte: since } },
   });
   return count > 0 ? [`☎️ Qayta qoʻngʻiroq kutayotgan javobsiz qoʻngʻiroqlar: <b>${count}</b> ta`] : [];
+}
+
+const DATE_WORDS = { hearing: "Sud majlisi", summons: "Chaqiruv", deadline: "Muddat", meeting: "Uchrashuv", other: "Muhim sana" };
+
+// The key dates in their cases today and tomorrow (hearings, deadlines):
+// a lawyer's and a coordinator's own cases, every case for managers.
+async function caseDateLines(user, now) {
+  const caseWhere = isManagerUser(user) ? {} : user.role === "LAWYER" ? { lawyerId: user.id } : isCoordinator(user.employee) ? { coordinatorId: user.employee.id } : null;
+  if (!caseWhere) return [];
+  const rows = await prisma.caseDate.findMany({
+    where: { deletedAt: null, date: { gte: now.date, lte: shiftDate(now.date, 1) }, case: { ...caseWhere, client: { archivedAt: null } } },
+    orderBy: [{ date: "asc" }, { time: "asc" }],
+    take: 20,
+    select: { kind: true, date: true, time: true, title: true, place: true, case: { select: { client: { select: { name: true } } } } },
+  });
+  if (rows.length === 0) return [];
+  return [
+    `⚖️ <b>Ishlardagi muhim sanalar (${rows.length})</b>`,
+    ...rows.map((r) => {
+      const when = `${r.date === now.date ? "Bugun" : "Ertaga"}${r.time != null ? `, ${f.clock(r.time)}` : ""}`;
+      const what = [DATE_WORDS[r.kind] || DATE_WORDS.other, r.title ? f.escapeHtml(r.title) : null].filter(Boolean).join(": ");
+      return `${when} — ${what} · ${f.escapeHtml(r.case.client.name)}${r.place ? ` · ${f.escapeHtml(r.place)}` : ""}`;
+    }),
+  ];
 }
 
 async function materialLines(user) {
@@ -132,6 +177,8 @@ async function myDay(user, { now = firmNow(), morning = false } = {}) {
   const sections = [
     await managerLines(user, now),
     await taskLines(user, now),
+    await followUpLines(user, now.date),
+    await caseDateLines(user, now),
     await appointmentLines(user, now.date, now),
     await clientLines(user, now.date),
     await missedLines(user, now),

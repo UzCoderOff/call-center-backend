@@ -9,8 +9,12 @@ const cl = require("../services/clients");
 const importer = require("../services/clientImport");
 const { buildXlsx } = require("../lib/xlsx");
 const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
-const { canSeeFinance, financeForbidden, caseWithoutMoney, visiblePayments, isConsultation, CONSULTATION } = require("../lib/finance");
-const { clientScope, ownCaseWhere, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
+const { canSeeFinance, canSeeCaseMoney, financeForbidden, caseWithoutMoney, isConsultation, CONSULTATION } = require("../lib/finance");
+const { CONTRACT_STATUSES, clientScope, workScope, ownCaseWhere, caseRole, clientLevel, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
+const { isCoordinator } = require("../lib/jobs");
+const history = require("../services/caseHistory");
+const { syncNextCall, FOLLOW_UP_INCLUDE } = require("../services/clientFollowUps");
+const { events: bus } = require("../lib/events");
 const { linkConsultationFees } = require("../services/consultationFee");
 const { scheduleOf, normalizeSchedule } = require("../services/installments");
 const env = require("../config/env");
@@ -29,13 +33,16 @@ const env = require("../config/env");
 //   DELETE /api/clients/:id      archive (hidden, kept, restorable)  ·  POST …/restore
 //   POST /api/clients/:id/merge  fold a duplicate into this client (managers)
 //
-// Who: managers, and staff who deal with clients — call-center staff and
-// anyone who books appointments — but staff only see THEIR clients: the ones
-// they are the operator of, or added themselves (src/lib/clientAccess.js). Archiving, merging, deleting cases/payments,
+// Who: managers, and staff who deal with clients — call-center staff, anyone
+// who books appointments, coordinators — but staff only see THEIR clients
+// (src/lib/clientAccess.js): an operator their consultations, and once the
+// client signs only a "result" (name, number, dates); a coordinator the
+// cases assigned to them, money included; a lawyer (LAWYER account) the
+// cases assigned to them. Archiving, merging, deleting cases/payments,
 // importing and exporting: managers only — each recorded in the audit log.
-// Lawyers (LAWYER accounts) see only their own clients — those with a case
-// assigned to them — and only their own cases of those; they can move their
-// cases along and write notes, nothing else.
+//
+// A case's history: its stages with dates (CaseStage) and its key dates
+// (CaseDate) — routes/caseWork.js — and every change on the timeline.
 //
 // Contract money — contract amounts, contract payments, debts — only for the
 // DEVELOPER and accounts with the "Moliya" switch (src/lib/finance.js):
@@ -45,7 +52,7 @@ const env = require("../config/env");
 // it (they check it before booking the client in).
 
 function canUseClients(user) {
-  return isManager(user) || isLawyer(user) || Boolean(user.employee?.collectCalls || user.employee?.calendarAccess === "book");
+  return isManager(user) || isLawyer(user) || Boolean(user.employee?.collectCalls || user.employee?.calendarAccess === "book" || isCoordinator(user.employee));
 }
 function gate(req, res, next) {
   if (!canUseClients(req.user)) return res.status(403).json({ error: "forbidden" });
@@ -54,7 +61,7 @@ function gate(req, res, next) {
 // What a lawyer may do here; everything else is closed to them.
 function lawyerGate(req, res, next) {
   if (!isLawyer(req.user)) return next();
-  const allowed = (req.method === "GET" && /^\/(\d+)?$/.test(req.path)) || (req.method === "POST" && /^\/\d+\/notes$/.test(req.path));
+  const allowed = (req.method === "GET" && /^\/(\d+)?$/.test(req.path)) || (req.method === "POST" && /^\/\d+\/(notes|follow-ups|files\/uploads)$/.test(req.path));
   if (!allowed) return res.status(403).json({ error: "forbidden" });
   next();
 }
@@ -72,7 +79,8 @@ const PERSON = { select: { id: true, username: true, employee: { select: { name:
 const today = () => firmNow().date;
 
 function sendError(err, res, next) {
-  if (err instanceof cl.ClientError) return res.status(400).json({ error: err.message });
+  if (err instanceof cl.ClientError || err instanceof history.HistoryError) return res.status(400).json({ error: err.message });
+  if (err.status === 403 || err.status === 404) return res.status(err.status).json({ error: err.message });
   if (err.code === "P2025") return res.status(404).json({ error: "not_found" });
   if (err.code === "P2002") return res.status(409).json({ error: "already_exists" });
   return next(err);
@@ -103,14 +111,9 @@ function clientFields(b) {
   }
   const source = cl.oneOf(b.source, cl.SOURCES, "source");
   if (source !== undefined) data.source = source;
-  if (b.nextCallAt !== undefined) {
-    if (b.nextCallAt === null || b.nextCallAt === "") data.nextCallAt = null;
-    else {
-      const when = new Date(b.nextCallAt);
-      if (Number.isNaN(when.getTime())) throw badRequest("invalid nextCallAt");
-      data.nextCallAt = when;
-    }
-  }
+  // The next call is the earliest open follow-up now (clientWork.js); see
+  // the PATCH below for what setting it directly does.
+  delete data.nextCallNote;
   return data;
 }
 
@@ -184,15 +187,36 @@ function withMoney(c) {
 const clients = express.Router();
 clients.use(requireAuth, gate, lawyerGate);
 
-// Two sections, so ongoing work isn't buried under one-off consultations:
-//   ?section=clients        clients with a contract (or a finished case)
-//   ?section=consultations  everyone else — consultations, "call again", declined
+// Sections, so ongoing work isn't buried under one-off consultations:
+//   ?section=clients        clients with a contract (or a finished case) —
+//                           for a coordinator, the cases they look after
+//   ?section=consultations  everyone else — consultations, "call again",
+//                           declined; for an operator, the ones they work on
+//   ?section=results        an operator's clients who signed a contract (they
+//                           see each as a result: name, number, dates)
+//   ?section=unassigned     managers: contracts still without a coordinator
+//                           or a lawyer
 // (no section: everyone, e.g. when searching). A lawyer: by their own cases.
-const CONTRACT_STATUSES = ["contract", "done"];
 function sectionWhere(section, user) {
-  const own = ownCaseWhere(user);
-  if (section === "clients") return { cases: { some: { ...own, status: { in: CONTRACT_STATUSES } } } };
-  if (section === "consultations") return { cases: { none: { ...own, status: { in: CONTRACT_STATUSES } } } };
+  if (section === "unassigned") return isManager(user) ? { cases: { some: { status: "contract", OR: [{ coordinatorId: null }, { lawyerId: null }] } } } : { id: -1 };
+  if (isManager(user) || isLawyer(user)) {
+    const own = ownCaseWhere(user);
+    if (section === "clients") return { cases: { some: { ...own, status: { in: CONTRACT_STATUSES } } } };
+    if (section === "consultations") return { cases: { none: { ...own, status: { in: CONTRACT_STATUSES } } } };
+    if (section === "results") return { id: -1 };
+    return null;
+  }
+  const me = user.employee?.id ?? -1;
+  if (section === "clients") return { cases: { some: { coordinatorId: me } } };
+  if (section === "consultations") {
+    return {
+      OR: [
+        { cases: { some: { operatorId: me, status: { notIn: CONTRACT_STATUSES } } } },
+        { createdById: user.id, cases: { none: { operatorId: { not: null } } } },
+      ],
+    };
+  }
+  if (section === "results") return { cases: { some: { operatorId: me, status: { in: CONTRACT_STATUSES } } } };
   return null;
 }
 
@@ -213,6 +237,7 @@ async function listQuery(q, user) {
   // "none": cases nobody is assigned to yet — to find and fill in.
   if (q.operatorId) caseWhere.operatorId = q.operatorId === "none" ? null : parseId(q.operatorId, "operatorId");
   if (q.lawyerId) caseWhere.lawyerId = q.lawyerId === "none" ? null : parseId(q.lawyerId, "lawyerId");
+  if (q.coordinatorId && isManager(user)) caseWhere.coordinatorId = q.coordinatorId === "none" ? null : parseId(q.coordinatorId, "coordinatorId");
   if (q.lawyer) caseWhere.lawyer = String(q.lawyer);
   if (q.filter === "active") caseWhere.status = caseWhere.status || { in: cl.OPEN_STATUSES };
   if (!isManager(user) && Object.keys(caseWhere).length > 0) Object.assign(caseWhere, ownCaseWhere(user));
@@ -221,11 +246,16 @@ async function listQuery(q, user) {
   let orderBy = [{ updatedAt: "desc" }];
   if (q.filter === "callToday") {
     and.push({ nextCallAt: { not: null, lte: new Date(firmDayRange(today()).to) } });
+    // Only clients they work on now — not a past result (the coordinator
+    // calls those).
+    if (!isManager(user)) and.push(workScope(user));
     orderBy = [{ nextCallAt: "asc" }];
   }
   if (q.filter === "debt") {
-    if (!canSeeFinance(user)) throw financeForbidden();
-    and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? user.id : null) } });
+    // Moliya (a lawyer: their own cases), or a coordinator's own cases.
+    if (canSeeFinance(user)) and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? { lawyerId: user.id } : {}) } });
+    else if (isCoordinator(user.employee)) and.push({ id: { in: await clientIdsWithDebt({ coordinatorId: user.employee.id }) } });
+    else throw financeForbidden();
   }
   // Archived clients are shown whatever their section.
   if (q.filter !== "archived") {
@@ -242,14 +272,21 @@ async function listQuery(q, user) {
   return { where: { AND: and }, orderBy };
 }
 
+// Which section tabs this person gets.
+function sectionsFor(user) {
+  if (isManager(user)) return ["clients", "consultations", "unassigned"];
+  if (isLawyer(user)) return ["clients", "consultations"];
+  if (isCoordinator(user.employee)) return ["clients", "consultations"];
+  return ["consultations", "results"];
+}
+
 clients.get("/", async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
-    const money = canSeeFinance(req.user);
     const { where, orderBy } = await listQuery(req.query, req.user);
     // How many each section has with the same filters — for the tabs.
     const sectionCount = async (section) => prisma.client.count({ where: (await listQuery({ ...req.query, section }, req.user)).where });
-    const sections = req.query.section ? { clients: await sectionCount("clients"), consultations: await sectionCount("consultations") } : null;
+    const sections = req.query.section ? Object.fromEntries(await Promise.all(sectionsFor(req.user).map(async (s) => [s, await sectionCount(s)]))) : null;
     const [rows, total] = await Promise.all([
       prisma.client.findMany({
         where,
@@ -268,9 +305,14 @@ clients.get("/", async (req, res, next) => {
               legalStage: true,
               lawyer: true,
               lawyerId: true,
-              contractAmount: money,
+              operatorId: true,
+              coordinatorId: true,
+              consultationDate: true,
+              contractDate: true,
+              contractAmount: true,
               operator: { select: { id: true, name: true } },
-              ...(money ? { payments: { select: { amount: true, kind: true } } } : {}),
+              coordinator: { select: { id: true, name: true } },
+              payments: { select: { amount: true, kind: true } },
             },
           },
         },
@@ -279,13 +321,36 @@ clients.get("/", async (req, res, next) => {
     ]);
 
     res.json({
-      clients: rows.map(({ phones, cases, searchText, extra, ...c }) => ({
-        ...c,
-        phone: phones[0]?.phone || null,
-        latestCase: cases[0] ? (({ payments, ...k }) => k)(cases[0]) : null,
-        caseCount: cases.length,
-        ...(money ? { debt: cases.reduce((sum, k) => sum + cl.paymentSummary(k.contractAmount, k.payments).remaining, 0) } : {}),
-      })),
+      clients: rows.map(({ phones, cases, searchText, extra, ...c }) => {
+        const phone = phones[0]?.phone || null;
+        const { level, roles } = clientLevel(req.user, { ...c, cases });
+        // Signed with an operator's help, now the coordinator's: the operator
+        // sees who and when — not the case.
+        if (level === "result") {
+          return {
+            id: c.id,
+            name: c.name,
+            phone,
+            archivedAt: c.archivedAt,
+            createdAt: c.createdAt,
+            updatedAt: c.updatedAt,
+            result: true,
+            signed: cases.filter((k) => roles.get(k.id) === "result").map((k) => ({ consultationDate: k.consultationDate, contractDate: k.contractDate, coordinator: k.coordinator?.name ?? null })),
+          };
+        }
+        const visible = cases.filter((k) => roles.get(k.id) && roles.get(k.id) !== "result");
+        const withMoneyCases = visible.filter((k) => canSeeCaseMoney(req.user, k));
+        const latest = visible[0] || null;
+        return {
+          ...c,
+          phone,
+          latestCase: latest
+            ? (({ payments, contractAmount, operatorId, coordinatorId, ...k }) => (canSeeCaseMoney(req.user, latest) ? { ...k, contractAmount } : k))(latest)
+            : null,
+          caseCount: visible.length,
+          ...(withMoneyCases.length ? { debt: withMoneyCases.reduce((sum, k) => sum + cl.paymentSummary(k.contractAmount, k.payments).remaining, 0) } : {}),
+        };
+      }),
       pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
       ...(sections ? { sections } : {}),
     });
@@ -294,9 +359,9 @@ clients.get("/", async (req, res, next) => {
   }
 });
 
-async function clientIdsWithDebt(lawyerId = null) {
+async function clientIdsWithDebt(caseWhere = {}) {
   const cases = await prisma.clientCase.findMany({
-    where: { contractAmount: { gt: 0 }, ...(lawyerId ? { lawyerId } : {}) },
+    where: { contractAmount: { gt: 0 }, ...caseWhere },
     select: { clientId: true, contractAmount: true, payments: { select: { amount: true, kind: true } } },
   });
   return [...new Set(cases.filter((k) => cl.paymentSummary(k.contractAmount, k.payments).remaining > 0).map((k) => k.clientId))];
@@ -384,6 +449,17 @@ clients.get("/lawyers", async (req, res, next) => {
   }
 });
 
+// Who a contract can be handed to: staff whose job is coordinator first,
+// then everyone else active (managers assign).
+clients.get("/coordinators", managersOnly, async (req, res, next) => {
+  try {
+    const rows = await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true }, orderBy: { name: "asc" } });
+    res.json({ coordinators: rows.filter((e) => e.job === "coordinator"), others: rows.filter((e) => e.job !== "coordinator") });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // This month's consultations and contracts per operator, against their
 // position's targets. Staff see only their own row.
 clients.get("/targets", async (req, res, next) => {
@@ -451,52 +527,123 @@ clients.post("/", async (req, res, next) => {
   }
 });
 
-// One client, with everything the client page shows: phones, cases (with
-// payments and money summary), connections, the timeline's notes, and the
-// calls and appointments found through their phone numbers.
+// One client, with everything the client page shows, shaped by who's
+// looking (src/lib/clientAccess.js):
+//   - phones, details, connections, the next call
+//   - cases with their people (operator, coordinator, lawyer), stage history
+//     with dates, key dates (hearings, deadlines), money where allowed
+//   - the timeline: notes, status and stage changes, assignments, edits —
+//     plus calls and appointments found through their phone numbers
+// `view: "result"`: an operator whose client signed — name, number, the
+// dates and their own calls, nothing of the case.
+const CASE_INCLUDE = {
+  operator: { select: { id: true, name: true } },
+  coordinator: { select: { id: true, name: true } },
+  payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
+  installments: true,
+  stages: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
+  dates: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { time: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
+};
+
+// What this person may do on a case, for the portal's buttons (the server
+// checks each action again).
+function casePermissions(user, role, k) {
+  const manager = role === "manager";
+  const people = manager || role === "lawyer" || role === "coordinator";
+  return {
+    role,
+    canEdit: manager || role === "lawyer" || role === "coordinator" || role === "operator",
+    canStatus: manager || role === "lawyer" || role === "operator",
+    canHistory: people,
+    canDates: people,
+    canAssign: manager,
+    canPay: canSeeFinance(user) || role === "coordinator",
+    canSchedule: canSeeFinance(user) && (manager || role === "lawyer"),
+    money: canSeeCaseMoney(user, k),
+  };
+}
+
+function callSelect() {
+  return {
+    id: true,
+    callType: true,
+    missed: true,
+    followUp: true,
+    callTimestampMs: true,
+    durationSeconds: true,
+    recordingPath: true,
+    employee: { select: { id: true, name: true, job: true } },
+  };
+}
+
 clients.get("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const lawyer = isLawyer(req.user);
-    await requireClientAccess(req.user, id);
+    const { level, roles } = await requireClientAccess(req.user, id);
+    const me = req.user.employee?.id ?? -1;
     const client = await prisma.client.findUnique({
       where: { id },
       include: {
         phones: { orderBy: { id: "asc" } },
         createdBy: PERSON,
-        cases: {
-          orderBy: { createdAt: "desc" },
-          include: { operator: { select: { id: true, name: true } }, payments: { orderBy: { date: "desc" } }, installments: true },
-        },
+        cases: { orderBy: { createdAt: "desc" }, include: CASE_INCLUDE },
         payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
-        events: { orderBy: { createdAt: "desc" }, take: 300, include: { author: PERSON } },
+        events: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 500, include: { author: PERSON } },
         linksFrom: { include: { to: { include: LINKED } } },
         linksTo: { include: { from: { include: LINKED } } },
+        contacts: { where: { deletedAt: null }, orderBy: [{ decides: "desc" }, { id: "asc" }] },
+        followUps: { orderBy: { dueAt: "asc" }, include: FOLLOW_UP_INCLUDE },
+        files: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, include: { uploadedBy: PERSON } },
       },
     });
     if (!client) return res.status(404).json({ error: "not_found" });
+    // Their numbers, and the numbers of the people connected to them.
+    const keys = [...client.phones.map((p) => p.phoneKey), ...client.contacts.map((c) => c.phoneKey)].filter(Boolean);
 
-    const keys = client.phones.map((p) => p.phoneKey).filter(Boolean);
-    // Same rule as the calls list: managers see all; staff their own calls
-    // only; a lawyer none.
-    const callAccess = isManager(req.user) ? {} : { employeeId: req.user.employee?.id ?? -1 };
+    // ---- an operator's past result: who and when, nothing of the case.
+    if (level === "result") {
+      const [calls, appointments] = await Promise.all([
+        keys.length ? prisma.callLog.findMany({ where: { phoneKey: { in: keys }, employeeId: me }, orderBy: { callTimestampMs: "desc" }, take: 100, select: callSelect() }) : [],
+        prisma.appointment.findMany({
+          where: { bookedById: req.user.id, OR: [{ clientId: id }, ...(keys.length ? [{ phoneKey: { in: keys } }] : [])] },
+          orderBy: [{ date: "desc" }, { start: "desc" }],
+          take: 50,
+          select: { id: true, date: true, start: true, end: true, status: true, format: true, calendarId: true, calendar: { select: { id: true, name: true } } },
+        }),
+      ]);
+      return res.json({
+        id: client.id,
+        view: "result",
+        name: client.name,
+        phones: client.phones.map((p) => ({ id: p.id, phone: p.phone })),
+        createdAt: client.createdAt,
+        createdBy: client.createdBy,
+        archivedAt: client.archivedAt,
+        results: client.cases
+          .filter((k) => roles.get(k.id) === "result")
+          .map((k) => ({ id: k.id, status: k.status, startDate: k.startDate, consultationDate: k.consultationDate, contractDate: k.contractDate, coordinator: k.coordinator?.name ?? null })),
+        calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
+        appointments,
+        canManage: false,
+      });
+    }
+
+    const manager = level === "manager";
+    const lawyer = isLawyer(req.user);
+    // The cases they work on, and (an operator with a new consultation for a
+    // client who signed before) their past results, as results.
+    const visible = client.cases.filter((k) => roles.has(k.id) && roles.get(k.id) !== "result");
+    const results = client.cases.filter((k) => roles.get(k.id) === "result");
+    const visibleIds = new Set(visible.map((k) => k.id));
+    const moneyIds = new Set(visible.filter((k) => canSeeCaseMoney(req.user, k)).map((k) => k.id));
+
+    // Calls with their numbers: managers and coordinators all of them (the
+    // whole history matters after the contract); staff their own; a lawyer
+    // none.
+    const callWhere = manager || level === "coordinator" ? {} : { employeeId: me };
     const [calls, appointments] = await Promise.all([
       keys.length && !lawyer
-        ? prisma.callLog.findMany({
-            where: { phoneKey: { in: keys }, ...callAccess },
-            orderBy: { callTimestampMs: "desc" },
-            take: 100,
-            select: {
-              id: true,
-              callType: true,
-              missed: true,
-              followUp: true,
-              callTimestampMs: true,
-              durationSeconds: true,
-              recordingPath: true,
-              employee: { select: { id: true, name: true } },
-            },
-          })
+        ? prisma.callLog.findMany({ where: { phoneKey: { in: keys }, ...callWhere }, orderBy: { callTimestampMs: "desc" }, take: 200, select: callSelect() })
         : [],
       prisma.appointment.findMany({
         where: {
@@ -510,21 +657,45 @@ clients.get("/:id", async (req, res, next) => {
       }),
     ]);
 
-    const { linksFrom, linksTo, searchText, extra, ...rest } = client;
+    const { linksFrom, linksTo, searchText, extra, cases, payments, events, followUps, files, contacts, ...rest } = client;
+    // About the client, or about a case they see.
+    const caseVisible = (caseId) => manager || caseId == null || visibleIds.has(caseId);
+    // Open ones, and the last 30 closed.
+    const shownFollowUps = followUps.filter((f) => caseVisible(f.caseId) && f.client);
+    const openFollowUps = shownFollowUps.filter((f) => f.status === "open");
+    const closedFollowUps = shownFollowUps.filter((f) => f.status !== "open").sort((a, b) => (b.doneAt?.getTime() ?? 0) - (a.doneAt?.getTime() ?? 0)).slice(0, 30);
     // Connected clients the viewer may not open show only as "a client".
     const visibleLinked = await accessibleClientIds(req.user, [...linksFrom.map((l) => l.to.id), ...linksTo.map((l) => l.from.id)]);
     const shownLink = (other) => (visibleLinked.has(other.id) ? linkedSummary(other) : { id: null, name: null, phone: null, status: null, archived: false, restricted: true });
-    // A lawyer sees their own cases (and those cases' history, plus notes
-    // about the client), not the rest of the file. Money: only with Moliya.
-    const ownCases = lawyer ? client.cases.filter((k) => k.lawyerId === req.user.id) : client.cases;
-    const ownIds = new Set(ownCases.map((k) => k.id));
-    const money = canSeeFinance(req.user);
+
+    const caseOut = (k) => {
+      const base = moneyIds.has(k.id) ? withMoney(k) : caseWithoutMoney(k);
+      return { ...base, permissions: casePermissions(req.user, roles.get(k.id), k) };
+    };
+    // Payments: consultation fees for everyone who sees the client; the rest
+    // only on cases whose money they see (Moliya: all, unattached ones too).
+    const shownPayments = payments.filter((p) => {
+      if (p.caseId != null && !visibleIds.has(p.caseId) && !manager) return false;
+      if (isConsultation(p)) return true;
+      return p.caseId != null ? moneyIds.has(p.caseId) : canSeeFinance(req.user);
+    });
+    // The timeline: about the client as a whole, or about a case they see. A
+    // lawyer: notes about the client, and everything about their cases.
+    const shownEvents = events.filter((e) => {
+      if (manager) return true;
+      if (e.caseId == null) return lawyer ? e.kind === "note" : true;
+      return visibleIds.has(e.caseId);
+    });
+
     res.json({
       ...rest,
-      cases: ownCases.map((k) => (money ? withMoney(k) : caseWithoutMoney(k))),
-      payments: visiblePayments(req.user, lawyer ? client.payments.filter((p) => ownIds.has(p.caseId)) : client.payments),
-      finance: money,
-      events: lawyer ? client.events.filter((e) => e.caseId == null ? e.kind === "note" : ownIds.has(e.caseId)) : client.events,
+      view: "full",
+      level,
+      cases: visible.map(caseOut),
+      results: results.map((k) => ({ id: k.id, status: k.status, consultationDate: k.consultationDate, contractDate: k.contractDate, coordinator: k.coordinator?.name ?? null })),
+      payments: shownPayments,
+      finance: canSeeFinance(req.user),
+      events: shownEvents,
       links: lawyer
         ? []
         : [
@@ -533,7 +704,12 @@ clients.get("/:id", async (req, res, next) => {
           ],
       calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
       appointments,
-      canManage: isManager(req.user),
+      contacts: contacts.map(({ phoneKey: _k, ...c }) => c),
+      followUps: [...openFollowUps, ...closedFollowUps].map(({ client: _c, ...f }) => f),
+      files: files.filter((f) => caseVisible(f.caseId)).map(({ path: _p, ...f }) => f),
+      me: req.user.id,
+      canManage: manager,
+      canEdit: level !== "lawyer",
       asLawyer: lawyer,
     });
   } catch (err) {
@@ -545,7 +721,7 @@ clients.patch("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     await loadClient(id);
-    await requireClientAccess(req.user, id);
+    await requireClientAccess(req.user, id, { write: true });
     const b = req.body || {};
     const data = clientFields(b);
     const phones = cl.normalizePhones(b.phones);
@@ -555,6 +731,18 @@ clients.patch("/:id", async (req, res, next) => {
     }
     const client = await prisma.$transaction(async (tx) => {
       const updated = await tx.client.update({ where: { id }, data });
+      // "Next call" set directly (older portals): a call follow-up for
+      // yourself; cleared: your open calls on this client are done.
+      if (b.nextCallAt !== undefined) {
+        if (b.nextCallAt === null || b.nextCallAt === "") {
+          await tx.clientFollowUp.updateMany({ where: { clientId: id, status: "open", kind: "call", assigneeId: req.user.id }, data: { status: "done", doneAt: new Date(), doneById: req.user.id } });
+        } else {
+          const when = new Date(b.nextCallAt);
+          if (Number.isNaN(when.getTime())) throw badRequest("invalid nextCallAt");
+          await tx.clientFollowUp.create({ data: { clientId: id, kind: "call", dueAt: when, note: cl.text(b.nextCallNote, 300) ?? null, assigneeId: req.user.id, createdById: req.user.id } });
+        }
+        await syncNextCall(tx, id);
+      }
       if (phones) {
         await tx.clientPhone.deleteMany({ where: { clientId: id } });
         if (phones.length) await tx.clientPhone.createMany({ data: phones.map((p) => ({ ...p, clientId: id })) });
@@ -632,7 +820,7 @@ clients.post("/:id/merge", managersOnly, async (req, res, next) => {
           count += 1;
         }
       }
-      for (const model of ["clientCase", "payment", "clientEvent", "appointment"]) {
+      for (const model of ["clientCase", "payment", "clientEvent", "appointment", "clientContact", "clientFollowUp", "clientFile"]) {
         await tx[model].updateMany({ where: { clientId: otherId }, data: { clientId: id } });
       }
       const links = await tx.clientLink.findMany({ where: { OR: [{ fromId: otherId }, { toId: otherId }] } });
@@ -656,7 +844,10 @@ clients.post("/:id/merge", managersOnly, async (req, res, next) => {
         fill.nextCallNote = gone.nextCallNote;
       }
       if (keep.archivedAt && !gone.archivedAt) fill.archivedAt = null;
+      delete fill.nextCallAt;
+      delete fill.nextCallNote;
       if (Object.keys(fill).length) await tx.client.update({ where: { id }, data: fill });
+      await syncNextCall(tx, id);
       await tx.clientEvent.create({ data: { clientId: id, kind: "merge", text: gone.name, authorId: req.user.id } });
       await audit(tx, req, "client.merge", "client", id, {
         merged: { id: gone.id, name: gone.name, phones: gone.phones.map((p) => p.phone), city: gone.city, email: gone.email, notes: gone.notes },
@@ -695,38 +886,111 @@ clients.post("/:id/cases", async (req, res, next) => {
 const cases = express.Router();
 cases.use(requireAuth, gate);
 
-// What a lawyer may change on a case of theirs: where it stands.
-const LAWYER_CASE_FIELDS = ["status", "legalStage", "number", "matter"];
+// What each role may change on a case (managers: everything). Money (the
+// contract amount) only with Moliya, whoever it is.
+//   lawyer       where it stands: status, number, matter, court, dates of it
+//   coordinator  the case's number and court (history rows and key dates:
+//                routes/caseWork.js)
+//   operator     the consultation: what it's about, its status up to the
+//                contract, its dates, themselves as operator, its lawyer
+const CASE_FIELDS = {
+  lawyer: ["status", "legalStage", "number", "matter", "court", "closedDate", "lostReason", "lostNote"],
+  coordinator: ["number", "court", "legalStage"],
+  operator: ["matter", "status", "startDate", "consultationDate", "operatorId", "lawyerId", "lawyer", "number", "lostReason", "lostNote"],
+};
+// An operator moves a consultation along — up to the contract (or "didn't
+// continue"); finishing a contract is the lawyer's and the managers'.
+const OPERATOR_STATUSES = ["consultation", "call_again", "contract", "declined"];
+// Changes shown on the timeline field by field (money is kept out of it).
+const TRACKED = ["matter", "number", "court", "startDate", "consultationDate", "contractDate", "closedDate"];
 
-// Status and stage changes are written to the client's timeline.
+async function employeeName(tx, id) {
+  if (id == null) return null;
+  return (await tx.employee.findUnique({ where: { id }, select: { name: true } }))?.name ?? null;
+}
+
+// A coordinator for a case (managers): any active staff member — usually
+// someone whose job is coordinator. undefined: not given; null: none.
+async function coordinatorFor(requested, req) {
+  if (requested === undefined) return undefined;
+  if (!isManager(req.user)) throw Object.assign(new Error("forbidden"), { status: 403 });
+  if (requested === null || requested === "") return null;
+  const id = parseId(requested, "coordinatorId");
+  const e = await prisma.employee.findUnique({ where: { id }, select: { id: true, active: true } });
+  if (!e || !e.active) throw badRequest("unknown coordinator");
+  return id;
+}
+
+// Status, stage, assignment and detail changes are written to the client's
+// timeline; a contract signed and new people on a case are announced
+// (Telegram, src/services/telegram/listeners.js).
 cases.patch("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const current = await prisma.clientCase.findUnique({ where: { id } });
+    const current = await prisma.clientCase.findUnique({ where: { id }, include: { client: { select: { createdById: true, cases: { select: { operatorId: true } } } } } });
     if (!current) return res.status(404).json({ error: "not_found" });
+    const role = caseRole(req.user, current, current.client);
+    if (!role) return res.status(404).json({ error: "not_found" });
+    if (role === "result") return res.status(403).json({ error: "result_only" });
     let b = caseInput(req, req.body);
-    if (!isLawyer(req.user)) await requireClientAccess(req.user, current.clientId);
-    if (isLawyer(req.user)) {
-      if (current.lawyerId !== req.user.id) return res.status(404).json({ error: "not_found" });
-      if (Object.keys(b).some((k) => !LAWYER_CASE_FIELDS.includes(k))) return res.status(403).json({ error: "forbidden" });
-      b = Object.fromEntries(Object.entries(b).filter(([k]) => LAWYER_CASE_FIELDS.includes(k)));
+    if (role !== "manager") {
+      const allowed = CASE_FIELDS[role] || [];
+      if (Object.keys(b).some((k) => !allowed.includes(k) && !(k === "contractAmount" && canSeeFinance(req.user)))) return res.status(403).json({ error: "forbidden" });
+      if (role === "operator" && b.status !== undefined && !OPERATOR_STATUSES.includes(b.status)) return res.status(403).json({ error: "forbidden" });
     }
-    const data = cl.normalizeCase(b, current, today());
+    const { legalStage, ...rest } = b;
+    const data = cl.normalizeCase(rest, current, today());
+    // A consultation that didn't continue: say why (it's what shows where
+    // clients are lost).
+    if (data.status === "declined" && current.status !== "declined" && !data.lostReason && !current.lostReason) throw badRequest("lost reason required");
     const operatorId = await operatorFor(req, b.operatorId, current.operatorId);
     if (operatorId !== undefined) data.operatorId = operatorId;
     const lawyer = await lawyerFor(b.lawyerId, req, current.lawyerId);
     if (lawyer) Object.assign(data, lawyer);
+    const coordinatorId = await coordinatorFor(b.coordinatorId, req);
+    if (coordinatorId !== undefined) data.coordinatorId = coordinatorId;
+    // A stage picked straight from a list (older portals): a history row
+    // dated today, so the history stays whole.
+    const stage = legalStage === undefined ? undefined : cl.oneOf(legalStage, cl.LEGAL_STAGES, "legalStage");
+
     const updated = await prisma.$transaction(async (tx) => {
-      const c = await tx.clientCase.update({ where: { id }, data });
-      const log = (kind, from, to) =>
-        tx.clientEvent.create({ data: { clientId: c.clientId, caseId: id, kind, text: `${from || ""}>${to || ""}`, authorId: req.user.id } });
-      if (data.status && data.status !== current.status) await log("status", current.status, data.status);
-      if (data.legalStage !== undefined && data.legalStage !== current.legalStage) await log("stage", current.legalStage, data.legalStage);
+      let c = await tx.clientCase.update({ where: { id }, data });
+      const log = (kind, text, extra) => tx.clientEvent.create({ data: { clientId: c.clientId, caseId: id, kind, text: text ?? "", data: extra ?? undefined, authorId: req.user.id } });
+      if (data.status && data.status !== current.status) await log("status", `${current.status || ""}>${data.status}`);
+      if (stage !== undefined && stage !== current.legalStage) {
+        if (stage) {
+          await tx.caseStage.create({ data: { caseId: id, stage, date: today(), createdById: req.user.id } });
+          await log("stage_row", "", { action: "add", stage, date: today() });
+        } else {
+          // "No stage": the history rows stay; the case just has none now.
+          await tx.caseStage.updateMany({ where: { caseId: id, deletedAt: null }, data: { deletedAt: new Date() } });
+          await log("stage_row", "", { action: "clear" });
+        }
+        c = await history.syncCaseStage(tx, id);
+      }
+      for (const [field, key] of [
+        ["operatorId", "operator"],
+        ["coordinatorId", "coordinator"],
+      ]) {
+        if (data[field] !== undefined && data[field] !== current[field]) {
+          await log("assign", "", { role: key, from: await employeeName(tx, current[field]), to: await employeeName(tx, data[field]) });
+        }
+      }
+      if (data.lawyerId !== undefined && data.lawyerId !== current.lawyerId) await log("assign", "", { role: "lawyer", from: current.lawyer || null, to: data.lawyer || null });
+      if (data.status === "declined" && current.status !== "declined") await log("lost", "", { reason: data.lostReason ?? current.lostReason ?? null, note: data.lostNote ?? null });
+      const changes = TRACKED.filter((f) => data[f] !== undefined && (data[f] ?? null) !== (current[f] ?? null)).map((f) => ({ field: f, from: current[f] ?? null, to: data[f] ?? null }));
+      if (changes.length) await log("case_edit", "", { changes });
+      if (data.contractAmount !== undefined && data.contractAmount !== current.contractAmount) {
+        await audit(tx, req, "case.amount", "case", id, { clientId: c.clientId, from: current.contractAmount, to: data.contractAmount });
+      }
       if (data.number !== undefined) await refreshSearch(tx, c.clientId);
       await tx.client.update({ where: { id: c.clientId }, data: { updatedAt: new Date() } });
       return c;
     });
-    res.json(canSeeFinance(req.user) ? updated : caseWithoutMoney(updated));
+    if (data.status === "contract" && current.status !== "contract" && !CONTRACT_STATUSES.includes(current.status)) bus.emit("case.contract", { caseId: id, byUserId: req.user.id });
+    if (data.coordinatorId && data.coordinatorId !== current.coordinatorId) bus.emit("case.assigned", { caseId: id, role: "coordinator", byUserId: req.user.id });
+    if (data.lawyerId && data.lawyerId !== current.lawyerId) bus.emit("case.assigned", { caseId: id, role: "lawyer", byUserId: req.user.id });
+    res.json(canSeeCaseMoney(req.user, updated) ? updated : caseWithoutMoney(updated));
   } catch (err) {
     sendError(err, res, next);
   }
@@ -758,7 +1022,7 @@ cases.put("/:id/installments", async (req, res, next) => {
 cases.delete("/:id", managersOnly, async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const c = await prisma.clientCase.findUnique({ where: { id }, include: { payments: true } });
+    const c = await prisma.clientCase.findUnique({ where: { id }, include: { payments: true, installments: true, stages: true, dates: true } });
     if (!c) return res.status(404).json({ error: "not_found" });
     await prisma.$transaction(async (tx) => {
       await audit(tx, req, "case.delete", "case", id, { case: c });
@@ -773,24 +1037,26 @@ cases.delete("/:id", managersOnly, async (req, res, next) => {
 
 // -------------------------------------------------------------- payments
 // Recording a payment: anyone who works with the client can record a
-// consultation fee; any other payment only people who see money.
+// consultation fee; any other payment people who see money — Moliya, or the
+// coordinator of that case (it goes through Kassa like every cash payment).
 clients.post("/:id/payments", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    await requireClientAccess(req.user, clientId);
+    const { roles } = await requireClientAccess(req.user, clientId, { write: true });
     const b = { ...(req.body || {}) };
-    if (!canSeeFinance(req.user)) {
+    let caseId = null;
+    if (b.caseId != null) {
+      const k = await prisma.clientCase.findFirst({ where: { id: parseId(b.caseId, "caseId"), clientId }, select: { id: true } });
+      if (!k || (!isManager(req.user) && (!roles.get(k.id) || roles.get(k.id) === "result"))) throw badRequest("case is not this client's");
+      caseId = k.id;
+    }
+    const mayRecordMoney = canSeeFinance(req.user) || (caseId != null && roles.get(caseId) === "coordinator");
+    if (!mayRecordMoney) {
       if (b.kind !== undefined && b.kind !== CONSULTATION) throw financeForbidden();
       b.kind = CONSULTATION;
     }
     const data = cl.normalizePayment(b);
-    let caseId = null;
-    if (b.caseId != null) {
-      const k = await prisma.clientCase.findFirst({ where: { id: parseId(b.caseId, "caseId"), clientId }, select: { id: true } });
-      if (!k) throw badRequest("case is not this client's");
-      caseId = k.id;
-    }
     let payment = await prisma.payment.create({ data: { ...data, clientId, caseId, recordedById: req.user.id } });
     await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
     // A consultation fee: tie it to the client's appointment, so the
@@ -823,15 +1089,28 @@ payments.delete("/:id", managersOnly, async (req, res, next) => {
 });
 
 // ----------------------------------------------------------------- notes
+const NOTE_CHANNELS = ["telegram", "meeting", "phone", "sms"];
+
+// A note about the client, or about one of their cases (caseId) — a note
+// on a case is seen by the people on that case only.
 clients.post("/:id/notes", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    await requireClientAccess(req.user, clientId);
+    const { roles, level } = await requireClientAccess(req.user, clientId, { write: true });
     const note = cl.text(req.body?.text, 4000);
     if (!note) throw badRequest("text is required");
+    let caseId = null;
+    if (req.body?.caseId != null) {
+      caseId = parseId(req.body.caseId, "caseId");
+      const k = await prisma.clientCase.findFirst({ where: { id: caseId, clientId }, select: { id: true } });
+      if (!k || (level !== "manager" && (!roles.get(caseId) || roles.get(caseId) === "result"))) throw badRequest("case is not this client's");
+    }
+    // How the talk happened, when it wasn't in Ledger: a Telegram chat, a
+    // meeting, a call from a personal phone, an SMS (null: just a note).
+    const channel = NOTE_CHANNELS.includes(req.body?.channel) ? req.body.channel : null;
     const event = await prisma.clientEvent.create({
-      data: { clientId, kind: "note", text: note, authorId: req.user.id },
+      data: { clientId, caseId, kind: "note", text: note, authorId: req.user.id, ...(channel ? { data: { channel } } : {}) },
       include: { author: PERSON },
     });
     await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
@@ -843,13 +1122,42 @@ clients.post("/:id/notes", async (req, res, next) => {
 
 const notes = express.Router();
 notes.use(requireAuth, gate);
-// Your own note, or any note for a manager.
+
+async function ownNote(req) {
+  const event = await prisma.clientEvent.findUnique({ where: { id: parseId(req.params.id) } });
+  if (!event || event.kind !== "note" || event.deletedAt) throw Object.assign(new Error("not_found"), { status: 404 });
+  if (event.authorId !== req.user.id && !isManager(req.user)) throw Object.assign(new Error("forbidden"), { status: 403 });
+  await requireClientAccess(req.user, event.clientId);
+  return event;
+}
+
+// Correcting a note — your own, or any for a manager. It shows as edited;
+// the words before go to the audit log.
+notes.patch("/:id", async (req, res, next) => {
+  try {
+    const event = await ownNote(req);
+    const text = cl.text(req.body?.text, 4000);
+    if (!text) throw badRequest("text is required");
+    if (text === event.text) return res.json(event);
+    const [updated] = await prisma.$transaction([
+      prisma.clientEvent.update({ where: { id: event.id }, data: { text, editedAt: new Date() }, include: { author: PERSON } }),
+      prisma.auditLog.create({ data: { userId: req.user.id, action: "note.edit", entity: "client", entityId: event.clientId, detail: { noteId: event.id, before: event.text } } }),
+    ]);
+    res.json(updated);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// Removing a note — your own, or any for a manager. It's hidden, not
+// deleted: the audit log keeps who removed what.
 notes.delete("/:id", async (req, res, next) => {
   try {
-    const event = await prisma.clientEvent.findUnique({ where: { id: parseId(req.params.id) } });
-    if (!event || event.kind !== "note") return res.status(404).json({ error: "not_found" });
-    if (event.authorId !== req.user.id && !isManager(req.user)) return res.status(403).json({ error: "forbidden" });
-    await prisma.clientEvent.delete({ where: { id: event.id } });
+    const event = await ownNote(req);
+    await prisma.$transaction([
+      prisma.clientEvent.update({ where: { id: event.id }, data: { deletedAt: new Date() } }),
+      prisma.auditLog.create({ data: { userId: req.user.id, action: "note.delete", entity: "client", entityId: event.clientId, detail: { noteId: event.id, text: event.text, authorId: event.authorId, createdAt: event.createdAt } } }),
+    ]);
     res.status(204).end();
   } catch (err) {
     sendError(err, res, next);
@@ -864,7 +1172,7 @@ clients.post("/:id/links", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
     await loadClient(id);
-    await requireClientAccess(req.user, id);
+    await requireClientAccess(req.user, id, { write: true });
     const b = req.body || {};
     const kind = cl.oneOf(b.kind, cl.LINK_KINDS, "kind");
     if (!kind) throw badRequest("kind is required");
@@ -929,6 +1237,7 @@ links.delete("/:id", async (req, res, next) => {
 // Many clients at once (managers): the ones ticked (ids), or every client the
 // list's filters match (query). set — one of:
 //   { operatorId } / { lawyerId }: on every case of each client;
+//   { coordinatorId }: on each client's contract cases;
 //   { status: "declined" }: "didn't continue" — closes their consultations
 //   and "call again"s (contracts are left as they are; a consultation still
 //   counts toward its operator's month).
@@ -946,7 +1255,7 @@ clients.post("/bulk", managersOnly, async (req, res, next) => {
 
     const set = b.set && typeof b.set === "object" ? b.set : {};
     const keys = Object.keys(set);
-    if (keys.length !== 1 || !["operatorId", "lawyerId", "status"].includes(keys[0])) throw badRequest("set one of operatorId, lawyerId, status");
+    if (keys.length !== 1 || !["operatorId", "lawyerId", "coordinatorId", "status"].includes(keys[0])) throw badRequest("set one of operatorId, lawyerId, coordinatorId, status");
     let data;
     let label;
     const where = { clientId: { in: ids } };
@@ -956,6 +1265,10 @@ clients.post("/bulk", managersOnly, async (req, res, next) => {
     } else if (keys[0] === "lawyerId") {
       data = await lawyerFor(set.lawyerId, req);
       label = data.lawyer ?? null;
+    } else if (keys[0] === "coordinatorId") {
+      data = { coordinatorId: (await coordinatorFor(set.coordinatorId, req)) ?? null };
+      label = data.coordinatorId ? (await prisma.employee.findUnique({ where: { id: data.coordinatorId }, select: { name: true } })).name : null;
+      where.status = { in: CONTRACT_STATUSES };
     } else {
       if (set.status !== "declined") throw badRequest("status can only be declined");
       data = { status: "declined" };
@@ -972,7 +1285,11 @@ clients.post("/bulk", managersOnly, async (req, res, next) => {
           });
         }
       }
-      const summary = { clients: ids.length, cases: affected.length, kind: keys[0] === "status" ? "declined" : keys[0] === "operatorId" ? "operator" : "lawyer", name: label };
+      const kindOf = { status: "declined", operatorId: "operator", lawyerId: "lawyer", coordinatorId: "coordinator" };
+      if (keys[0] !== "status" && affected.length) {
+        await tx.clientEvent.createMany({ data: affected.map((k) => ({ clientId: k.clientId, caseId: k.id, kind: "assign", text: "", data: { role: kindOf[keys[0]], to: label, bulk: true }, authorId: req.user.id })) });
+      }
+      const summary = { clients: ids.length, cases: affected.length, kind: kindOf[keys[0]], name: label };
       if (ids.length) await audit(tx, req, "clients.bulk", "client", null, summary);
       return summary;
     });

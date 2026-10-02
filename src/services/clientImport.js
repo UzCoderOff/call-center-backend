@@ -1,4 +1,5 @@
 const cl = require("./clients");
+const { syncNextCall } = require("./clientFollowUps");
 const { refreshSearch, clientsByPhoneKeys } = require("../lib/clientsDb");
 const { lawyerAccounts, matchLawyer } = require("../lib/lawyers");
 
@@ -97,6 +98,13 @@ async function importOne(tx, raw, { user, today, operators, lawyers }) {
 
   const caseId = await importCase(tx, client.id, raw, { user, today, operators, lawyers });
   await importNotes(tx, client.id, caseId, raw.notes, user, client.notes);
+  // A planned call from the sheet: a follow-up for whoever works on the
+  // client (once — the same time isn't added twice).
+  if (nextCallAt && !(await tx.clientFollowUp.findFirst({ where: { clientId: client.id, status: "open", dueAt: nextCallAt } }))) {
+    const k = caseId ? await tx.clientCase.findUnique({ where: { id: caseId }, select: { operator: { select: { userId: true } } } }) : null;
+    await tx.clientFollowUp.create({ data: { clientId: client.id, kind: "call", dueAt: nextCallAt, assigneeId: k?.operator?.userId ?? user.id, createdById: user.id } });
+    await syncNextCall(tx, client.id);
+  }
   await refreshSearch(tx, client.id);
   return outcome;
 }
@@ -171,8 +179,14 @@ async function importCase(tx, clientId, raw, { user, today, operators, lawyers }
     // A row with no date at all is history of unknown date: it doesn't count
     // toward this month's (or any month's) targets.
     if (!startDate && !contractDate) Object.assign(data, { startDate: null, consultationDate: null, contractDate: null });
+    // When a finished case finished isn't in the sheet.
+    if (data.closedDate === today) data.closedDate = null;
     const assigned = lawyerAccount ? { lawyerId: lawyerAccount.id, lawyer: lawyerAccount.name } : {};
     caseRow = await tx.clientCase.create({ data: { ...data, clientId, operatorId, ...assigned } });
+    // Its stage starts its history (dated as the sheet says, roughly).
+    if (data.legalStage) {
+      await tx.caseStage.create({ data: { caseId: caseRow.id, stage: data.legalStage, date: contractDate || startDate || today, note: "Exceldan: sana taxminiy", createdById: user?.id ?? null } });
+    }
   } else {
     const update = {};
     for (const [key, value] of Object.entries(text)) if (value && !existing[key]) update[key] = value;
@@ -190,6 +204,9 @@ async function importCase(tx, clientId, raw, { user, today, operators, lawyers }
     if (dates.consultationDate && consultedOn) update.consultationDate = consultedOn;
     if (dates.contractDate && signedOn) update.contractDate = signedOn;
     caseRow = Object.keys(update).length ? await tx.clientCase.update({ where: { id: existing.id }, data: update }) : existing;
+    if (update.legalStage) {
+      await tx.caseStage.create({ data: { caseId: existing.id, stage: update.legalStage, date: today, note: "Exceldan", createdById: user?.id ?? null } });
+    }
   }
 
   // "Paid so far" in the sheet -> a payment for what isn't recorded yet.

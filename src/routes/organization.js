@@ -22,6 +22,15 @@ function optionalId(value, field) {
   return parseId(value, field);
 }
 
+const { JOBS } = require("../lib/jobs");
+
+// What people in this position do (a preset for Employee.job).
+function job(value) {
+  if (value === undefined) return undefined;
+  if (!JOBS.includes(value)) throw badRequest("invalid job");
+  return value;
+}
+
 function calendarAccess(value) {
   if (value === undefined) return undefined;
   if (!["none", "view", "book"].includes(value)) throw badRequest("invalid calendarAccess");
@@ -129,6 +138,7 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         autoReport: Boolean(req.body?.autoReport),
         alsoForm: Boolean(req.body?.alsoForm),
         calendarAccess: calendarAccess(req.body?.calendarAccess) ?? "none",
+        job: job(req.body?.job) ?? "other",
         reportTemplateId: optionalId(req.body?.reportTemplateId, "reportTemplateId") ?? null,
         workDays: workPattern(req.body?.workDays) ?? (req.body?.collectCalls ? "1234567" : "123456"),
         holidaysOff: typeof req.body?.holidaysOff === "boolean" ? req.body.holidaysOff : !req.body?.collectCalls,
@@ -161,6 +171,7 @@ positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
         ...(typeof autoReport === "boolean" ? { autoReport } : {}),
         ...(typeof alsoForm === "boolean" ? { alsoForm } : {}),
         ...(access !== undefined ? { calendarAccess: access } : {}),
+        ...(job(req.body?.job) !== undefined ? { job: job(req.body.job) } : {}),
         ...(templateId !== undefined ? { reportTemplateId: templateId } : {}),
         ...(workPattern(req.body?.workDays) ? { workDays: workPattern(req.body.workDays) } : {}),
         ...(typeof req.body?.holidaysOff === "boolean" ? { holidaysOff: req.body.holidaysOff } : {}),

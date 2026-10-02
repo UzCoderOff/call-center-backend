@@ -153,6 +153,25 @@ async function onCallback(query) {
     await api.enqueue("editMessageText", { chat_id: chatId, message_id: query.message.message_id, text: text.slice(0, 4000) }).catch(() => {});
     return answer("Bajarildi");
   }
+  // "✅ Bajarildi" under a follow-up reminder.
+  const followUp = data.match(/^fu:done:(\d+)$/);
+  if (followUp) {
+    const row = await prisma.clientFollowUp.findUnique({ where: { id: Number(followUp[1]) } });
+    if (!row) return answer();
+    const mine = row.assigneeId === user.id || (row.assigneeId == null && row.createdById === user.id) || ["BOSS", "DEVELOPER"].includes(user.role);
+    if (!mine) return answer("Bu eslatma sizga emas");
+    if (row.status === "open") {
+      const { syncNextCall } = require("../clientFollowUps");
+      await prisma.$transaction(async (tx) => {
+        await tx.clientFollowUp.update({ where: { id: row.id }, data: { status: "done", doneAt: new Date(), doneById: user.id } });
+        await tx.clientEvent.create({ data: { clientId: row.clientId, caseId: row.caseId, kind: "follow_up", text: "", data: { action: "done", kind: row.kind, dueAt: row.dueAt, via: "telegram" }, authorId: user.id } });
+        await syncNextCall(tx, row.clientId);
+      });
+    }
+    const text = `${query.message.text || ""}\n\n✅ Bajarildi`;
+    await api.enqueue("editMessageText", { chat_id: chatId, message_id: query.message.message_id, text: text.slice(0, 4000) }).catch(() => {});
+    return answer("Bajarildi");
+  }
   if (data === "unlink:yes") {
     await answer();
     return disconnect(chatId, user);

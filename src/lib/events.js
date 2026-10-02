@@ -23,6 +23,9 @@ const { EventEmitter } = require("events");
 //                   a training material the manager chose to announce
 //   "task.created"            { taskId }   a task given (or given to someone else)
 //   "task.done"               { taskId, byUserId }
+//   "targets.set"             { employeeId, fromMonth, byUserId }  a monthly plan set (Natijalar)
+//   "case.contract"           { caseId, byUserId }  a contract signed — to hand over
+//   "case.assigned"           { caseId, role, byUserId }  a coordinator or lawyer put on a case
 //
 // The Telegram notifications (src/services/telegram/) are built on these.
 //

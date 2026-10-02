@@ -5,6 +5,7 @@ const { resolveRecordingPath } = require("../utils/fileStorage");
 const { resolvePlayableRecording } = require("../utils/audioTranscode");
 const { badRequest, parseMs, parseId } = require("../utils/params");
 const { clientIndexFor } = require("../lib/clientAccess");
+const { parseJobs, isCoordinator } = require("../lib/jobs");
 const {
   FOLLOW_UP_WINDOW_MS,
   NEEDS_CALLBACK_STATUSES,
@@ -25,12 +26,30 @@ function accessWhere(req) {
   return {};
 }
 
+// Opening one call (and its recording): also, for a coordinator, any call
+// with a client they look after — the whole history matters after the
+// contract (the operator's first calls, the lawyer's). Lists stay their own.
+async function viewWhere(req) {
+  const own = accessWhere(req);
+  if (isManager(req.user) || !isCoordinator(req.user.employee)) return own;
+  const phones = await prisma.clientPhone.findMany({
+    where: { phoneKey: { not: null }, client: { cases: { some: { coordinatorId: req.user.employee.id } } } },
+    select: { phoneKey: true },
+  });
+  const keys = [...new Set(phones.map((p) => p.phoneKey))];
+  return keys.length ? { OR: [own, { phoneKey: { in: keys } }] } : own;
+}
+
 // List filters, applied on top of accessWhere for every role.
 function filterWhere(req) {
   const q = req.query;
   const where = {};
 
   if (q.employeeId && isManager(req.user)) where.employeeId = parseId(q.employeeId, "employeeId");
+  // ?jobs=call_center,coordinator — whose phones (Employee.job). The portal
+  // shows the call center by default; the others are a tap away.
+  const jobs = parseJobs(q.jobs);
+  if (jobs && isManager(req.user) && !q.employeeId) where.employee = { job: { in: jobs } };
   if (q.missed !== undefined) where.missed = q.missed === "true";
   if (q.callType) where.callType = String(q.callType);
   // Lets the portal filter down to "calls with no recording attached" —
@@ -122,8 +141,9 @@ router.get("/", async (req, res, next) => {
 });
 
 async function loadCallDetail(req, id) {
+  const visible = await viewWhere(req);
   const call = await prisma.callLog.findFirst({
-    where: { id, ...accessWhere(req) },
+    where: { id, ...visible },
     include: {
       ...LIST_INCLUDE,
       transcript: true,
@@ -139,7 +159,7 @@ async function loadCallDetail(req, id) {
   // history. Same access rules as everywhere else.
   const history = call.phoneKey
     ? await prisma.callLog.findMany({
-        where: { phoneKey: call.phoneKey, id: { not: call.id }, ...accessWhere(req) },
+        where: { phoneKey: call.phoneKey, id: { not: call.id }, ...visible },
         select: { ...LINKED_CALL_SELECT, missed: true, followUp: true },
         orderBy: { callTimestampMs: "desc" },
         take: 20,
@@ -205,7 +225,8 @@ router.patch("/:id/follow-up", async (req, res, next) => {
 router.get("/:id/recording", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const call = await prisma.callLog.findFirst({ where: { id, ...accessWhere(req) } });
+    // A coordinator: their clients' calls too (viewWhere).
+    const call = await prisma.callLog.findFirst({ where: { id, ...(await viewWhere(req)) } });
     if (!call) return res.status(404).json({ error: "not_found" });
     if (!call.recordingPath) return res.status(404).json({ error: "no_recording" });
 

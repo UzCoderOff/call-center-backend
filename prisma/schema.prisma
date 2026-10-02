@@ -95,6 +95,15 @@ model User {
   tasksAssigned Task[] @relation("TaskAssignee")
   tasksCreated  Task[] @relation("TaskCreatedBy")
   tasksDone     Task[] @relation("TaskDoneBy")
+  caseStagesAdded CaseStage[] @relation("CaseStageBy")
+  caseDatesAdded  CaseDate[]  @relation("CaseDateBy")
+  contactsAdded       ClientContact[]  @relation("ClientContactBy")
+  followUpsAssigned   ClientFollowUp[] @relation("FollowUpAssignee")
+  followUpsCreated    ClientFollowUp[] @relation("FollowUpBy")
+  followUpsDone       ClientFollowUp[] @relation("FollowUpDoneBy")
+  clientFilesAdded    ClientFile[]     @relation("ClientFileBy")
+  strikesCancelled    Strike[]         @relation("StrikeCancelledBy")
+  settingsChanged     Setting[]        @relation("SettingBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -136,10 +145,26 @@ model Employee {
   // and work) | "client" (calls, bookings, consultations, contracts) |
   // "office" (their report form's numbers; calls still shown, not the goal).
   workKind String @default("auto")
+  // What this person does at the firm — decides which tools and numbers
+  // apply to them (2026-10-02; replaces the guessing workKind did):
+  //   "call_center"  sales calls: answers and makes calls, books
+  //                  consultations. Their missed calls go on the call-back
+  //                  list; Calls and Home show them by default.
+  //   "coordinator"  works with clients after the contract: the cases
+  //                  assigned to them — payments, deadlines, keeping the
+  //                  client informed. Their phone may be monitored too.
+  //   "office"       office work (documents, translation, insurance…),
+  //                  measured on their daily report form.
+  //   "other"
+  // Set by the developer (Team → person → Work settings). The migration
+  // filled it in from each person's settings.
+  job String @default("other")
 
   calls   CallLog[]
   reports Report[]
-  cases   ClientCase[]
+  cases   ClientCase[] @relation("CaseOperator")
+  // Cases they look after as coordinator (after the contract).
+  coordinatedCases ClientCase[] @relation("CaseCoordinator")
   costs   EmployeeCost[]
 
   // Flexible metadata escape hatch — see schema-level note above.
@@ -165,6 +190,7 @@ model Employee {
   workDays    String    @default("123456")
   holidaysOff Boolean   @default(true)
   absences    Absence[]
+  strikes     Strike[]
   targets     Target[]
 }
 
@@ -203,6 +229,8 @@ model Position {
   // Preset work pattern for new staff (see Employee.workDays).
   workDays            String             @default("123456")
   holidaysOff         Boolean            @default(true)
+  // Preset job for new staff (see Employee.job).
+  job                 String             @default("other")
   // Materials meant for everyone in this position.
   materials           MaterialAudience[]
 }
@@ -317,6 +345,7 @@ model CallLog {
   followUpMarkedAt   DateTime?
 
   transcript Transcript?
+  strike     Strike?
   analysis   CallAnalysis?
 
   // Appointments booked from this call.
@@ -362,6 +391,9 @@ model SyncLog {
   // How many call-log entries appear to have been deleted on the phone
   // before they could be synced.
   missingEntries Int?
+  // Whether the app may read the phone's files (where the phone's own
+  // recorder saves call recordings). Null: an app older than 2.3.0.
+  filesAccess    Boolean?
   createdAt      DateTime @default(now())
 
   @@index([employeeId, createdAt])
@@ -529,6 +561,9 @@ model Client {
   linksTo      ClientLink[]  @relation("ClientLinkTo")
   appointments Appointment[]
   tasks        Task[]
+  contacts     ClientContact[]
+  followUps    ClientFollowUp[]
+  files        ClientFile[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -563,7 +598,7 @@ model ClientCase {
   lawyer           String?
   // The operator responsible — their monthly targets count this case.
   operatorId       Int?
-  operator         Employee?         @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  operator         Employee?         @relation("CaseOperator", fields: [operatorId], references: [id], onDelete: SetNull)
   status           String            @default("consultation")
   legalStage       String?
   // "YYYY-MM-DD". consultationDate/contractDate are set when the status first
@@ -575,6 +610,26 @@ model ClientCase {
   payments         Payment[]
   installments     CaseInstallment[]
   events           ClientEvent[]
+  // After the contract: the coordinator who looks after the case (a manager
+  // assigns them). They see all of it, its money too.
+  coordinatorId    Int?
+  coordinator      Employee?         @relation("CaseCoordinator", fields: [coordinatorId], references: [id], onDelete: SetNull)
+  // The investigating body or court handling it now, e.g. "Yunusobod tumani
+  // sudi".
+  court            String?
+  // When it finished (done) or stopped (declined): "YYYY-MM-DD".
+  closedDate       String?
+  // A consultation that didn't continue ("declined"): why — the price, they
+  // didn't trust us, went to another lawyer, couldn't be reached… — and a
+  // word more. The call-center numbers show where clients are lost.
+  lostReason       String?
+  lostNote         String?
+  followUps        ClientFollowUp[]
+  files            ClientFile[]
+  // Where it has been, with dates (legalStage is the latest of these), and
+  // the dates that matter (hearings, deadlines).
+  stages           CaseStage[]
+  dates            CaseDate[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -587,6 +642,7 @@ model ClientCase {
   @@index([operatorId, consultationDate])
   @@index([operatorId, contractDate])
   @@index([lawyerId])
+  @@index([coordinatorId])
 }
 
 model Payment {
@@ -627,6 +683,13 @@ model ClientEvent {
   authorId  Int?
   author    User?       @relation("ClientEventAuthor", fields: [authorId], references: [id], onDelete: SetNull)
   createdAt DateTime    @default(now())
+  // Structured details of a recorded change (an assignment: { role, from,
+  // to }; a stage row: { stage, date }…). The text stays for older entries.
+  data      Json?
+  // A note corrected by its author or a manager; removed ones are kept,
+  // hidden (the audit log has who and when).
+  editedAt  DateTime?
+  deletedAt DateTime?
 
   @@index([clientId, createdAt])
 }
@@ -928,4 +991,188 @@ model Target {
   createdAt  DateTime @default(now())
 
   @@unique([employeeId, metric, fromMonth])
+}
+
+// A case's way through investigators and courts: one row per stage it
+// reached, and when ("tergov 2026-03-12", "birinchi instansiya 2026-06-01").
+// ClientCase.legalStage is kept equal to the latest one. Rows can be added
+// with past dates (a case brought in from before Ledger), corrected, or
+// removed — removed rows are kept, hidden, and every change is in the
+// client's timeline and the audit log.
+model CaseStage {
+  id          Int        @id @default(autoincrement())
+  caseId      Int
+  case        ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stage       String // services/clients.js LEGAL_STAGES
+  date        String // "YYYY-MM-DD": when the case reached it
+  // The body or court at this stage, and anything worth knowing.
+  court       String?
+  note        String?
+  createdById Int?
+  createdBy   User?      @relation("CaseStageBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([caseId, date])
+}
+
+// The dates that matter in a case — court hearings, investigator summons,
+// deadlines ("appeal by…"), meetings — and, once past, what happened. They
+// show on the case, the lawyer's and coordinator's home pages and in the
+// morning Telegram summary.
+model CaseDate {
+  id          Int        @id @default(autoincrement())
+  caseId      Int
+  case        ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  kind        String // "hearing" | "summons" | "deadline" | "meeting" | "other"
+  date        String // "YYYY-MM-DD"
+  time        Int? // minutes from midnight; null: the whole day
+  title       String?
+  place       String?
+  note        String?
+  // Written afterwards: what happened.
+  outcome     String?
+  createdById Int?
+  createdBy   User?      @relation("CaseDateBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([caseId, date])
+  @@index([date])
+}
+
+// Someone connected to a client — their father, wife, a representative — the
+// firm talks to about the client's matter, often the one who decides or
+// pays. Not a client: no cases of their own. Their numbers are recognised on
+// calls ("Ali Valiyev — otasi"). Removed ones are kept, hidden.
+model ClientContact {
+  id          Int              @id @default(autoincrement())
+  clientId    Int
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name        String
+  // "father" | "mother" | "spouse" | "child" | "sibling" | "relative" |
+  // "representative" | "friend" | "colleague" | "other"
+  relation    String
+  phone       String?
+  phoneKey    String?
+  note        String?
+  // Makes the decision (or pays): the one to call when the decision is due.
+  decides     Boolean          @default(false)
+  createdById Int?
+  createdBy   User?            @relation("ClientContactBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  deletedAt   DateTime?
+  followUps   ClientFollowUp[]
+
+  @@index([clientId])
+  @@index([phoneKey])
+}
+
+// What has to happen next with a client, and by when: call back, wait for
+// their decision (then call whoever decides), a meeting, papers to bring, a
+// payment to collect. Each has someone responsible; Ledger reminds them when
+// it's due (home page, Telegram) and keeps it — with what came of it — in the
+// client's history. Client.nextCallAt follows the earliest open one.
+model ClientFollowUp {
+  id          Int            @id @default(autoincrement())
+  clientId    Int
+  client      Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  caseId      Int?
+  case        ClientCase?    @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  // Who to talk to: one of the client's contacts (null: the client).
+  contactId   Int?
+  contact     ClientContact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  // "call" | "decision" (waiting for them to decide) | "meeting" |
+  // "documents" | "payment" | "other"
+  kind        String
+  dueAt       DateTime
+  note        String?
+  // Who must do it (null: whoever works on the client).
+  assigneeId  Int?
+  assignee    User?          @relation("FollowUpAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdById Int?
+  createdBy   User?          @relation("FollowUpBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // "open" | "done" | "cancelled"
+  status      String         @default("open")
+  // What came of it: "reached" | "no_answer" | "decided_yes" | "decided_no" |
+  // "rescheduled" | "other"
+  outcome     String?
+  outcomeNote String?
+  doneAt      DateTime?
+  doneById    Int?
+  doneBy      User?          @relation("FollowUpDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  // When the Telegram reminder went out (once).
+  remindedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([assigneeId, status, dueAt])
+  @@index([clientId, status])
+  @@index([status, dueAt])
+}
+
+// A late call-back: a call-center phone missed a call and nobody called the
+// number back within the firm's time (Setting "strikes"). Counted per month
+// against a limit. A manager can cancel one with a reason — it stays, marked;
+// one cancelled because a call-back turned up later says so.
+model Strike {
+  id            Int       @id @default(autoincrement())
+  employeeId    Int
+  employee      Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  callLogId     Int       @unique
+  callLog       CallLog   @relation(fields: [callLogId], references: [id], onDelete: Cascade)
+  // "YYYY-MM" of the missed call, firm time — what the monthly limit counts.
+  month         String
+  missedAt      DateTime
+  deadlineAt    DateTime
+  // When the number was finally called back (null: not yet / never).
+  answeredAt    DateTime?
+  cancelledAt   DateTime?
+  cancelledById Int?
+  cancelledBy   User?     @relation("StrikeCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([employeeId, month])
+}
+
+// Firm-wide rules, one row per key, the value as JSON — e.g. "strikes": how
+// fast a missed call must be called back, in which hours, the monthly limit.
+model Setting {
+  key         String   @id
+  value       Json
+  updatedById Int?
+  updatedBy   User?    @relation("SettingBy", fields: [updatedById], references: [id], onDelete: SetNull)
+  updatedAt   DateTime @updatedAt
+}
+
+// A file kept on a client — a signed contract, a power of attorney, a court
+// decision, a receipt, a copy of an ID — about the client or one of their
+// cases; seen by whoever works on it. Removed files are kept (hidden) until a
+// manager deletes them for good.
+model ClientFile {
+  id           Int         @id @default(autoincrement())
+  clientId     Int
+  client       Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  caseId       Int?
+  case         ClientCase? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  // "contract" | "power_of_attorney" | "court_decision" | "application" |
+  // "id_copy" | "receipt" | "evidence" | "other"
+  kind         String
+  title        String?
+  // As uploaded, and as stored (under CLIENT_FILES_DIR).
+  name         String
+  path         String
+  mimeType     String
+  size         Int
+  uploadedById Int?
+  uploadedBy   User?       @relation("ClientFileBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  deletedAt    DateTime?
+
+  @@index([clientId])
+  @@index([caseId])
 }

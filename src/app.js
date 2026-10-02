@@ -16,6 +16,8 @@ const reportRoutes = require("./routes/reports");
 const organization = require("./routes/organization");
 const calendarRoutes = require("./routes/calendar");
 const clientRoutes = require("./routes/clients");
+const caseWork = require("./routes/caseWork");
+const clientWork = require("./routes/clientWork");
 const materialRoutes = require("./routes/materials");
 const telegramRoutes = require("./routes/telegram");
 const financeRoutes = require("./routes/finance");
@@ -106,6 +108,19 @@ app.use("/api/calendars", calendarRoutes.calendars);
 app.use("/api/appointments", calendarRoutes.appointments);
 app.use("/api/clients", clientRoutes.clients);
 app.use("/api/client-cases", clientRoutes.cases);
+app.use("/api/client-cases", caseWork.caseItems);
+app.use("/api/client-stages", caseWork.stages);
+app.use("/api/client-dates", caseWork.dates);
+// Connected people, follow-ups and files (some hang off /api/clients/:id).
+clientWork.attach(clientRoutes.clients);
+app.use("/api/client-contacts", clientWork.contacts);
+app.use("/api/client-follow-ups", clientWork.followUps);
+app.use("/api/client-files", clientWork.files);
+// The call center's rules (late call-back strikes, who counts as the call
+// center) and the strikes given.
+const ruleRoutes = require("./routes/rules");
+app.use("/api/rules", ruleRoutes.rules);
+app.use("/api/strikes", ruleRoutes.strikes);
 app.use("/api/client-payments", clientRoutes.payments);
 app.use("/api/client-notes", clientRoutes.notes);
 app.use("/api/client-links", clientRoutes.links);

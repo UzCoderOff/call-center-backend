@@ -46,6 +46,9 @@ function publicMe(user) {
           // A report form to fill in today (alone, or next to the automatic report).
           reportForm: asksForm(e),
           calendarAccess: e.calendarAccess,
+          // What they do (call center, coordinator, office…): their home
+          // page and tools follow it.
+          job: e.job,
         }
       : null,
   };

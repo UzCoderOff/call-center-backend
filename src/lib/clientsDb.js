@@ -1,6 +1,7 @@
 const { phoneKey } = require("./phone");
 const cl = require("../services/clients");
 const { lawyerById } = require("./lawyers");
+const { isCallCenter } = require("./jobs");
 
 // Clients-database helpers that touch the database — shared by the clients
 // routes, the calls list (names instead of bare numbers) and the calendar
@@ -52,6 +53,9 @@ async function clientIndex(db, keys) {
 // (lawyerId: the calendar's owner), so they see the client. Without a
 // client or a phone number there's nothing reliable to match on, so no
 // client is created.
+// The consultation phase: a booking joins a case in it, else starts one.
+const CONSULTING = ["consultation", "call_again"];
+
 async function clientForBooking(db, { name, phone, matter, date, user, lawyerId = null, clientId = null }) {
   const key = phoneKey(phone);
   if (!clientId && !key) return null;
@@ -70,12 +74,20 @@ async function clientForBooking(db, { name, phone, matter, date, user, lawyerId 
     // client's file that way: no case is created or handed to them — the
     // appointment is only linked, and a manager assigns the case.
     if (user.role === "LAWYER") return existing.client.id;
-    const open = await db.clientCase.findFirst({
-      where: { clientId: existing.client.id, status: { in: cl.OPEN_STATUSES } },
+    const kases = await db.clientCase.findMany({
+      where: { clientId: existing.client.id },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, lawyerId: true, operatorId: true, status: true, consultationDate: true },
+      select: { id: true, lawyerId: true, operatorId: true, coordinatorId: true, status: true, consultationDate: true },
     });
+    // The coordinator booking their client in (a meeting about the case):
+    // only linked.
+    if (user.employee?.id && kases.some((k) => k.coordinatorId === user.employee.id)) return existing.client.id;
+    const open = kases.find((k) => CONSULTING.includes(k.status));
     if (!open) {
+      // Under contract and not the call center booking a new problem: a
+      // meeting about the ongoing case — only linked, its case untouched.
+      if (kases.some((k) => k.status === "contract") && !isCallCenter(user.employee)) return existing.client.id;
+      // Otherwise a new consultation (a past client back with something new).
       await db.clientCase.create({
         data: { clientId: existing.client.id, matter: cl.text(matter, 500), operatorId, startDate: date, consultationDate: date, ...assigned },
       });

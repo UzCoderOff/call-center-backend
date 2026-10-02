@@ -125,6 +125,7 @@ async function sendOffsite(local, { files = true, onStep = () => {} } = {}) {
   if (files) {
     if (fs.existsSync(env.storageRoot)) await step("recordings", () => rclone(["copy", env.storageRoot, `${REMOTE}:recordings`]));
     if (fs.existsSync(env.materialsDir)) await step("materials", () => rclone(["copy", env.materialsDir, `${REMOTE}:materials`]));
+    if (fs.existsSync(env.clientFilesDir)) await step("client files", () => rclone(["copy", env.clientFilesDir, `${REMOTE}:client-files`]));
   }
   return steps;
 }

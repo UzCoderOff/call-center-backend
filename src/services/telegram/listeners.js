@@ -4,6 +4,7 @@ const { firmNow } = require("../../lib/firmTime");
 const m = require("../materials");
 const f = require("./format");
 const { notifyUser, linkedUsers } = require("./notify");
+const { BUILTIN_NAMES, FINANCE_ONLY, parseKey, formMeasures, targetsFor } = require("../performanceMetrics");
 
 // Notifications for things happening in the portal, from the events in
 // src/lib/events.js. A failure here never affects the booking or save that
@@ -139,12 +140,163 @@ async function onMaterial({ materialId }) {
   }
 }
 
+// A monthly plan set for someone (Natijalar) -> them: everything they're
+// measured on from that month. All income without soʻm — staff don't see
+// contract money (src/lib/finance.js).
+async function onTargetsSet({ employeeId, fromMonth, byUserId }) {
+  const employee = await prisma.employee.findUnique({ where: { id: employeeId }, include: { position: true } });
+  if (!employee?.userId || employee.userId === byUserId) return;
+  const targets = (await targetsFor([employee], fromMonth)).get(employee.id);
+  if (!targets?.size) return;
+  const formIds = [...new Set([...targets.keys()].map((k) => parseKey(k)?.templateId).filter(Boolean))];
+  const forms = formIds.length ? await prisma.reportTemplate.findMany({ where: { id: { in: formIds } }, select: { id: true, name: true, fields: true } }) : [];
+  const measures = new Map(forms.flatMap(formMeasures).map((m) => [m.key, m]));
+  const count = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  const lines = [...targets].map(([key, amount]) => {
+    if (FINANCE_ONLY.has(key)) return `• ${BUILTIN_NAMES[key]} — bajarilishi Natijalarda foizda koʻrinadi`;
+    const m = measures.get(key);
+    const money = key === "fees" || m?.unit === "money";
+    return `• ${f.escapeHtml(BUILTIN_NAMES[key] || m?.label || key)}: <b>${money ? f.money(amount) : count(amount)}</b>`;
+  });
+  const [y, mo] = fromMonth.split("-").map(Number);
+  const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
+  const text = [
+    "🎯 <b>Sizga oylik reja qoʻyildi</b>",
+    `${f.MONTHS[mo - 1].replace(/^./, (c) => c.toUpperCase())} ${y} dan:`,
+    ...lines,
+    by ? `Qoʻydi: ${f.escapeHtml(f.personName(by))}` : null,
+    f.portalLink(`/performance/${employee.id}`, "Natijalarni ochish"),
+  ];
+  await notifyUser(employee.userId, "targets", text.filter(Boolean).join("\n"));
+}
+
+const CASE_INCLUDE = {
+  client: { select: { id: true, name: true } },
+  operator: { select: { name: true } },
+  coordinator: { select: { name: true, userId: true } },
+};
+
+const caseLine = (k) => `${f.escapeHtml(k.client.name)}${k.matter ? ` — ${f.escapeHtml(k.matter)}` : ""}`;
+
+// A contract signed -> the managers: the case needs its coordinator and
+// lawyer (unless it already has both).
+async function onContract({ caseId, byUserId }) {
+  const k = await prisma.clientCase.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+  if (!k) return;
+  const missing = [!k.coordinatorId ? "koordinator" : null, !k.lawyerId ? "advokat" : null].filter(Boolean);
+  const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
+  const text = [
+    "✍️ <b>Shartnoma tuzildi</b>",
+    caseLine(k),
+    k.operator ? `Operator: ${f.escapeHtml(k.operator.name)}` : null,
+    missing.length ? `Tayinlash kerak: ${missing.join(" va ")}` : null,
+    by ? `Belgiladi: ${f.escapeHtml(f.personName(by))}` : null,
+    f.portalLink(`/clients/${k.client.id}`, "Mijozni ochish"),
+  ];
+  for (const user of await linkedUsers({ role: { in: ["BOSS", "DEVELOPER"] } })) {
+    if (user.id === byUserId) continue;
+    await notifyUser(user, "cases", text.filter(Boolean).join("\n"));
+  }
+}
+
+// A case handed to someone -> them (unless they did it themselves).
+async function onAssigned({ caseId, role, byUserId }) {
+  const k = await prisma.clientCase.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
+  if (!k) return;
+  const userId = role === "coordinator" ? k.coordinator?.userId : k.lawyerId;
+  if (!userId || userId === byUserId) return;
+  const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
+  const text = [
+    "📁 <b>Sizga ish biriktirildi</b>",
+    caseLine(k),
+    role === "coordinator" ? "Siz — koordinator: toʻlovlar, muddatlar va mijoz bilan aloqa." : "Siz — advokat.",
+    by ? `Biriktirdi: ${f.escapeHtml(f.personName(by))}` : null,
+    f.portalLink(`/clients/${k.client.id}`, "Ishni ochish"),
+  ];
+  await notifyUser(userId, "cases", text.filter(Boolean).join("\n"));
+}
+
+const FOLLOW_UP_WORDS = { call: "Qoʻngʻiroq qilish", decision: "Qaror muddati", meeting: "Uchrashuv", documents: "Hujjatlar", payment: "Toʻlov", other: "Eslatma" };
+const RELATION_WORDS = { father: "otasi", mother: "onasi", spouse: "turmush oʻrtogʻi", child: "farzandi", sibling: "aka-ukasi/opa-singlisi", relative: "qarindoshi", representative: "vakili", friend: "doʻsti", colleague: "hamkasbi", other: "aloqador" };
+
+// One follow-up as a Telegram message: what, about whom, who to call, why.
+function followUpText(row, head) {
+  const phone = row.contact?.phone || row.client.phones[0]?.phone;
+  const who = row.contact ? `${f.escapeHtml(row.contact.name)} (${RELATION_WORDS[row.contact.relation] || "aloqador"})` : null;
+  return [
+    head,
+    `<b>${FOLLOW_UP_WORDS[row.kind] || FOLLOW_UP_WORDS.other}</b> — ${f.escapeHtml(row.client.name)}`,
+    who ? `Kim bilan: ${who}` : null,
+    phone ? `Tel: ${f.escapeHtml(f.phoneCompact(phone))}` : null,
+    row.note ? f.escapeHtml(row.note) : null,
+    `Muddat: ${f.moment(row.dueAt)}`,
+    f.portalLink(`/clients/${row.client.id}`, "Mijozni ochish"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function followUpButton(id) {
+  return { reply_markup: { inline_keyboard: [[{ text: "✅ Bajarildi", callback_data: `fu:done:${id}` }]] } };
+}
+
+const FOLLOW_UP_MESSAGE_INCLUDE = {
+  contact: { select: { name: true, relation: true, phone: true } },
+  client: { select: { id: true, name: true, phones: { select: { phone: true }, orderBy: { id: "asc" }, take: 1 } } },
+};
+
+// A follow-up given to someone else -> them.
+async function onFollowUpAssigned({ followUpId }) {
+  const row = await prisma.clientFollowUp.findUnique({ where: { id: followUpId }, include: FOLLOW_UP_MESSAGE_INCLUDE });
+  if (!row?.assigneeId || row.status !== "open") return;
+  await notifyUser(row.assigneeId, "followUps", followUpText(row, "📝 <b>Sizga eslatma qoʻyildi</b>"), followUpButton(row.id));
+}
+
+// A strike -> the person (with where they stand this month), and the
+// managers once they're over the limit.
+async function onStrike({ strikeId }) {
+  const { strikeCounts } = require("../strikes");
+  const strike = await prisma.strike.findUnique({ where: { id: strikeId }, include: { employee: { select: { id: true, name: true, userId: true } }, callLog: { select: { phoneNumber: true } } } });
+  if (!strike || strike.cancelledAt) return;
+  const { rules, counts } = await strikeCounts([strike.employeeId], strike.month);
+  const c = counts.get(strike.employeeId);
+  const [y, mo] = strike.month.split("-").map(Number);
+  const monthName = `${f.MONTHS[mo - 1]} ${y}`;
+  const late = strike.answeredAt ? `qayta qoʻngʻiroq: ${f.moment(strike.answeredAt)}` : "qayta qoʻngʻiroq qilinmadi";
+  if (strike.employee.userId) {
+    await notifyUser(
+      strike.employee.userId,
+      "strikes",
+      [
+        `⚠️ <b>Ogohlantirish ${c.count}/${rules.limit}</b> (${monthName})`,
+        `${f.escapeHtml(f.phoneCompact(strike.callLog.phoneNumber))} — ${f.moment(strike.missedAt)} dagi javobsiz qoʻngʻiroq; ${late}.`,
+        `Qoida: javobsiz qoʻngʻiroqqa ${rules.minutes} daqiqa ichida qayta qoʻngʻiroq qiling.`,
+      ].join("\n")
+    );
+  }
+  if (c.count > rules.limit) {
+    const text = [
+      `🚫 <b>${f.escapeHtml(strike.employee.name)} — ${monthName}: ${c.count}-ogohlantirish</b> (chegara ${rules.limit})`,
+      c.fine > 0 ? `Jarima (chegaradan oshgani uchun): ${f.money(c.fine)}` : null,
+      f.portalLink(`/performance/${strike.employee.id}`, "Natijalarni ochish"),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    for (const user of await linkedUsers({ role: { in: ["BOSS", "DEVELOPER"] } })) await notifyUser(user, "strikes", text);
+  }
+}
+
 function register() {
   safeOn("appointment.booked", onBooked);
   safeOn("appointments.cancelled", onCancelled);
   safeOn("material.published", onMaterial);
   safeOn("task.created", onTaskCreated);
   safeOn("task.done", onTaskDone);
+  safeOn("targets.set", onTargetsSet);
+  safeOn("case.contract", onContract);
+  safeOn("case.assigned", onAssigned);
+  safeOn("followup.assigned", onFollowUpAssigned);
+  safeOn("strike.created", onStrike);
 }
 
-module.exports = { register, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, taskText, taskButton, TASK_INCLUDE };
+module.exports = { register, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, onTargetsSet, onContract, onAssigned, onFollowUpAssigned, onStrike, followUpText, followUpButton, FOLLOW_UP_MESSAGE_INCLUDE, taskText, taskButton, TASK_INCLUDE };

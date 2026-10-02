@@ -29,9 +29,10 @@ function reportMoney(reports, templates) {
       return;
     }
     const key = `${entry.templateId}|${entry.fieldId}|${entry.columnId || ""}`;
-    const u = unclassified.get(key) || { form: entry.form, label: entry.label, column: entry.column, amount: 0, count: 0 };
+    const u = unclassified.get(key) || { form: entry.form, label: entry.label, column: entry.column, amount: 0, count: 0, byEmployee: {} };
     u.amount += entry.amount;
     u.count += 1;
+    u.byEmployee[entry.employeeId] = (u.byEmployee[entry.employeeId] || 0) + entry.amount;
     unclassified.set(key, u);
   }
 
