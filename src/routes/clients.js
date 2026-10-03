@@ -111,6 +111,15 @@ function clientFields(b) {
   }
   const source = cl.oneOf(b.source, cl.SOURCES, "source");
   if (source !== undefined) data.source = source;
+  // Kept out of the automatic archive until the end of that day
+  // (services/clientArchive.js); null takes it off.
+  if (b.keepUntil !== undefined) {
+    if (b.keepUntil === null || b.keepUntil === "") data.keepUntil = null;
+    else {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(b.keepUntil))) throw badRequest("invalid keepUntil");
+      data.keepUntil = new Date(firmDayRange(String(b.keepUntil)).to);
+    }
+  }
   // The next call is the earliest open follow-up now (clientWork.js); see
   // the PATCH below for what setting it directly does.
   delete data.nextCallNote;
@@ -731,6 +740,11 @@ clients.patch("/:id", async (req, res, next) => {
     }
     const client = await prisma.$transaction(async (tx) => {
       const updated = await tx.client.update({ where: { id }, data });
+      // On the timeline: kept out of the archive until when, or not any more.
+      if (b.keepUntil !== undefined) {
+        const until = data.keepUntil ? String(b.keepUntil) : null;
+        await tx.clientEvent.create({ data: { clientId: id, kind: "keep", text: until || "", authorId: req.user.id, data: { until } } });
+      }
       // "Next call" set directly (older portals): a call follow-up for
       // yourself; cleared: your open calls on this client are done.
       if (b.nextCallAt !== undefined) {

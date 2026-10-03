@@ -54,6 +54,7 @@ model User {
   // Phones signed in to the Android app with this account.
   devices         Device[]
   reviewedReports Report[] @relation("ReportReviewedBy")
+  enteredReports  Report[] @relation("ReportEnteredBy")
 
   // The lawyer's appointment calendar, for a BOSS account that has one.
   calendar           Calendar?
@@ -269,6 +270,10 @@ model Report {
   reviewedBy    User?          @relation("ReportReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
   reviewedAt    DateTime?
   reviewComment String?
+  // Filled in by the developer for them, for a day they missed (2026-10-03,
+  // routes/reports.js PUT /for/:employeeId/:date). Null: they sent it.
+  enteredById   Int?
+  enteredBy     User?          @relation("ReportEnteredBy", fields: [enteredById], references: [id], onDelete: SetNull)
 
   @@unique([employeeId, templateId, date])
   @@index([date])
@@ -549,6 +554,9 @@ model Client {
   // Archived clients are hidden from lists but kept, with everything about
   // them, and can be restored — nothing is deleted by accident.
   archivedAt   DateTime?
+  // Kept out of the automatic archive until then (src/services/clientArchive.js):
+  // "we may still work with them".
+  keepUntil    DateTime?
   // Room for fields added later without a migration (like Employee.customFields).
   extra        Json?
   createdById  Int?

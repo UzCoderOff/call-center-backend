@@ -42,6 +42,7 @@ const REPORT_INCLUDE = {
   employee: { select: { id: true, name: true, collectCalls: true, office: { select: { id: true, name: true } } } },
   template: { select: { id: true, name: true } },
   reviewedBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
+  enteredBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
 };
 
 async function callStatsForDay(employee, date) {
@@ -105,6 +106,66 @@ router.put("/today", async (req, res, next) => {
       create: { employeeId: employee.id, templateId: template.id, date, fields: template.fields, answers },
       update: { fields: template.fields, answers },
       include: REPORT_INCLUDE,
+    });
+    res.json(report);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Someone missed a day ("I forgot to send Monday's report — can you put it
+// in?"): the developer fills it in, or corrects it, for them. Any day up to
+// today, on the form of an existing report or the one they have now. The
+// report shows who entered it, and the audit log keeps it.
+//   GET /api/reports/for/:employeeId/:date   { employee, date, template, report }
+//   PUT /api/reports/for/:employeeId/:date   { answers }
+async function reportFor(req) {
+  const employee = await prisma.employee.findUnique({ where: { id: parseId(req.params.employeeId, "employeeId") }, select: { id: true, name: true, reportTemplateId: true } });
+  if (!employee) {
+    const err = new Error("not_found");
+    err.status = 404;
+    throw err;
+  }
+  const date = String(req.params.date);
+  if (!isValidDate(date)) throw badRequest("invalid date");
+  if (date > firmDate()) throw badRequest("future date");
+  const existing = await prisma.report.findFirst({ where: { employeeId: employee.id, date }, orderBy: { updatedAt: "desc" }, include: REPORT_INCLUDE });
+  const template = existing
+    ? await prisma.reportTemplate.findUnique({ where: { id: existing.templateId } })
+    : employee.reportTemplateId
+      ? await prisma.reportTemplate.findUnique({ where: { id: employee.reportTemplateId } })
+      : null;
+  return { employee, date, template, existing };
+}
+
+router.get("/for/:employeeId/:date", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    const { employee, date, template, existing } = await reportFor(req);
+    if (!template) return res.status(409).json({ error: "no_report_form" });
+    // A report already in keeps the questions it was answered with.
+    const fields = existing ? existing.fields : template.fields;
+    res.json({ employee: { id: employee.id, name: employee.name }, date, template: { id: template.id, name: template.name, fields }, report: existing });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/for/:employeeId/:date", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    const { employee, date, template, existing } = await reportFor(req);
+    if (!template) return res.status(409).json({ error: "no_report_form" });
+    const fields = existing ? existing.fields : template.fields;
+    const { answers, errors } = validateAnswers(fields, req.body?.answers);
+    if (Object.keys(errors).length > 0) return res.status(400).json({ error: "invalid_answers", fields: errors });
+
+    const report = await prisma.report.upsert({
+      where: { employeeId_templateId_date: { employeeId: employee.id, templateId: template.id, date } },
+      create: { employeeId: employee.id, templateId: template.id, date, fields, answers, enteredById: req.user.id },
+      update: { answers, enteredById: req.user.id },
+      include: REPORT_INCLUDE,
+    });
+    await prisma.auditLog.create({
+      data: { userId: req.user.id, action: existing ? "report.correct" : "report.enterFor", entity: "report", entityId: report.id, detail: { employeeId: employee.id, date } },
     });
     res.json(report);
   } catch (err) {
@@ -201,6 +262,8 @@ function summaryOf(report) {
     submittedAt: report.submittedAt,
     updatedAt: report.updatedAt,
     reviewedAt: report.reviewedAt,
+    // Filled in by the developer for them.
+    entered: report.enteredById != null,
   };
 }
 

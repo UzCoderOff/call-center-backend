@@ -43,7 +43,31 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-02/03): jobs, coordinators and case history; plans for any income; phones that don't record; simpler Moliya; Russian
+### This release (2026-10-03): old consultations to the archive by themselves; missed reports filled in by the developer
+
+- **Old consultations leave the lists by themselves.** A client with no
+  contract who has had nothing happen for 14 days — no call, note, status
+  change, appointment, payment or follow-up — goes to the archive (checked
+  every hour; services/clientArchive.js). It goes by the client's real dates,
+  not the day they were typed in or imported. Never archived: anyone with an
+  appointment or a planned call ahead, or marked **«Arxivga tushmasin»** on
+  their page (2 weeks, 1 month, 3 months or a date). Archived clients are in
+  Mijozlar → Arxiv and come back by themselves when booked again; the
+  timeline says "archived automatically". Sozlamalar → **Eski
+  konsultatsiyalar**: on/off and the number of days (developer).
+  **The first run (a minute after the update) archives the old ones at once —
+  about 70 of today's ~98 consultations.**
+- **The developer fills in a report someone missed**: Hisobotlar → a day →
+  tap the person ("bosing — siz kiritasiz"), or open a report → Tahrirlash.
+  Any day up to today; the report shows "Kiritgan: …" and the audit log keeps
+  it. Staff still send only today's.
+- `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
+  generate`, `pm2 restart all` as above (the auto-deploy does all of it). One
+  migration, only adding:
+  - `20261004120000_keep_clients_entered_reports` — `Client.keepUntil` and
+    `Report.enteredById` (empty: nothing changes).
+
+### Earlier release (2026-10-02/03): jobs, coordinators and case history; plans for any income; phones that don't record; simpler Moliya; Russian
 
 - **Who does what (Ish turi):** call center, coordinator, office, other. The
   call-back list, booking counts and missed-call Telegram are the call
