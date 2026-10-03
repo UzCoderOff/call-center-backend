@@ -22,13 +22,26 @@ function optionalId(value, field) {
   return parseId(value, field);
 }
 
-const { JOBS } = require("../lib/jobs");
+const { JOBS, jobFields, jobList } = require("../lib/jobs");
 
 // What people in this position do (a preset for Employee.job).
 function job(value) {
   if (value === undefined) return undefined;
   if (!JOBS.includes(value)) throw badRequest("invalid job");
   return value;
+}
+
+// `jobs` (all of them, the main one first) or the older single `job` ->
+// { job, extraJobs } to store; nothing when neither is given (an update).
+function positionJobs(body, creating) {
+  if (body?.jobs !== undefined) {
+    const list = jobList(body.jobs);
+    if (!list.length) throw badRequest("invalid jobs");
+    return jobFields(list);
+  }
+  const single = job(body?.job);
+  if (single !== undefined) return { job: single };
+  return creating ? { job: "other", extraJobs: "" } : {};
 }
 
 function calendarAccess(value) {
@@ -138,7 +151,7 @@ positions.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         autoReport: Boolean(req.body?.autoReport),
         alsoForm: Boolean(req.body?.alsoForm),
         calendarAccess: calendarAccess(req.body?.calendarAccess) ?? "none",
-        job: job(req.body?.job) ?? "other",
+        ...positionJobs(req.body, true),
         reportTemplateId: optionalId(req.body?.reportTemplateId, "reportTemplateId") ?? null,
         workDays: workPattern(req.body?.workDays) ?? (req.body?.collectCalls ? "1234567" : "123456"),
         holidaysOff: typeof req.body?.holidaysOff === "boolean" ? req.body.holidaysOff : !req.body?.collectCalls,
@@ -171,7 +184,7 @@ positions.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
         ...(typeof autoReport === "boolean" ? { autoReport } : {}),
         ...(typeof alsoForm === "boolean" ? { alsoForm } : {}),
         ...(access !== undefined ? { calendarAccess: access } : {}),
-        ...(job(req.body?.job) !== undefined ? { job: job(req.body.job) } : {}),
+        ...positionJobs(req.body, false),
         ...(templateId !== undefined ? { reportTemplateId: templateId } : {}),
         ...(workPattern(req.body?.workDays) ? { workDays: workPattern(req.body.workDays) } : {}),
         ...(typeof req.body?.holidaysOff === "boolean" ? { holidaysOff: req.body.holidaysOff } : {}),

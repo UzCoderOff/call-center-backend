@@ -11,7 +11,8 @@ const { buildXlsx } = require("../lib/xlsx");
 const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
 const { canSeeFinance, canSeeCaseMoney, financeForbidden, caseWithoutMoney, isConsultation, CONSULTATION } = require("../lib/finance");
 const { CONTRACT_STATUSES, clientScope, workScope, ownCaseWhere, caseRole, clientLevel, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
-const { isCoordinator } = require("../lib/jobs");
+const { isCoordinator, isCallCenter, hasJob, jobsOf } = require("../lib/jobs");
+const { hasCalls } = require("../lib/calling");
 const history = require("../services/caseHistory");
 const { syncNextCall, FOLLOW_UP_INCLUDE } = require("../services/clientFollowUps");
 const { events: bus } = require("../lib/events");
@@ -52,7 +53,7 @@ const env = require("../config/env");
 // it (they check it before booking the client in).
 
 function canUseClients(user) {
-  return isManager(user) || isLawyer(user) || Boolean(user.employee?.collectCalls || user.employee?.calendarAccess === "book" || isCoordinator(user.employee));
+  return isManager(user) || isLawyer(user) || Boolean(hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee));
 }
 function gate(req, res, next) {
   if (!canUseClients(req.user)) return res.status(403).json({ error: "forbidden" });
@@ -276,7 +277,8 @@ async function listQuery(q, user) {
 function sectionsFor(user) {
   if (isManager(user)) return ["clients", "consultations", "unassigned"];
   if (isLawyer(user)) return ["clients", "consultations"];
-  if (isCoordinator(user.employee)) return ["clients", "consultations"];
+  // A coordinator who is also call center sees their consultations' results too.
+  if (isCoordinator(user.employee)) return isCallCenter(user.employee) ? ["clients", "consultations", "results"] : ["clients", "consultations"];
   return ["consultations", "results"];
 }
 
@@ -453,8 +455,9 @@ clients.get("/lawyers", async (req, res, next) => {
 // then everyone else active (managers assign).
 clients.get("/coordinators", managersOnly, async (req, res, next) => {
   try {
-    const rows = await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true }, orderBy: { name: "asc" } });
-    res.json({ coordinators: rows.filter((e) => e.job === "coordinator"), others: rows.filter((e) => e.job !== "coordinator") });
+    const rows = await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true, extraJobs: true }, orderBy: { name: "asc" } });
+    const out = (e) => ({ id: e.id, name: e.name, job: e.job, jobs: jobsOf(e) });
+    res.json({ coordinators: rows.filter((e) => hasJob(e, "coordinator")).map(out), others: rows.filter((e) => !hasJob(e, "coordinator")).map(out) });
   } catch (err) {
     next(err);
   }

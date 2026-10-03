@@ -21,7 +21,7 @@ async function requireAuth(req, res, next) {
     const decoded = verifySessionToken(token);
     const user = await prisma.user.findUnique({
       where: { id: decoded.sub },
-      include: { employee: true },
+      include: { employee: { include: { pbx: { select: { ext: true } } } } },
     });
 
     if (!user || !user.active) {

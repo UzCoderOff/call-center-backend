@@ -6,6 +6,7 @@ const { firmDate } = require("../lib/firmTime");
 const { setSetting } = require("../lib/settings");
 const { asksForm } = require("../services/autoReport");
 const s = require("../services/strikes");
+const { jobsOf, jobFields, jobWhere, hasJob } = require("../lib/jobs");
 
 // The firm's rules for the call center, and what follows from them.
 //
@@ -53,22 +54,22 @@ rules.put("/strikes", developerOnly, async (req, res, next) => {
   }
 });
 
-// Who counts as the call center: everyone whose job is "call center" (Team
-// → person). Here many at once — by position, office or report form, or one
-// by one.
+// Who counts as the call center: everyone with "call center" among their
+// jobs (Team → person). Here many at once — by position, office or report
+// form, or one by one. Their other jobs stay as they are.
 rules.get("/call-center", managersOnly, async (req, res, next) => {
   try {
     const [people, positions, offices, templates] = await Promise.all([
       prisma.employee.findMany({
         where: { active: true },
         orderBy: { name: "asc" },
-        select: { id: true, name: true, job: true, collectCalls: true, positionId: true, officeId: true, reportTemplateId: true, position: { select: { name: true } }, office: { select: { name: true } } },
+        select: { id: true, name: true, job: true, extraJobs: true, collectCalls: true, pbxCalling: true, positionId: true, officeId: true, reportTemplateId: true, position: { select: { name: true } }, office: { select: { name: true } } },
       }),
       prisma.position.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
       prisma.office.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
       prisma.reportTemplate.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
     ]);
-    res.json({ people, positions, offices, templates, canEdit: req.user.role === "DEVELOPER" });
+    res.json({ people: people.map((p) => ({ ...p, jobs: jobsOf(p) })), positions, offices, templates, canEdit: req.user.role === "DEVELOPER" });
   } catch (err) {
     sendError(err, res, next);
   }
@@ -81,15 +82,21 @@ rules.put("/call-center", developerOnly, async (req, res, next) => {
     const remove = ids(req.body?.remove);
     if (add.some((id) => remove.includes(id))) throw badRequest("same person in add and remove");
     if (add.length + remove.length > 500) throw badRequest("too many");
-    const leaving = remove.length ? await prisma.employee.findMany({ where: { id: { in: remove }, job: "call_center" } }) : [];
+    const leaving = remove.length ? await prisma.employee.findMany({ where: { id: { in: remove }, ...jobWhere(["call_center"]) } }) : [];
+    const joining = add.length ? (await prisma.employee.findMany({ where: { id: { in: add } } })).filter((e) => !hasJob(e, "call_center")) : [];
     await prisma.$transaction(async (tx) => {
-      if (add.length) await tx.employee.updateMany({ where: { id: { in: add } }, data: { job: "call_center" } });
-      // Out of the call center: office work if they fill in a report form,
-      // otherwise "other" (changeable on their page).
-      for (const e of leaving) await tx.employee.update({ where: { id: e.id }, data: { job: asksForm(e) ? "office" : "other" } });
+      // Into the call center: one more job (the main one if they had none).
+      for (const e of joining) await tx.employee.update({ where: { id: e.id }, data: jobFields([...jobsOf(e), "call_center"]) });
+      // Out of the call center: their other jobs stay; with none left, office
+      // work if they fill in a report form, otherwise "other" (changeable on
+      // their page).
+      for (const e of leaving) {
+        const rest = jobsOf(e).filter((j) => j !== "call_center");
+        await tx.employee.update({ where: { id: e.id }, data: rest.length ? jobFields(rest) : { job: asksForm(e) ? "office" : "other", extraJobs: "" } });
+      }
       await tx.auditLog.create({ data: { userId: req.user.id, action: "rules.callCenter", entity: "setting", entityId: null, detail: { add, remove: leaving.map((e) => e.id) } } });
     });
-    res.json({ added: add.length, removed: leaving.length });
+    res.json({ added: joining.length, removed: leaving.length });
   } catch (err) {
     sendError(err, res, next);
   }

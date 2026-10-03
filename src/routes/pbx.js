@@ -1,0 +1,101 @@
+const express = require("express");
+const prisma = require("../lib/prisma");
+const env = require("../config/env");
+const { requireAuth, requireRole, MANAGER_ROLES } = require("../middleware/auth");
+const { badRequest, parseId } = require("../utils/params");
+const { hasJob } = require("../lib/jobs");
+const pbx = require("../services/pbx");
+const state = require("../services/pbx/state");
+const provision = require("../services/pbx/provision");
+const secrets = require("../services/pbx/secrets");
+const { pbxSettings, savePbxSettings } = require("../services/pbx/settings");
+
+// Ledger's phone line in the portal (Settings → Phone line):
+//   GET  /api/pbx/status                       managers: is it running, who's on it
+//   PUT  /api/pbx/settings                     developer: company number, outside line
+//   POST /api/pbx/extensions/:employeeId/softphone
+//        developer: a sign-in for a test softphone (MicroSIP, Zoiper) on that
+//        person's phone ID — shown once; their Ledger app is signed out of
+//        the line until it signs in again
+const router = express.Router();
+router.use(requireAuth);
+
+// Which phone IDs have a phone connected right now (Asterisk's view).
+async function onlineExts() {
+  if (!state.ami?.ready) return null;
+  try {
+    const contacts = await state.ami.actionList({ Action: "PJSIPShowContacts" });
+    return new Set(contacts.filter((c) => c.Event === "ContactList" && /^(Reachable|NonQualified|Unknown)$/i.test(c.Status || "")).map((c) => c.Aor));
+  } catch {
+    return null;
+  }
+}
+
+router.get("/status", requireRole(...MANAGER_ROLES), async (req, res, next) => {
+  try {
+    const [rows, settings, online] = await Promise.all([
+      prisma.pbxExtension.findMany({ include: { employee: { select: { id: true, name: true, active: true, pbxCalling: true, job: true, extraJobs: true } } }, orderBy: { ext: "asc" } }),
+      pbxSettings(),
+      onlineExts(),
+    ]);
+    const now = new Date();
+    res.json({
+      ...pbx.status(),
+      canIssue: secrets.hasKey(),
+      sip: { host: env.pbx.sipHost, port: env.pbx.sipPort, transport: "TLS" },
+      settings: { companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled },
+      people: rows
+        .filter((r) => r.employee.active && r.employee.pbxCalling)
+        .map((r) => ({
+          employeeId: r.employee.id,
+          name: r.employee.name,
+          ext: r.ext,
+          callCenter: hasJob(r.employee, "call_center"),
+          signedIn: Boolean(r.ha1Enc),
+          viaApp: r.secretDeviceId != null,
+          online: online ? online.has(r.ext) : null,
+          canCallOut: r.canCallOut,
+          restingUntil: r.restingUntil && r.restingUntil > now ? r.restingUntil : null,
+        })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/settings", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    const patch = {};
+    if (req.body?.companyNumber !== undefined) {
+      const number = String(req.body.companyNumber || "").replace(/[^\d+]/g, "");
+      if (number && !/^\+?\d{9,15}$/.test(number)) throw badRequest("invalid companyNumber");
+      patch.companyNumber = number;
+    }
+    if (req.body?.trunkEnabled !== undefined) {
+      if (typeof req.body.trunkEnabled !== "boolean") throw badRequest("trunkEnabled must be true or false");
+      patch.trunkEnabled = req.body.trunkEnabled;
+    }
+    await savePbxSettings(patch, req.user.id);
+    provision.scheduleApply();
+    const settings = await pbxSettings();
+    res.json({ companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/extensions/:employeeId/softphone", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    if (!secrets.hasKey()) return res.status(409).json({ error: "pbx_not_configured" });
+    const employee = await prisma.employee.findUnique({ where: { id: parseId(req.params.employeeId, "employeeId") } });
+    if (!employee || !employee.active) return res.status(404).json({ error: "not_found" });
+    if (!employee.pbxCalling) return res.status(409).json({ error: "calling_off" });
+    const { ext, secret } = await provision.issueSecret(employee.id, null);
+    await prisma.auditLog.create({ data: { userId: req.user.id, action: "pbx.softphone", entity: "employee", entityId: employee.id, detail: { ext } } });
+    res.json({ ext, password: secret, domain: env.pbx.sipHost, port: env.pbx.sipPort, transport: "TLS", realm: env.pbx.realm });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

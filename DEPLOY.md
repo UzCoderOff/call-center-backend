@@ -43,7 +43,24 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-02/03): jobs, coordinators and case history; plans for any income; phones that don't record; simpler Moliya; Russian
+### This release (2026-10-03): two jobs per person
+
+- **Someone can do more than one job** (e.g. call center + coordinator, or
+  office + call center). Xodimlar → person → Ish sozlamalari → «Ish turi»
+  is now a multi-choice: the first one chosen is the main job (it decides
+  their home page). Everything that follows the job — the call-back list,
+  missed-call Telegram, strikes, Calls/Home switches, client sections,
+  Natijalar — now counts all of their jobs. Positions can preset more than
+  one too. Settings → Call center adds or removes the call-center job and
+  leaves the others as they are.
+- `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
+  generate`, `pm2 restart all` as above. One migration, only adding:
+  - `20261005000000_extra_jobs` — `extraJobs` on Employee and Position
+    (empty: nobody's jobs change).
+- The portal goes out together with it (older portals keep working: they
+  send the single job, which leaves the other jobs as they are).
+
+### Earlier release (2026-10-02/03): jobs, coordinators and case history; plans for any income; phones that don't record; simpler Moliya; Russian
 
 - **Who does what (Ish turi):** call center, coordinator, office, other. The
   call-back list, booking counts and missed-call Telegram are the call

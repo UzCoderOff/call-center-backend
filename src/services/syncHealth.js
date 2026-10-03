@@ -27,11 +27,13 @@ async function getRecordingHealth(employees) {
   const ids = employees.map((e) => e.id);
   const tokens = employees.map((e) => e.employeeId).filter(Boolean);
   const since = BigInt(Date.now() - RECORDING_LOOKBACK_MS);
-  const answered = { employeeId: { in: ids }, missed: false, durationSeconds: { gte: RECORDABLE_MIN_SECONDS }, callTimestampMs: { gte: since } };
+  // Only calls synced from the phone: the phone's own recorder is what's
+  // being judged (Ledger's line records every call on the server).
+  const answered = { employeeId: { in: ids }, source: "phone", missed: false, durationSeconds: { gte: RECORDABLE_MIN_SECONDS }, callTimestampMs: { gte: since } };
   const [calls, recorded, last, access] = await Promise.all([
     prisma.callLog.groupBy({ by: ["employeeId"], where: answered, _count: { _all: true } }),
     prisma.callLog.groupBy({ by: ["employeeId"], where: { ...answered, recordingPath: { not: null } }, _count: { _all: true } }),
-    prisma.callLog.groupBy({ by: ["employeeId"], where: { employeeId: { in: ids }, recordingPath: { not: null } }, _max: { callTimestampMs: true } }),
+    prisma.callLog.groupBy({ by: ["employeeId"], where: { employeeId: { in: ids }, source: "phone", recordingPath: { not: null } }, _max: { callTimestampMs: true } }),
     // What the app said about file access in its latest sync that told us.
     tokens.length
       ? Promise.all(tokens.map((t) => prisma.syncLog.findFirst({ where: { employeeId: t, ok: true, filesAccess: { not: null } }, orderBy: { createdAt: "desc" }, select: { employeeId: true, filesAccess: true } })))

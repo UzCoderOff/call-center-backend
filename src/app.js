@@ -138,6 +138,9 @@ app.use("/api/cash", cashRoutes);
 // "collect calls?" config. Authenticated by device token, not the cookie.
 app.use("/api/device", deviceRoutes);
 
+// Ledger's own phone line (pbx/README.md): status, settings, test sign-ins.
+app.use("/api/pbx", require("./routes/pbx"));
+
 app.use((req, res) => res.status(404).json({ error: "not_found" }));
 app.use(errorHandler);
 

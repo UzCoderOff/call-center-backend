@@ -1,4 +1,6 @@
 const prisma = require("../../lib/prisma");
+const { jobWhere } = require("../../lib/jobs");
+const { hasCallsWhere } = require("../../lib/calling");
 const { worksOn } = require("../workdays");
 const env = require("../../config/env");
 const { firmNow, shiftDate, isoWeekday, weekStartOf } = require("../../lib/firmTime");
@@ -36,7 +38,7 @@ async function missedCalls(now) {
       callTimestampMs: { gte: oldest, lte: newest },
       // The call center's job (Employee.job): someone else's monitored phone
       // isn't a sales line to call back from.
-      employee: { active: true, collectCalls: true, job: "call_center", user: { is: { telegram: { is: { chatId: { not: null } } } } } },
+      employee: { active: true, AND: [hasCallsWhere(), jobWhere(["call_center"])], user: { is: { telegram: { is: { chatId: { not: null } } } } } },
     },
     select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { userId: true } } },
     orderBy: { callTimestampMs: "asc" },

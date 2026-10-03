@@ -25,7 +25,7 @@ async function checkCredentials(req, res, username, password) {
 
   const user = await prisma.user.findUnique({
     where: { username },
-    include: { employee: true },
+    include: { employee: { include: { pbx: { select: { ext: true } } } } },
   });
   const ok = await verifyPassword(password, user?.passwordHash ?? (await DUMMY_HASH));
   if (!user || !user.active || !ok) {

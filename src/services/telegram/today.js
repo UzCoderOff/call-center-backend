@@ -6,6 +6,7 @@ const m = require("../materials");
 const f = require("./format");
 const { isManagerUser, ownsCalendar, booksAppointments } = require("./prefs");
 const { canSeeFinance } = require("../../lib/finance");
+const { hasCalls } = require("../../lib/calling");
 const { workScope } = require("../../lib/clientAccess");
 const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 
@@ -15,7 +16,7 @@ const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 // only what the portal already shows them.
 
 const canSeeClients = (user) =>
-  isManagerUser(user) || user.role === "LAWYER" || Boolean(user.employee?.collectCalls) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
+  isManagerUser(user) || user.role === "LAWYER" || hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
 
 // A day's appointments: in their own calendar (the lawyer), or the ones
 // they booked (staff).
@@ -77,7 +78,7 @@ async function clientLines(user, date) {
 // Missed calls on their own phone that still wait for a call back.
 async function missedLines(user, now) {
   // The call-back list is the call center's (Employee.job).
-  if (!user.employee?.collectCalls || !isCallCenter(user.employee)) return [];
+  if (!hasCalls(user.employee) || !isCallCenter(user.employee)) return [];
   const since = BigInt(Date.now() - 3 * 24 * 60 * 60 * 1000);
   const count = await prisma.callLog.count({
     where: { employeeId: user.employee.id, missed: true, followUp: "pending", callTimestampMs: { gte: since } },

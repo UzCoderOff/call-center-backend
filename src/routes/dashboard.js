@@ -5,7 +5,8 @@ const { parseMs, parseId } = require("../utils/params");
 const { computeCallStats, computeDailySeries, blankStats } = require("../services/stats");
 const { getSyncHealth } = require("../services/syncHealth");
 const { diskSpace } = require("../services/diskSpace");
-const { JOBS, parseJobs } = require("../lib/jobs");
+const { JOBS, parseJobs, hasJob, isCallCenter, jobsOf } = require("../lib/jobs");
+const { hasCalls } = require("../lib/calling");
 const { computeFunnel } = require("../services/funnel");
 const { strikeCounts } = require("../services/strikes");
 const { DEFAULT_FEE } = require("../services/consultationFee");
@@ -97,21 +98,22 @@ router.get("/", async (req, res, next) => {
       // Their strikes this month, and the rule (when it's on). Not the fine:
       // that's between them and the boss (Natijalar).
       const mine = strikes.counts.get(self.id);
-      const strike = strikes.rules.enabled && self.job === "call_center" ? { count: mine.count, limit: mine.limit, over: mine.over, minutes: strikes.rules.minutes } : null;
+      const strike = strikes.rules.enabled && isCallCenter(self) ? { count: mine.count, limit: mine.limit, over: mine.over, minutes: strikes.rules.minutes } : null;
       return res.json({ scope: "self", totals, previous, daily, needsCallback, funnel, strikes: strike, sync: health.get(self.id) });
     }
 
     const everyone = await prisma.employee.findMany({
-      select: { id: true, name: true, active: true, employeeId: true, collectCalls: true, job: true },
+      select: { id: true, name: true, active: true, employeeId: true, collectCalls: true, pbxCalling: true, job: true, extraJobs: true },
       orderBy: { name: "asc" },
     });
     // ?jobs=call_center,… — whose phones these numbers are about (the portal
     // asks for the call center by default). Without it: everyone's.
     const jobs = parseJobs(req.query.jobs);
-    const employees = jobs ? everyone.filter((e) => jobs.includes(e.job)) : everyone;
+    const employees = jobs ? everyone.filter((e) => jobsOf(e).some((j) => jobs.includes(j))) : everyone;
     const employeeIds = jobs ? employees.map((e) => e.id) : null;
-    // How many monitored phones each job has, for the portal's switches.
-    const phonesByJob = Object.fromEntries(JOBS.map((j) => [j, everyone.filter((e) => e.active && e.collectCalls && e.job === j).length]));
+    // How many people with calls (their phone, or Ledger's line) each job
+    // has, for the portal's switches.
+    const phonesByJob = Object.fromEntries(JOBS.map((j) => [j, everyone.filter((e) => e.active && hasCalls(e) && hasJob(e, j)).length]));
     const collecting = employees.filter((e) => e.collectCalls);
     const [{ totals, byEmployee }, daily, needsCallback, health, funnel, strikes, previous] = await Promise.all([
       computeCallStats({ employeeIds, from, to }),
@@ -123,21 +125,23 @@ router.get("/", async (req, res, next) => {
       previousTotals(employeeIds, prevFrom, prevTo),
     ]);
 
-    // One row per active call-collecting employee. Anyone else with calls in
+    // One row per active employee with calls. Anyone else with calls in
     // the range (deactivated, collection since switched off) still shows,
     // so the rows always add up to the company totals.
     const rows = employees
-      .filter((e) => (e.active && e.collectCalls) || byEmployee.has(e.id))
+      .filter((e) => (e.active && hasCalls(e)) || byEmployee.has(e.id))
       .map((e) => ({
         id: e.id,
         name: e.name,
         active: e.active,
         collectCalls: e.collectCalls,
+        hasCalls: hasCalls(e),
         ...(byEmployee.get(e.id) || blankStats()),
         sync: health.get(e.id) ?? null,
         job: e.job,
+        jobs: jobsOf(e),
         // This month's late call-back strikes (when the rule is on).
-        strikes: strikes.rules.enabled && e.job === "call_center" ? strikes.counts.get(e.id) : null,
+        strikes: strikes.rules.enabled && isCallCenter(e) ? strikes.counts.get(e.id) : null,
       }));
 
     // The developer also sees when the server's disk is getting full.

@@ -4,6 +4,7 @@ const env = require("../config/env");
 const { startSession, endSession, publicMe } = require("../lib/session");
 const { checkCredentials } = require("./auth");
 const { generateDeviceToken, hashDeviceToken, requireDevice } = require("../middleware/deviceAuth");
+const pbxProvision = require("../services/pbx/provision");
 
 // Endpoints for the Android app. The app signs in once with the person's
 // normal portal username/password and gets a device token back; after that
@@ -81,6 +82,7 @@ router.get("/config", requireDevice, async (req, res, next) => {
 router.post("/logout", requireDevice, async (req, res, next) => {
   try {
     await prisma.device.update({ where: { id: req.device.id }, data: { revokedAt: new Date() } });
+    await pbxProvision.revokeDevice(req.device.id);
     endSession(res);
     res.json({ ok: true });
   } catch (err) {

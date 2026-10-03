@@ -5,7 +5,7 @@ const { resolveRecordingPath } = require("../utils/fileStorage");
 const { resolvePlayableRecording } = require("../utils/audioTranscode");
 const { badRequest, parseMs, parseId } = require("../utils/params");
 const { clientIndexFor } = require("../lib/clientAccess");
-const { parseJobs, isCoordinator } = require("../lib/jobs");
+const { parseJobs, isCoordinator, jobWhere } = require("../lib/jobs");
 const {
   FOLLOW_UP_WINDOW_MS,
   NEEDS_CALLBACK_STATUSES,
@@ -49,7 +49,7 @@ function filterWhere(req) {
   // ?jobs=call_center,coordinator — whose phones (Employee.job). The portal
   // shows the call center by default; the others are a tap away.
   const jobs = parseJobs(q.jobs);
-  if (jobs && isManager(req.user) && !q.employeeId) where.employee = { job: { in: jobs } };
+  if (jobs && isManager(req.user) && !q.employeeId) where.employee = jobWhere(jobs);
   if (q.missed !== undefined) where.missed = q.missed === "true";
   if (q.callType) where.callType = String(q.callType);
   // Lets the portal filter down to "calls with no recording attached" —

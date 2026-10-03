@@ -50,5 +50,7 @@ prepareDatabase()
       telegram.start();
       // Late call-back strikes and other work on a clock.
       scheduler.start();
+      // Ledger's own phone line (off without PBX_AMI_SECRET).
+      require("./services/pbx").start();
     });
   });

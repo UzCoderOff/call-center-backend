@@ -159,6 +159,10 @@ model Employee {
   // Set by the developer (Team → person → Work settings). The migration
   // filled it in from each person's settings.
   job String @default("other")
+  // Their other jobs when they do more than one (2026-10-03), comma-separated
+  // ("coordinator,office"); `job` stays the main one. Read both through
+  // src/lib/jobs.js (jobsOf / hasJob / jobWhere), never `job` alone.
+  extraJobs String @default("")
 
   calls   CallLog[]
   reports Report[]
@@ -192,6 +196,44 @@ model Employee {
   absences    Absence[]
   strikes     Strike[]
   targets     Target[]
+
+  // Calls through Ledger's own phone line (2026-10, see pbx/README.md): they
+  // get a phone ID (PbxExtension) and make and take calls in the Ledger app.
+  // Separate from collectCalls, which is about syncing the phone's own call
+  // log; read "has calls at all" through src/lib/calling.js (hasCalls).
+  pbxCalling Boolean       @default(false)
+  pbx        PbxExtension?
+}
+
+// A person's extension on Ledger's phone line ("phone ID") and what Asterisk
+// needs to let their phone in. One row per person who ever had calling on;
+// the number is never reused.
+model PbxExtension {
+  id         Int      @id @default(autoincrement())
+  employeeId Int      @unique
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  // "201", "202"… three digits from 201 up — never 101–104 or 112, which are
+  // emergency numbers in Uzbekistan.
+  ext        String   @unique
+  // md5("<ext>:<realm>:<secret>") — what Asterisk checks the password
+  // against — encrypted with PBX_SECRET_KEY (src/services/pbx/secrets.js).
+  // The secret itself is shown once: to the phone that signs in, or to the
+  // developer for a test softphone. Null: nothing can sign in.
+  ha1Enc         String?
+  // The signed-in phone (Device.id) that holds the current secret; null for
+  // a test softphone.
+  secretDeviceId Int?
+  secretIssuedAt DateTime?
+  // May call numbers outside the firm (once the company line is connected).
+  canCallOut     Boolean   @default(true)
+  lastWakeAt     DateTime?
+  // Rings in a row their phone didn't come up for. At 2 they rest — out of
+  // the call-center line — until restingUntil, so callers don't wait on a
+  // phone that's off.
+  wakeFailStreak Int       @default(0)
+  restingUntil   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 // A physical location — e.g. the office by the court, the translation office.
@@ -229,8 +271,9 @@ model Position {
   // Preset work pattern for new staff (see Employee.workDays).
   workDays            String             @default("123456")
   holidaysOff         Boolean            @default(true)
-  // Preset job for new staff (see Employee.job).
+  // Preset job for new staff (see Employee.job), and their other jobs.
   job                 String             @default("other")
+  extraJobs           String             @default("")
   // Materials meant for everyone in this position.
   materials           MaterialAudience[]
 }
@@ -343,6 +386,16 @@ model CallLog {
   followUpMarkedById Int?
   followUpMarkedBy   User?     @relation("FollowUpMarkedBy", fields: [followUpMarkedById], references: [id], onDelete: SetNull)
   followUpMarkedAt   DateTime?
+
+  // "phone": synced from the person's phone (routes/sync.js); "pbx": a call
+  // through Ledger's phone line (src/services/pbx/ingest.js), where
+  // deviceCallLogId is "pbx:<pbxCallId>".
+  source    String  @default("phone")
+  // Asterisk's id for the call (its linkedid).
+  pbxCallId String? @unique
+  // Line calls: who was rung, for how long, and why the call is theirs —
+  // { rang: [{ ext, employeeId, status, waitedSec }], owner, reason }.
+  pbxDetail Json?
 
   transcript Transcript?
   strike     Strike?

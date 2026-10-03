@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { jobWhere } = require("../lib/jobs");
 const { firmNow, firmDayRange, shiftDate } = require("../lib/firmTime");
 const { phoneKey } = require("../lib/phone");
 const { getSetting } = require("../lib/settings");
@@ -146,9 +147,9 @@ async function evaluateStrikes({ now = Date.now(), db = prisma } = {}) {
       missed: true,
       phoneKey: { not: null },
       callTimestampMs: { gte: BigInt(since) },
-      employee: { job: "call_center", active: true },
+      employee: { ...jobWhere(["call_center"]), active: true },
     },
-    select: { id: true, employeeId: true, phoneKey: true, callTimestampMs: true, followUp: true, followUpMarkedAt: true, strike: { select: { id: true, cancelledAt: true, cancelReason: true } }, employee: { select: { id: true, employeeId: true, workDays: true, holidaysOff: true } } },
+    select: { id: true, employeeId: true, source: true, phoneKey: true, callTimestampMs: true, followUp: true, followUpMarkedAt: true, strike: { select: { id: true, cancelledAt: true, cancelReason: true } }, employee: { select: { id: true, employeeId: true, workDays: true, holidaysOff: true } } },
     orderBy: { callTimestampMs: "asc" },
   });
   if (missed.length === 0) return { created: 0, cancelled: 0 };
@@ -189,7 +190,11 @@ async function evaluateStrikes({ now = Date.now(), db = prisma } = {}) {
     // A second missed call from the same number within the hour: the first
     // one is what counts.
     if (others.some((c) => c.missed && c.id !== call.id && Number(c.callTimestampMs) < t0 && t0 - Number(c.callTimestampMs) < SAME_NUMBER_MS)) continue;
-    const result = judge({ missed: call, later: others, rules, works: worksFor(call.employee.id), lastSyncMs: lastSync.get(call.employee.employeeId) ?? null, now });
+    // A call on Ledger's line: the server sees the line's calls as they
+    // happen, so there's no phone sync to wait for (a call back from a
+    // personal SIM that syncs later still cancels the strike by itself).
+    const lastSyncMs = call.source === "pbx" ? now : lastSync.get(call.employee.employeeId) ?? null;
+    const result = judge({ missed: call, later: others, rules, works: worksFor(call.employee.id), lastSyncMs, now });
 
     if (call.strike) {
       // Returned in time after all (a late sync): cancelled by itself.

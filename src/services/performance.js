@@ -6,7 +6,8 @@ const { reportMoney } = require("./reportMoney");
 const { workingDates } = require("./workdays");
 const { BUILTIN, MONEY, FINANCE_ONLY, parseKey, formMeasures, reportValues, targetsFor } = require("./performanceMetrics");
 const { scheduleOf } = require("./installments");
-const { jobOf } = require("../lib/jobs");
+const { jobOf, jobsOf, hasJob } = require("../lib/jobs");
+const { hasCalls } = require("../lib/calling");
 const { strikeCounts } = require("./strikes");
 
 // Each person's month at work, for the performance page ("Natijalar"):
@@ -157,7 +158,7 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
 
     // ------------------------------------------------------------ calls
     let calls = null;
-    if (e.collectCalls) {
+    if (hasCalls(e)) {
       const s = callStats.byEmployee.get(e.id);
       const sum = (key) => myDays.reduce((t, d) => t + (d.calls?.[key] || 0), 0);
       const total = s?.totalCalls || 0;
@@ -292,16 +293,17 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     // The developer can settle it per person (workKind): "office" for
     // someone whose calls are collected but whose job is the office work.
     // What they're measured on is their job (set by the developer).
+    // Someone can do more than one job: they're measured on each of them.
     const kind = jobOf(e);
     const clientActivity = Boolean(consulted.length || signed.length || mine.length || bookingsOut.made);
-    const clientWork = kind === "call_center";
-    const coordinatorWork = kind === "coordinator";
+    const clientWork = hasJob(e, "call_center");
+    const coordinatorWork = hasJob(e, "coordinator");
     // Office work: they fill in a report form (or sent reports this month
     // without doing client work). A form left on someone switched to the
     // automatic report alone doesn't count.
     const asksForm = mode === "form" || mode === "auto+form";
     const form = e.reportTemplateId && asksForm ? templateById.get(e.reportTemplateId) : null;
-    const officeWork = kind === "office" || Boolean(form || (myReports.length && !clientWork && !coordinatorWork));
+    const officeWork = hasJob(e, "office") || Boolean(form || (myReports.length && !clientWork && !coordinatorWork));
 
     // ------------------------------------------------------- coordinator
     // Money collected this month on the cases handed to them (contract
@@ -358,12 +360,12 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     const row = {
       // clientActivity: they did some client work (shown on their page) even
       // when it isn't what they're measured on.
-      work: { kind, client: clientWork, coordinator: coordinatorWork, office: officeWork, clientActivity },
+      work: { kind, jobs: jobsOf(e), client: clientWork, coordinator: coordinatorWork, office: officeWork, clientActivity },
       coordinator,
       // With the rule on (or any given): this month's count against the limit.
       strikes: strikeRule.enabled || strikeMap.get(e.id)?.count ? { ...strikeMap.get(e.id), minutes: strikeRule.minutes } : null,
       metrics,
-      employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, workDays: e.workDays, holidaysOff: e.holidaysOff },
+      employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, hasCalls: hasCalls(e), workDays: e.workDays, holidaysOff: e.holidaysOff },
       workDays: { total: workMine.length, soFar: workMineSoFar.length, away: mineCal.off.filter((o) => o.kind !== "weekly" && o.date >= joined).map((o) => ({ date: o.date, kind: o.kind, name: o.name ?? null })) },
       calls,
       clientsAdded: myDays.reduce((t, d) => t + d.newClients, 0),

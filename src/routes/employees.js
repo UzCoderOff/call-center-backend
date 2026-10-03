@@ -6,6 +6,8 @@ const { generateUniqueEmployeeId } = require("../utils/employeeId");
 const { generateTempPassword } = require("../lib/tempPassword");
 const { parseId, badRequest } = require("../utils/params");
 const { getSyncHealth } = require("../services/syncHealth");
+const { hasCalls } = require("../lib/calling");
+const pbxProvision = require("../services/pbx/provision");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -15,7 +17,22 @@ const EMPLOYEE_INCLUDE = {
   office: { select: { id: true, name: true } },
   position: { select: { id: true, name: true } },
   reportTemplate: { select: { id: true, name: true } },
+  pbx: { select: { ext: true, ha1Enc: true, secretDeviceId: true, restingUntil: true, canCallOut: true } },
 };
+
+// Their place on Ledger's phone line, without the sign-in hash.
+function phoneLine(pbx) {
+  if (!pbx) return null;
+  return {
+    ext: pbx.ext,
+    // A phone can sign in: the Ledger app (viaApp) or a test softphone.
+    signedIn: Boolean(pbx.ha1Enc),
+    viaApp: pbx.secretDeviceId != null,
+    canCallOut: pbx.canCallOut,
+    // Off the call-center line for a while: their phone didn't come up.
+    restingUntil: pbx.restingUntil && pbx.restingUntil > new Date() ? pbx.restingUntil : null,
+  };
+}
 
 // Passwords are one-way bcrypt hashes (see lib/passwords.js) — nobody, not
 // even a DEVELOPER, can ever recover or display someone's actual password.
@@ -37,11 +54,15 @@ function publicEmployee(employee, viewerRole, sync) {
     office: employee.office ?? null,
     position: employee.position ?? null,
     collectCalls: employee.collectCalls,
+    pbxCalling: employee.pbxCalling,
+    hasCalls: hasCalls(employee),
+    phoneLine: phoneLine(employee.pbx),
     autoReport: employee.autoReport,
     alsoForm: employee.alsoForm,
     calendarAccess: employee.calendarAccess,
     workKind: employee.workKind,
     job: employee.job,
+    jobs: jobsOf(employee),
     workDays: employee.workDays,
     holidaysOff: employee.holidaysOff,
     reportTemplate: employee.reportTemplate ?? null,
@@ -78,7 +99,7 @@ function optionalId(value, field) {
 
 const CALENDAR_ACCESS = ["none", "view", "book"];
 const WORK_KINDS = ["auto", "client", "office"];
-const { JOBS } = require("../lib/jobs");
+const { JOBS, jobFields, jobList, jobsOf } = require("../lib/jobs");
 const { normalizePattern } = require("../services/workdays");
 
 // The job-related settings shared by create and update.
@@ -94,6 +115,11 @@ function workSettings(body) {
     if (typeof body.collectCalls !== "boolean") throw badRequest("collectCalls must be true or false");
     data.collectCalls = body.collectCalls;
   }
+  // Calls through Ledger's phone line (gives them a phone ID).
+  if (body.pbxCalling !== undefined) {
+    if (typeof body.pbxCalling !== "boolean") throw badRequest("pbxCalling must be true or false");
+    data.pbxCalling = body.pbxCalling;
+  }
   if (body.autoReport !== undefined) {
     if (typeof body.autoReport !== "boolean") throw badRequest("autoReport must be true or false");
     data.autoReport = body.autoReport;
@@ -108,7 +134,13 @@ function workSettings(body) {
   }
   // What they do (see schema: Employee.job) — decides the call-back list,
   // the Calls/Home default and what Natijalar measures them on.
-  if (body.job !== undefined) {
+  // `jobs`: all of them, the main one first (someone can do more than one).
+  // Older portals send the single `job`, which leaves the others as they are.
+  if (body.jobs !== undefined) {
+    const list = jobList(body.jobs);
+    if (!list.length) throw badRequest("invalid jobs");
+    Object.assign(data, jobFields(list));
+  } else if (body.job !== undefined) {
     if (!JOBS.includes(body.job)) throw badRequest("invalid job");
     data.job = body.job;
   }
@@ -164,7 +196,10 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       if (settings.reportTemplateId === undefined) settings.reportTemplateId = position.reportTemplateId;
       if (settings.workDays === undefined) settings.workDays = position.workDays;
       if (settings.holidaysOff === undefined) settings.holidaysOff = position.holidaysOff;
-      if (settings.job === undefined) settings.job = position.job;
+      if (settings.job === undefined) {
+        settings.job = position.job;
+        settings.extraJobs = position.extraJobs;
+      }
     }
 
     const existingUsername = await prisma.user.findUnique({ where: { username } });
@@ -190,6 +225,7 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
         calendarAccess: settings.calendarAccess ?? "none",
         workKind: settings.workKind ?? "auto",
         job: settings.job ?? "other",
+        extraJobs: settings.extraJobs ?? "",
         // Without a position: call-center staff (calls collected) work every
         // day, holidays included; everyone else Monday–Saturday.
         workDays: settings.workDays ?? (settings.collectCalls ? "1234567" : "123456"),
@@ -203,9 +239,10 @@ router.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
       },
       include: EMPLOYEE_INCLUDE,
     });
+    const created = await updatePhoneLine(employee, body);
 
     res.status(201).json({
-      employee: publicEmployee(employee, req.user.role),
+      employee: publicEmployee(created, req.user.role),
       // The portal login password is shown exactly once — it isn't
       // recoverable after this; use reset-password if it's lost. The same
       // username/password signs in to the Android app.
@@ -270,6 +307,21 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
+// After saving someone: a phone ID when Ledger calls are on for them, whether
+// they may call outside, and the phone line told about it (it follows the
+// changes by itself: switched off, deactivated, other job). Returns the
+// employee as saved.
+async function updatePhoneLine(employee, body) {
+  if (body.canCallOut !== undefined && typeof body.canCallOut !== "boolean") throw badRequest("canCallOut must be true or false");
+  const needsExt = employee.pbxCalling && !employee.pbx;
+  if (needsExt || (body.canCallOut !== undefined && (employee.pbx || employee.pbxCalling))) {
+    const row = await pbxProvision.ensureExtension(employee.id);
+    if (body.canCallOut !== undefined) await prisma.pbxExtension.update({ where: { id: row.id }, data: { canCallOut: body.canCallOut } });
+  }
+  pbxProvision.scheduleApply();
+  return prisma.employee.findUnique({ where: { id: employee.id }, include: EMPLOYEE_INCLUDE });
+}
+
 router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
@@ -294,7 +346,7 @@ router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
       await prisma.user.update({ where: { id: employee.userId }, data: { active } });
     }
 
-    res.json(publicEmployee(employee, req.user.role));
+    res.json(publicEmployee(await updatePhoneLine(employee, body), req.user.role));
   } catch (err) {
     if (err.code === "P2025") return res.status(404).json({ error: "not_found" });
     if (err.code === "P2003") return res.status(400).json({ error: "invalid_reference" });
@@ -339,11 +391,14 @@ router.delete("/:id/devices/:deviceId", requireRole("DEVELOPER"), async (req, re
   try {
     const employee = await prisma.employee.findUnique({ where: { id: parseId(req.params.id) } });
     if (!employee?.userId) return res.status(404).json({ error: "not_found" });
+    const deviceId = parseId(req.params.deviceId, "deviceId");
     const result = await prisma.device.updateMany({
-      where: { id: parseId(req.params.deviceId, "deviceId"), userId: employee.userId, revokedAt: null },
+      where: { id: deviceId, userId: employee.userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
     if (result.count === 0) return res.status(404).json({ error: "not_found" });
+    // …and off Ledger's phone line.
+    await pbxProvision.revokeDevice(deviceId);
     res.status(204).end();
   } catch (err) {
     next(err);

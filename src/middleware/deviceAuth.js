@@ -26,7 +26,7 @@ async function findDevice(token) {
   if (!token) return null;
   const device = await prisma.device.findUnique({
     where: { tokenHash: hashDeviceToken(token) },
-    include: { user: { include: { employee: true } } },
+    include: { user: { include: { employee: { include: { pbx: { select: { ext: true } } } } } } },
   });
   if (!device || device.revokedAt || !device.user.active) return null;
 

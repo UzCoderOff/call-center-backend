@@ -1,0 +1,9 @@
+# Ledger's phone line: block addresses that keep guessing phone sign-ins.
+# Installed by pbx/install.sh to /etc/fail2ban/jail.d/.
+[asterisk]
+enabled  = true
+port     = 5160,5161
+logpath  = /var/log/asterisk/messages.log
+maxretry = 5
+findtime = 10m
+bantime  = 1h

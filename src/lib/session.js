@@ -2,6 +2,8 @@ const { signSessionToken } = require("./tokens");
 const env = require("../config/env");
 const { canSeeFinance } = require("./finance");
 const { asksForm } = require("../services/autoReport");
+const { jobsOf } = require("./jobs");
+const { hasCalls } = require("./calling");
 
 // The portal login cookie. Shared by the web login (routes/auth.js) and the
 // Android app, which gets a session cookie for its in-app portal view from
@@ -40,6 +42,11 @@ function publicMe(user) {
           id: e.id,
           name: e.name,
           collectCalls: e.collectCalls,
+          // Calls at all: synced from their phone, or through Ledger's line.
+          hasCalls: hasCalls(e),
+          // Ledger's phone line: whether it's on for them, and their phone ID.
+          pbxCalling: e.pbxCalling,
+          ext: e.pbx?.ext ?? null,
           hasReport: e.reportTemplateId != null || e.autoReport,
           autoReport: e.autoReport,
           alsoForm: e.alsoForm,
@@ -49,6 +56,8 @@ function publicMe(user) {
           // What they do (call center, coordinator, office…): their home
           // page and tools follow it.
           job: e.job,
+          // All of their jobs (main first) when they do more than one.
+          jobs: jobsOf(e),
         }
       : null,
   };

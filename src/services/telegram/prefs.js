@@ -1,5 +1,6 @@
 const { MANAGER_ROLES } = require("../../middleware/auth");
 const { isCallCenter, isCoordinator } = require("../../lib/jobs");
+const { hasCalls } = require("../../lib/calling");
 
 // The kinds of Telegram notification, and who each one is for. Each person
 // sees (in the portal and in the bot's Sozlamalar) only the kinds that apply
@@ -33,7 +34,7 @@ function applicableKinds(user) {
   const out = [];
   if (ownsCalendar(user) || booksAppointments(user)) out.push("appointments");
   // The call-back list is the call center's (Employee.job).
-  if (e?.collectCalls && isCallCenter(e)) out.push("missedCalls");
+  if (hasCalls(e) && isCallCenter(e)) out.push("missedCalls");
   out.push("digest");
   if (e && e.reportTemplateId != null && (!e.autoReport || e.alsoForm)) out.push("reportReminder");
   if (!isManagerUser(user)) out.push("materials");
@@ -48,7 +49,7 @@ function applicableKinds(user) {
   // coordinators).
   if (isManagerUser(user) || user.role === "LAWYER" || isCoordinator(e)) out.push("cases");
   // Follow-ups due: everyone who works with clients.
-  if (isManagerUser(user) || user.role === "LAWYER" || e?.collectCalls || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
+  if (isManagerUser(user) || user.role === "LAWYER" || hasCalls(e) || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
   // Late call-back strikes: the call center, and the managers (over the limit).
   if (isManagerUser(user) || isCallCenter(e)) out.push("strikes");
   return out;

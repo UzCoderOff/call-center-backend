@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
-const { jobOf } = require("../lib/jobs");
+const { isCallCenter, isCoordinator } = require("../lib/jobs");
+const { hasCalls } = require("../lib/calling");
 
 // What a person can be measured on (Natijalar), and their targets.
 //
@@ -142,11 +143,14 @@ async function targetsFor(employees, month, db = prisma) {
 // have a target from). All income — for anyone, client or office work — only
 // to whoever sees Moliya.
 async function catalogFor(employee, { finance = false } = {}, db = prisma) {
-  // By their job (src/lib/jobs.js), as on the performance page. Calls only
-  // for people whose calls are collected.
-  const job = jobOf(employee);
-  const keys =
-    job === "call_center" ? CLIENT_KEYS.filter((k) => k !== "calls_answered" || employee.collectCalls) : job === "coordinator" ? COORDINATOR_KEYS : [];
+  // By their jobs (src/lib/jobs.js), as on the performance page. Calls only
+  // for people who have calls (their phone's, or Ledger's line).
+  const keys = [
+    ...new Set([
+      ...(isCallCenter(employee) ? CLIENT_KEYS.filter((k) => k !== "calls_answered" || hasCalls(employee)) : []),
+      ...(isCoordinator(employee) ? COORDINATOR_KEYS : []),
+    ]),
+  ];
   const builtin = [...(finance ? ["income"] : []), ...keys].map((key) => ({ key, builtin: true, unit: MONEY.has(key) ? "money" : "count" }));
   const own = await db.target.findMany({ where: { employeeId: employee.id }, select: { metric: true } });
   const asksForm = employee.reportTemplateId && (!employee.autoReport || employee.alsoForm);

@@ -70,6 +70,31 @@ module.exports = {
   // Which calendar day a daily report belongs to is decided in the firm's
   // own timezone, not the server's (a VPS usually runs on UTC).
   firmTimezone: process.env.FIRM_TIMEZONE || "Asia/Tashkent",
+  // Ledger's own phone line: Asterisk on this server (pbx/README.md). Without
+  // PBX_AMI_SECRET none of it runs and nothing changes for anyone.
+  pbx: {
+    amiHost: process.env.PBX_AMI_HOST || "127.0.0.1",
+    amiPort: Number(process.env.PBX_AMI_PORT) || 5038,
+    amiUser: process.env.PBX_AMI_USER || "ledger",
+    amiSecret: process.env.PBX_AMI_SECRET || null,
+    // Where Ledger writes the phone IDs for Asterisk, where Asterisk drops a
+    // small file per finished call, and where it records.
+    confDir: process.env.PBX_CONF_DIR || "/etc/asterisk/ledger",
+    // (Not under /var/spool/asterisk, which only Asterisk may enter.)
+    spoolDir: process.env.PBX_SPOOL_DIR || "/var/spool/ledger-pbx/calls",
+    monitorDir: process.env.PBX_MONITOR_DIR || "/var/spool/ledger-pbx/recordings",
+    // Asterisk asks Ledger things (wake this phone) on 127.0.0.1 at this port
+    // — a second listener the web proxy never forwards to — with this secret.
+    hookPort: Number(process.env.PBX_HOOK_PORT) || 4001,
+    hookSecret: process.env.PBX_HOOK_SECRET || null,
+    // What phones connect to (TLS), and the sign-in realm.
+    sipHost: process.env.PBX_SIP_HOST || "82.115.51.61.nip.io",
+    sipPort: Number(process.env.PBX_SIP_PORT) || 5161,
+    realm: process.env.PBX_SIP_REALM || "ledger",
+    // 32 bytes (64 hex characters): encrypts the phones' sign-in hashes in
+    // the database, so a database copy (the off-site backup) can't sign in.
+    secretKey: process.env.PBX_SECRET_KEY || null,
+  },
   // The newest Android app build, so installed apps can offer an update.
   // Leave APP_LATEST_VERSION_CODE unset to disable the prompt.
   appLatest: {

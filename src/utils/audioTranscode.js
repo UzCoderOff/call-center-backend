@@ -130,7 +130,13 @@ const inFlightTranscodes = new Map(); // destAbsolutePath -> Promise
 // that arrives mid-conversion (or a crash partway through, or a second
 // server process doing the same thing) never sees/serves a truncated
 // cache file, and two writers can never corrupt each other's temp file.
-function transcodeToMp3(sourceAbsolutePath, destAbsolutePath) {
+// audioArgs: ffmpeg's output audio options (channels, rate, bitrate).
+const PLAYBACK_AUDIO = ["-ac", "1", "-ar", "44100", "-b:a", "64k"];
+// Ledger's phone line records 8 kHz telephone audio: 16 kHz mono at 32 kbps
+// loses nothing and keeps an hour of talk around 14 MB.
+const PHONE_LINE_AUDIO = ["-ac", "1", "-ar", "16000", "-b:a", "32k"];
+
+function transcodeToMp3(sourceAbsolutePath, destAbsolutePath, audioArgs = PLAYBACK_AUDIO) {
   resolveFfmpeg();
 
   const tmpPath = path.join(
@@ -157,7 +163,7 @@ function transcodeToMp3(sourceAbsolutePath, destAbsolutePath) {
     // is far more than a call needs; a stuck ffmpeg is killed.
     execFile(
       ffmpegCommand,
-      ["-nostdin", "-loglevel", "error", "-protocol_whitelist", "file", "-y", "-i", sourceAbsolutePath, "-vn", "-ac", "1", "-ar", "44100", "-b:a", "64k", "-f", "mp3", tmpPath],
+      ["-nostdin", "-loglevel", "error", "-protocol_whitelist", "file", "-y", "-i", sourceAbsolutePath, "-vn", ...audioArgs, "-f", "mp3", tmpPath],
       { timeout: 60 * 1000, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
       (err, _stdout, stderr) => {
         if (err) {
@@ -210,6 +216,8 @@ async function resolvePlayableRecording(relativeRecordingPath, resolveOriginalPa
 }
 
 module.exports = {
+  transcodeToMp3,
+  PHONE_LINE_AUDIO,
   resolvePlayableRecording,
   isWebSafeExtension,
   WEB_SAFE_EXTENSIONS,

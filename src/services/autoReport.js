@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { hasCalls } = require("../lib/calling");
 const { firmDate, firmDayRange, isValidDate, shiftDate } = require("../lib/firmTime");
 
 // Automatic daily reports. For people with Employee.autoReport on (call-center
@@ -67,7 +68,7 @@ async function autoReportDays(employee, from, to) {
   };
 
   const [calls, booked, clients, consultations, contracts, payments, followUpsDone, strikes] = await Promise.all([
-    employee.collectCalls
+    hasCalls(employee)
       ? prisma.callLog.findMany({
           where: { employeeId: employee.id, callTimestampMs: { gte: BigInt(start), lte: BigInt(end) } },
           select: { callTimestampMs: true, callType: true, missed: true, durationSeconds: true, followUp: true, phoneKey: true },
@@ -134,7 +135,7 @@ async function autoReportDays(employee, from, to) {
   }
 
   const list = [...days.values()];
-  if (!employee.collectCalls) for (const day of list) day.calls = null;
+  if (!hasCalls(employee)) for (const day of list) day.calls = null;
   return list;
 }
 
