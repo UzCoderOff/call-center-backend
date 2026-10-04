@@ -191,7 +191,7 @@ async function notifyMessage(conv, message, author) {
     const title = await displayTitle(conv, user);
     const body = preview(message, conv.kind === "direct" ? null : authorName);
     const link = `/chat/${conv.id}`;
-    if (await app.notifyApp(user.id, { kind: "chat", title, body, link, tag: `chat:${conv.id}` })) continue;
+    if (await app.notifyPush(user.id, { kind: "chat", title, body, link, tag: `chat:${conv.id}` })) continue;
     await notifyUser(user.id, "chat", [`💬 <b>${f.escapeHtml(title)}</b>`, f.escapeHtml(body), f.portalLink(link, "Chatni ochish")].join("\n"), undefined, { app: false });
   }
 }
@@ -221,7 +221,7 @@ async function eventReminders() {
         const title = stage === "now" ? `📅 ${m.eventTitle} — hozir` : `📅 ${m.eventTitle} — ${at} da`;
         const body = stage === "now" ? `Boshlanish vaqti keldi · ${chatTitle}` : `1 soatdan keyin · ${chatTitle}`;
         const link = `/chat/${m.conversationId}`;
-        if (await app.notifyApp(user.id, { kind: "chatEvent", title, body, link, tag: `chat-event:${m.id}` })) continue;
+        if (await app.notifyPush(user.id, { kind: "chatEvent", title, body, link, tag: `chat-event:${m.id}` })) continue;
         await notifyUser(user.id, "chat", [`<b>${f.escapeHtml(title)}</b>`, f.escapeHtml(body), f.portalLink(link, "Chatni ochish")].join("\n"), undefined, { app: false });
       }
       return true;

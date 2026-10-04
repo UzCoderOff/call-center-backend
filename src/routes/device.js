@@ -135,6 +135,16 @@ router.get("/notices/:id", requireDevice, async (req, res, next) => {
   }
 });
 
+// Who's on the other end of a call, for the call screen: ?number=
+// (services/pbx/callerCard.js — as much as this person may see).
+router.get("/caller", requireDevice, async (req, res, next) => {
+  try {
+    res.json(await require("../services/pbx/callerCard").callerCard(req.user, String(req.query.number || "").slice(0, 40)));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // "Remind me" on a call coming in: { phone, name?, minutes } — a reminder to
 // call this number back (services/reminders.js).
 router.post("/reminders", requireDevice, async (req, res, next) => {

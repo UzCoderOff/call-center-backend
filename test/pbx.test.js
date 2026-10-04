@@ -159,3 +159,18 @@ test("a phone that rang later in the same call isn't counted as off", () => {
   ]);
   assert.deepEqual(Object.fromEntries(v), { 203: "worked", 204: "failed", 205: "worked" });
 });
+
+test("phone IDs never take the line's own numbers (500, the phone tests)", () => {
+  const { nextExt, RESERVED } = require("../src/services/pbx/provision");
+  const used = new Set();
+  for (let n = 201; n < 500; n++) used.add(String(n));
+  assert.equal(nextExt(used), "501");
+  for (let n = 501; n < 600; n++) used.add(String(n));
+  assert.equal(nextExt(used), "603");
+  assert.ok(["500", "600", "601", "602"].every((x) => RESERVED.has(x)));
+});
+
+test("AMI fields can repeat (Originate's Variable)", () => {
+  const msg = formatMessage({ Action: "Originate", Variable: ["A=1", "B=2"], Skip: undefined });
+  assert.equal(msg, "Action: Originate\r\nVariable: A=1\r\nVariable: B=2\r\n\r\n");
+});

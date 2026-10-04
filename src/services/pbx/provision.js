@@ -15,8 +15,12 @@ const { pbxSettings } = require("./settings");
 const FIRST_EXT = 201;
 const LAST_EXT = 899;
 
+// Numbers the line itself uses (extensions.conf): the company line to try
+// it out, and the phone tests.
+const RESERVED = new Set(["500", "600", "601", "602"]);
+
 function nextExt(used) {
-  for (let n = FIRST_EXT; n <= LAST_EXT; n++) if (!used.has(String(n))) return String(n);
+  for (let n = FIRST_EXT; n <= LAST_EXT; n++) if (!used.has(String(n)) && !RESERVED.has(String(n))) return String(n);
   throw new Error("no free phone IDs left");
 }
 
@@ -136,4 +140,4 @@ async function apply() {
   await require("./presence").reconcile();
 }
 
-module.exports = { FIRST_EXT, nextExt, ensureExtension, issueSecret, revokeDevice, lineMembers, globalsFor, scheduleApply, applyNow, apply };
+module.exports = { FIRST_EXT, RESERVED, nextExt, ensureExtension, issueSecret, revokeDevice, lineMembers, globalsFor, scheduleApply, applyNow, apply };

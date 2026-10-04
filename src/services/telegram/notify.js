@@ -5,7 +5,7 @@ const { wants } = require("./prefs");
 const app = require("../notify");
 
 // Sending a notification to a person: on Telegram if the bot is set up and
-// they've connected it, and in the Ledger app (app 3.0+, services/notify.js)
+// they've connected it, and in the Ledger app and browsers (services/notify.js)
 // — only while their account is active and they haven't switched that kind
 // off.
 
@@ -55,7 +55,7 @@ async function notifyUser(userOrId, kind, text, extra, { app: toApp = true, appE
   if (enabled() && user.telegram?.chatId) delivered = await sendTo(user, text, extra);
   if (toApp) {
     try {
-      if (await app.notifyApp(user.id, { kind, ...app.fromTelegram(text), ...appExtra })) delivered = true;
+      if (await app.notifyPush(user.id, { kind, ...app.fromTelegram(text), ...appExtra })) delivered = true;
     } catch (err) {
       console.error(`[notify] app notification to user ${user.id} failed:`, err.message);
     }
@@ -63,13 +63,13 @@ async function notifyUser(userOrId, kind, text, extra, { app: toApp = true, appE
   return delivered;
 }
 
-// Everyone notifications can reach — Telegram connected or the Ledger app
-// with push — with what notify needs to know.
+// Everyone notifications can reach — Telegram connected, the Ledger app
+// with push, or a browser with notifications on — with what notify needs.
 function linkedUsers(where = {}) {
   return prisma.user.findMany({
     where: {
       active: true,
-      AND: [where, { OR: [{ telegram: { chatId: { not: null } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }] }],
+      AND: [where, { OR: [{ telegram: { chatId: { not: null } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }, { webPush: { some: {} } }] }],
     },
     include: USER_CONTEXT,
   });

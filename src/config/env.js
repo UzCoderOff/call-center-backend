@@ -97,6 +97,13 @@ module.exports = {
   },
   // Google push to the Ledger app (Firebase): the service account key file —
   // never in git, chmod 600 (src/services/push/fcm.js). Unset: no push.
+  // Notifications in browsers (the portal; services/push/web.js): the
+  // server's VAPID key pair — `npx web-push generate-vapid-keys`. Without it
+  // browsers get none.
+  webPush: {
+    publicKey: process.env.WEB_PUSH_PUBLIC_KEY || null,
+    privateKey: process.env.WEB_PUSH_PRIVATE_KEY || null,
+  },
   fcm: {
     serviceAccountFile: process.env.FCM_SERVICE_ACCOUNT_FILE || null,
     // Only for tests: a stand-in for Google's send address.

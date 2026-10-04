@@ -11,6 +11,8 @@ const env = require("../../config/env");
 //           can't be woken — ring whoever is next)
 //   POST /pbx/caller  s=<secret>&num=<number>
 //        -> the Ledger client's name for that number, "" if unknown
+//   POST /pbx/test-call  s=<secret>&ext=203&kind=client|unknown
+//        -> "1": a test call rings that phone in a few seconds (testCall.js)
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -35,6 +37,7 @@ async function handle(req, res, handlers) {
     if (!env.pbx.hookSecret || params.get("s") !== env.pbx.hookSecret) return reply(403, "forbidden");
     if (req.url === "/pbx/wake") return reply(200, await handlers.wake({ ext: params.get("ext"), call: params.get("call"), from: params.get("from") }));
     if (req.url === "/pbx/caller" && handlers.caller) return reply(200, await handlers.caller({ num: params.get("num") }));
+    if (req.url === "/pbx/test-call" && handlers.testCall) return reply(200, await handlers.testCall({ ext: params.get("ext"), kind: params.get("kind") }));
     return reply(404, "not found");
   } catch (err) {
     console.error("[pbx] hook failed:", err.message);

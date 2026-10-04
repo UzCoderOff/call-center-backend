@@ -163,8 +163,11 @@ function formatMessage(fields) {
   let out = "";
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined || value === null) continue;
-    // A value can't break into the next line (it would become another field).
-    out += `${key}: ${String(value).replace(/[\r\n]/g, " ")}\r\n`;
+    // An array: the field repeated (e.g. Originate's Variable).
+    for (const one of Array.isArray(value) ? value : [value]) {
+      // A value can't break into the next line (it would become another field).
+      out += `${key}: ${String(one).replace(/[\r\n]/g, " ")}\r\n`;
+    }
   }
   return `${out}\r\n`;
 }

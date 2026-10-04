@@ -38,11 +38,11 @@ async function missedCalls(now) {
       callTimestampMs: { gte: oldest, lte: newest },
       // The call center's job (Employee.job): someone else's monitored phone
       // isn't a sales line to call back from.
-      // …and someone a notification reaches (Telegram or the Ledger app).
+      // …and someone a notification reaches (Telegram, the app or a browser).
       employee: {
         active: true,
         AND: [hasCallsWhere(), jobWhere(["call_center"])],
-        user: { is: { OR: [{ telegram: { is: { chatId: { not: null } } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }] } },
+        user: { is: { OR: [{ telegram: { is: { chatId: { not: null } } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }, { webPush: { some: {} } }] } },
       },
     },
     select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { userId: true } } },

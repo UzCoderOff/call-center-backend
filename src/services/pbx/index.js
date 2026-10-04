@@ -29,7 +29,7 @@ function start() {
   });
   // A phone that isn't signed in right now is woken by Google push (wake.js);
   // a client calling is shown by name (caller.js).
-  hooks.start({ wake: require("./wake").wake, caller: require("./caller").caller });
+  hooks.start({ wake: require("./wake").wake, caller: require("./caller").caller, testCall: require("./testCall").testCall });
   require("../push").warmUp();
   ingest.start();
   setInterval(() => presence.reconcile().catch((err) => console.error("[pbx] call-center line:", err.message)), 60 * 1000).unref();

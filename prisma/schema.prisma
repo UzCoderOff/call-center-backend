@@ -107,6 +107,7 @@ model User {
   settingsChanged     Setting[]        @relation("SettingBy")
 
   notices          Notice[]
+  webPush          WebPushSubscription[]
   remindersFor     Reminder[]           @relation("ReminderFor")
   remindersSet     Reminder[]           @relation("ReminderBy")
   conversationsBy  Conversation[]       @relation("ConversationBy")
@@ -1365,4 +1366,23 @@ model Message {
 
   @@index([conversationId, id])
   @@index([eventAt])
+}
+
+// A browser where someone allowed Ledger's notifications (the portal on a
+// computer or a phone's browser — services/push/web.js). The message is
+// encrypted for that browser, so the push service in between (Google,
+// Mozilla, Apple) can't read it. Gone when the browser says so, or when
+// they sign out there.
+model WebPushSubscription {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String    @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime  @default(now())
+  lastOkAt  DateTime?
+
+  @@index([userId])
 }

@@ -1,21 +1,24 @@
 const prisma = require("../lib/prisma");
 const env = require("../config/env");
 const push = require("./push");
+const web = require("./push/web");
 
-// The Ledger app's own notifications (app 3.0+). Each one is a Notice row;
-// Google push carries only its id ({ t: "notice", n: id }) and the app
-// fetches the text with its device token (GET /api/device/notices/:id), so
-// nothing about clients goes through Google.
+// Ledger's own notifications: on phones with the Ledger app (3.0+) and in
+// browsers where someone allowed them (the portal, services/push/web.js).
+// Each one is a Notice row. To the app, Google push carries only its id
+// ({ t: "notice", n: id }) and the app fetches the text with its device
+// token (GET /api/device/notices/:id), so nothing about clients goes
+// through Google; to a browser, the text goes encrypted for that browser.
 //
 // Everything the staff bot sends on Telegram comes here too
-// (services/telegram/notify.js), and things only the app gets (chat,
-// services/chat.js).
+// (services/telegram/notify.js), and things only the app and browsers get
+// (chat, services/chat.js).
 
 const KEEP_DAYS = 45;
 // Still worth showing if the phone was off for a while.
 const TTL_SEC = 24 * 60 * 60;
 
-const configured = () => push.configured();
+const configured = () => push.configured() || web.configured();
 
 const clip = (value, max) => {
   if (value == null) return null;
@@ -35,16 +38,17 @@ function appDevices(userId) {
 }
 
 async function hasApp(userId) {
-  if (!configured()) return false;
-  return (await prisma.device.count({ where: { userId, revokedAt: null, fcmToken: { not: null } } })) > 0;
+  if (push.configured() && (await prisma.device.count({ where: { userId, revokedAt: null, fcmToken: { not: null } } })) > 0) return true;
+  return web.hasBrowser(userId);
 }
 
-// { title, body?, link?, phone?, tag?, kind? } -> the person's phones.
-// Whether at least one phone took it.
-async function notifyApp(userId, notice) {
+// { title, body?, link?, phone?, tag?, kind? } -> the person's phones and
+// browsers. Whether at least one took it.
+async function notifyPush(userId, notice) {
   if (!configured()) return false;
-  const devices = await appDevices(userId);
-  if (devices.length === 0) return false;
+  const devices = push.configured() ? await appDevices(userId) : [];
+  const browsers = await web.hasBrowser(userId);
+  if (devices.length === 0 && !browsers) return false;
   const row = await prisma.notice.create({
     data: {
       userId,
@@ -60,6 +64,7 @@ async function notifyApp(userId, notice) {
   for (const device of devices) {
     if ((await push.sendToDevice(device, { t: "notice", n: row.id }, { ttlSec: TTL_SEC })) === "sent") sent = true;
   }
+  if (browsers && (await web.sendToUser(userId, { id: row.id, title: row.title, body: row.body, link: row.link, tag: row.tag || `notice:${row.id}` }))) sent = true;
   return sent;
 }
 
@@ -100,4 +105,4 @@ async function cleanup() {
   await prisma.notice.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000) } } });
 }
 
-module.exports = { configured, notifyApp, hasApp, fromTelegram, publicNotice, cleanLink, cleanup };
+module.exports = { configured, notifyPush, hasApp, fromTelegram, publicNotice, cleanLink, cleanup };
