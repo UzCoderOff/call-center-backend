@@ -135,3 +135,27 @@ test("AMI messages: values can't break into another field", () => {
   assert.equal(formatMessage({ Action: "Setvar", Value: "a\r\nAction: Originate", Skip: undefined }), "Action: Setvar\r\nValue: a  Action: Originate\r\n\r\n");
   assert.deepEqual(parseMessage("Response: Success\r\nActionID: ledger-1\r\nMessage: Authentication accepted"), { Response: "Success", ActionID: "ledger-1", Message: "Authentication accepted" });
 });
+
+test("a calling client's name is safe to show on the phone and in the dialplan", () => {
+  const { callerLabel } = require("../src/services/pbx/caller");
+  assert.equal(callerLabel("Aliyev Sardor"), "Aliyev Sardor");
+  assert.equal(callerLabel('Karimova "Dilnoza", OOO <Test>'), "Karimova Dilnoza OOO Test");
+  assert.equal(callerLabel("${SHELL} a:b?c|d"), "SHELL a b c d");
+  assert.equal(callerLabel("Qoʻchqorov Gʻayrat"), "Qoʻchqorov Gʻayrat");
+  assert.equal(callerLabel("  "), "");
+  assert.equal(callerLabel("x".repeat(60)).length, 40);
+});
+
+test("a phone that rang later in the same call isn't counted as off", () => {
+  const { ringVerdicts } = require("../src/services/pbx/presence");
+  const v = ringVerdicts([
+    { ext: "203", status: "WAKE_TIMEOUT" },
+    { ext: "204", status: "WAKE_TIMEOUT" },
+    { ext: "203", status: "WAKE_TIMEOUT" },
+    { ext: "203", status: "ANSWER" },
+    { ext: "205", status: "BUSY" },
+    { ext: "204", status: "CHANUNAVAIL" },
+    { ext: "206", status: "WAKING" },
+  ]);
+  assert.deepEqual(Object.fromEntries(v), { 203: "worked", 204: "failed", 205: "worked" });
+});

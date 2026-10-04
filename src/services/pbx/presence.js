@@ -72,25 +72,66 @@ async function doReconcile() {
   }
 }
 
-// A ring result for a phone ID (from ingest.js): two "never came up" in a
-// row and they rest; any real ring resets the count.
+// A ring result for a phone ID on its own (a ring with no call file, e.g. a
+// call between colleagues; ingest.js).
 async function noteRing(ext, status, now = new Date()) {
-  const row = await prisma.pbxExtension.findUnique({ where: { ext } });
-  if (!row) return;
-  if (WAKE_FAILURES.has(status)) {
-    const streak = row.wakeFailStreak + 1;
-    const rest = streak >= REST_AFTER_FAILURES;
-    await prisma.pbxExtension.update({
-      where: { id: row.id },
-      data: { wakeFailStreak: rest ? 0 : streak, ...(rest ? { restingUntil: new Date(now.getTime() + REST_MS) } : {}) },
-    });
-    if (rest) {
-      console.warn(`[pbx] ${ext}: the phone didn't come up twice in a row — off the call-center line for ${REST_MS / 60000} minutes`);
-      await reconcile();
-    }
-  } else if (PHONE_WORKED.has(status) && (row.wakeFailStreak || row.restingUntil)) {
-    await prisma.pbxExtension.update({ where: { id: row.id }, data: { wakeFailStreak: 0, restingUntil: null } });
+  if (WAKE_FAILURES.has(status)) await phoneFailed(ext, now);
+  else if (PHONE_WORKED.has(status)) await phoneWorked(ext);
+}
+
+// All the rings of one call (ingest.js), per phone ID: the phone worked if it
+// rang at least once; the call counts as one "didn't come up" only if it
+// never did — a slow wake-up that rang on the next try isn't a phone that's
+// off.
+async function noteCallRings(rings, now = new Date()) {
+  for (const [ext, verdict] of ringVerdicts(rings)) {
+    if (verdict === "worked") await phoneWorked(ext);
+    else await phoneFailed(ext, now);
   }
 }
 
-module.exports = { QUEUE, memberInterface, desiredMembers, reconcile, noteRing, WAKE_FAILURES, REST_MS };
+// ext -> "worked" | "failed" for one call's rings (phone IDs with neither,
+// e.g. the caller hung up while it was waking, are left out).
+function ringVerdicts(rings) {
+  const verdicts = new Map();
+  for (const r of rings) {
+    if (!r.ext || !r.status) continue;
+    if (PHONE_WORKED.has(r.status)) verdicts.set(r.ext, "worked");
+    else if (WAKE_FAILURES.has(r.status) && !verdicts.has(r.ext)) verdicts.set(r.ext, "failed");
+  }
+  return verdicts;
+}
+
+// Two "never came up" in a row and they rest.
+async function phoneFailed(ext, now) {
+  const row = await prisma.pbxExtension.findUnique({ where: { ext } });
+  if (!row) return;
+  const streak = row.wakeFailStreak + 1;
+  const rest = streak >= REST_AFTER_FAILURES;
+  await prisma.pbxExtension.update({
+    where: { id: row.id },
+    data: { wakeFailStreak: rest ? 0 : streak, ...(rest ? { restingUntil: new Date(now.getTime() + REST_MS) } : {}) },
+  });
+  if (rest) {
+    console.warn(`[pbx] ${ext}: the phone didn't come up twice in a row — off the call-center line for ${REST_MS / 60000} minutes`);
+    await reconcile();
+  }
+}
+
+// The phone rang or signed in: whatever the person did, the phone works —
+// the count starts again, and if they were resting they're back on the line.
+async function phoneWorked(ext, { signedIn = false } = {}) {
+  const row = await prisma.pbxExtension.findUnique({ where: { ext: String(ext || "") } });
+  if (!row || !(row.wakeFailStreak || row.restingUntil)) return;
+  const wasResting = row.restingUntil && row.restingUntil.getTime() > Date.now();
+  await prisma.pbxExtension.update({ where: { id: row.id }, data: { wakeFailStreak: 0, restingUntil: null } });
+  if (wasResting) {
+    console.log(`[pbx] ${ext}: the phone ${signedIn ? "signed in" : "rang"} again — back on the call-center line`);
+    await reconcile();
+  }
+}
+
+// A phone signed in to the line (Asterisk's ContactStatus event).
+const phoneSignedIn = (ext) => phoneWorked(ext, { signedIn: true });
+
+module.exports = { QUEUE, memberInterface, desiredMembers, reconcile, noteRing, noteCallRings, ringVerdicts, phoneSignedIn, WAKE_FAILURES, REST_MS };

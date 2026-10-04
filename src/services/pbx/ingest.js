@@ -164,7 +164,7 @@ async function saveRecording(rec, { employeeId, callTimestampMs, callId, answere
 async function processCall(callId, ringFiles, rotation) {
   const call = readEvt(`${callId}.call.evt`);
   const rings = ringFiles.map(readEvt);
-  for (const r of rings) if (r.ext && r.status) await presence.noteRing(r.ext, r.status);
+  await presence.noteCallRings(rings);
 
   const exts = await prisma.pbxExtension.findMany({ select: { ext: true, employeeId: true } });
   const summary = summarizeCall(call, rings, { employeeByExt: new Map(exts.map((e) => [e.ext, e.employeeId])), pickRotation: rotation.pick });
