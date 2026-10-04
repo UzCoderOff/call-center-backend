@@ -18,11 +18,9 @@ function start() {
   state.ami = new Ami({ host: env.pbx.amiHost, port: env.pbx.amiPort, user: env.pbx.amiUser, secret: env.pbx.amiSecret }).start();
   // On every (re)connection: the phone IDs and the call-center line as they are now.
   state.ami.on("ready", () => provision.apply().catch((err) => console.error("[pbx] updating the phone line failed:", err.message)));
-  hooks.start({
-    // Until the Ledger app can be woken by Google push (app 3.0), no phone
-    // can be woken: only phones signed in right now ring.
-    wake: async () => "0",
-  });
+  // A phone that isn't signed in right now is woken by Google push (wake.js).
+  hooks.start({ wake: require("./wake").wake });
+  require("../push").warmUp();
   ingest.start();
   setInterval(() => presence.reconcile().catch((err) => console.error("[pbx] call-center line:", err.message)), 60 * 1000).unref();
 }

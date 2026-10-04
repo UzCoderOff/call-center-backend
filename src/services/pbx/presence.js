@@ -1,6 +1,7 @@
 const prisma = require("../../lib/prisma");
 const state = require("./state");
 const { hasJob } = require("../../lib/jobs");
+const push = require("../push");
 
 // Who answers the company line. No on/off switch (operators work remotely):
 // everyone on the line whose jobs include the call center and whose phone
@@ -33,10 +34,16 @@ async function desiredMembers(db = prisma, now = Date.now()) {
     .map((r) => ({ ext: r.ext, name: r.employee.name }));
 }
 
-// Phone IDs whose phone can be woken through Google push (the Ledger app,
-// from app 3.0). Until then, only a phone that's signed in right now counts.
+// Phone IDs whose phone can be woken through Google push: their sign-in
+// belongs to a Ledger app (3.0+) that gave its push address. A test
+// softphone can't be woken: it counts only while signed in.
 async function wakeable() {
-  return new Set();
+  if (!push.configured()) return new Set();
+  const rows = await prisma.pbxExtension.findMany({ where: { ha1Enc: { not: null }, secretDeviceId: { not: null } }, select: { ext: true, secretDeviceId: true } });
+  if (!rows.length) return new Set();
+  const devices = await prisma.device.findMany({ where: { id: { in: rows.map((r) => r.secretDeviceId) }, revokedAt: null, fcmToken: { not: null } }, select: { id: true } });
+  const ok = new Set(devices.map((d) => d.id));
+  return new Set(rows.filter((r) => ok.has(r.secretDeviceId)).map((r) => r.ext));
 }
 
 let running = null;

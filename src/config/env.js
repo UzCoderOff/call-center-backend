@@ -95,6 +95,13 @@ module.exports = {
     // the database, so a database copy (the off-site backup) can't sign in.
     secretKey: process.env.PBX_SECRET_KEY || null,
   },
+  // Google push to the Ledger app (Firebase): the service account key file —
+  // never in git, chmod 600 (src/services/push/fcm.js). Unset: no push.
+  fcm: {
+    serviceAccountFile: process.env.FCM_SERVICE_ACCOUNT_FILE || null,
+    // Only for tests: a stand-in for Google's send address.
+    apiUrl: process.env.FCM_API_URL || null,
+  },
   // The newest Android app build, so installed apps can offer an update.
   // Leave APP_LATEST_VERSION_CODE unset to disable the prompt.
   appLatest: {

@@ -331,6 +331,11 @@ model Device {
   createdAt  DateTime  @default(now())
   lastSeenAt DateTime  @default(now())
   revokedAt  DateTime?
+  // Google push (Firebase Cloud Messaging) address of this phone's Ledger
+  // app (app 3.0+): wakes it for a call or a chat message
+  // (src/services/push/fcm.js). Cleared when Google says it's gone.
+  fcmToken   String?
+  fcmTokenAt DateTime?
 
   @@index([userId])
 }

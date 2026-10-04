@@ -5,6 +5,8 @@ const { startSession, endSession, publicMe } = require("../lib/session");
 const { checkCredentials } = require("./auth");
 const { generateDeviceToken, hashDeviceToken, requireDevice } = require("../middleware/deviceAuth");
 const pbxProvision = require("../services/pbx/provision");
+const pbxState = require("../services/pbx/state");
+const { pbxSettings } = require("../services/pbx/settings");
 
 // Endpoints for the Android app. The app signs in once with the person's
 // normal portal username/password and gets a device token back; after that
@@ -13,11 +15,32 @@ const pbxProvision = require("../services/pbx/provision");
 //   POST /api/device/login    username+password -> device token (+ portal session cookie)
 //   POST /api/device/session  device token -> fresh portal session cookie (the in-app portal
 //                             view uses it, so a 12h cookie expiry never logs anyone out)
-//   GET  /api/device/config   device token -> "collect calls?" + update info
+//   GET  /api/device/config   device token -> "collect calls?", calling, update info
 //   POST /api/device/logout   device token -> token revoked
+//   POST /api/device/push     { token } this phone's Google push address (app 3.0+)
+//   POST /api/device/sip      this phone's sign-in to Ledger's phone line, shown once
 //
 // Call syncing itself (POST /api/calls/sync) accepts the same device token.
 const router = express.Router();
+
+// Calling through Ledger's phone line, for the app (null: not for them):
+// their phone ID, where to connect, whether calls can go outside yet, and
+// whether this phone holds the current sign-in (if not, it asks /sip).
+async function callingFor(device, employee) {
+  if (!pbxState.enabled || !employee?.active || !employee.pbxCalling) return null;
+  const [line, settings] = await Promise.all([prisma.pbxExtension.findUnique({ where: { employeeId: employee.id } }), pbxSettings()]);
+  return {
+    ext: line?.ext ?? null,
+    host: env.pbx.sipHost,
+    port: env.pbx.sipPort,
+    transport: "tls",
+    realm: env.pbx.realm,
+    canCallOut: line?.canCallOut ?? true,
+    // The outside line is connected: calls to clients can go out.
+    outboundReady: Boolean(settings.trunkEnabled),
+    signedIn: Boolean(line?.ha1Enc && line.secretDeviceId === device.id),
+  };
+}
 
 const SYNC_INTERVAL_MINUTES = 60;
 
@@ -72,8 +95,43 @@ router.get("/config", requireDevice, async (req, res, next) => {
       // storage permissions and runs background sync at all.
       collectCalls: Boolean(employee?.active && employee.collectCalls),
       syncIntervalMinutes: SYNC_INTERVAL_MINUTES,
+      calling: await callingFor(req.device, employee),
       latestApp: env.appLatest.versionCode ? env.appLatest : null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// This phone's Google push address (Firebase gives the app one and changes
+// it now and then). With it, a call can wake the phone (services/pbx/wake.js).
+router.post("/push", requireDevice, async (req, res, next) => {
+  try {
+    const token = typeof req.body?.token === "string" ? req.body.token.trim() : "";
+    if (!token || token.length > 4096) return res.status(400).json({ error: "invalid token" });
+    if (token !== req.device.fcmToken) {
+      // An address belongs to one phone: a reinstalled app gets a new one,
+      // and the old device row (signed out) shouldn't keep it.
+      await prisma.device.updateMany({ where: { fcmToken: token, NOT: { id: req.device.id } }, data: { fcmToken: null } });
+      await prisma.device.update({ where: { id: req.device.id }, data: { fcmToken: token, fcmTokenAt: new Date() } });
+      pbxProvision.scheduleApply(); // whether their phone can be woken changed
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// This phone's sign-in to the phone line: a new secret for their phone ID,
+// given to this phone only (the previous phone or test softphone signs out
+// of the line). Shown once; the app keeps it in the Android Keystore.
+router.post("/sip", requireDevice, async (req, res, next) => {
+  try {
+    const employee = req.user.employee;
+    if (!pbxState.enabled) return res.status(409).json({ error: "pbx_off" });
+    if (!employee?.active || !employee.pbxCalling) return res.status(403).json({ error: "calling_off" });
+    const { ext, secret } = await pbxProvision.issueSecret(employee.id, req.device.id);
+    res.json({ ext, secret, ...(await callingFor(req.device, employee)), signedIn: true });
   } catch (err) {
     next(err);
   }
