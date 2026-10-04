@@ -105,6 +105,13 @@ model User {
   clientFilesAdded    ClientFile[]     @relation("ClientFileBy")
   strikesCancelled    Strike[]         @relation("StrikeCancelledBy")
   settingsChanged     Setting[]        @relation("SettingBy")
+
+  notices          Notice[]
+  remindersFor     Reminder[]           @relation("ReminderFor")
+  remindersSet     Reminder[]           @relation("ReminderBy")
+  conversationsBy  Conversation[]       @relation("ConversationBy")
+  chatMemberships  ConversationMember[]
+  messages         Message[]            @relation("MessageAuthor")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -627,6 +634,8 @@ model Client {
   linksTo      ClientLink[]  @relation("ClientLinkTo")
   appointments Appointment[]
   tasks        Task[]
+  reminders    Reminder[]
+  conversation Conversation?
   contacts     ClientContact[]
   followUps    ClientFollowUp[]
   files        ClientFile[]
@@ -1241,4 +1250,119 @@ model ClientFile {
 
   @@index([clientId])
   @@index([caseId])
+}
+
+// What Ledger told a person — the same as its Telegram message — for the
+// Ledger app's own notifications (app 3.0+). Google push carries only the
+// id; the app fetches the text here, so nothing about clients goes through
+// Google (src/services/notify.js). Kept 45 days.
+model Notice {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // What it's about: a Telegram kind (services/telegram/prefs.js),
+  // "reminder", "chat"…
+  kind      String?
+  title     String
+  body      String?
+  // Where tapping it goes: a portal path, e.g. "/tasks".
+  link      String?
+  // A number to call back (a reminder from "Remind me" on a call).
+  phone     String?
+  // Notifications with the same tag replace each other on the phone (one
+  // per chat).
+  tag       String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+// A reminder someone set — for themselves, or the boss / developer for
+// anyone. At dueAt the person gets it in the Ledger app and Telegram.
+// "Remind me" on a call coming in sets one with the caller's number.
+model Reminder {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation("ReminderFor", fields: [userId], references: [id], onDelete: Cascade)
+  createdById Int?
+  createdBy   User?     @relation("ReminderBy", fields: [createdById], references: [id], onDelete: SetNull)
+  title       String
+  notes       String?
+  dueAt       DateTime
+  // Call this number back (shown with a Call button).
+  phone       String?
+  clientId    Int?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // When it went out; cleared when the time is moved, so it goes again.
+  sentAt      DateTime?
+  doneAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId, doneAt, dueAt])
+  @@index([dueAt])
+}
+
+// Staff chat (2026-10, src/routes/chat.js): the Everyone chat, groups the
+// developer makes, a chat on each client, and private chats the boss or
+// developer start (staff use Telegram for the rest).
+model Conversation {
+  id            Int       @id @default(autoincrement())
+  // "everyone" | "group" | "client" | "direct"
+  kind          String
+  // Groups only; the others are named after the client or the person.
+  title         String?
+  // kind "client": who can see the client can read and write here
+  // (src/lib/clientAccess.js) — no fixed members.
+  clientId      Int?      @unique
+  client        Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdById   Int?
+  createdBy     User?     @relation("ConversationBy", fields: [createdById], references: [id], onDelete: SetNull)
+  lastMessageAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  members       ConversationMember[]
+  messages      Message[]
+
+  @@index([kind])
+}
+
+// A person in a conversation and how far they've read. Groups and private
+// chats: these rows are the members. The Everyone chat (all active
+// accounts) and client chats (whoever can see the client): a row is only
+// the reader's read mark and mute.
+model ConversationMember {
+  id                Int          @id @default(autoincrement())
+  conversationId    Int
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  userId            Int
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadMessageId Int          @default(0)
+  // Last time they had it open — while they're reading, no push.
+  readAt            DateTime?
+  muted             Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  authorId       Int?
+  author         User?        @relation("MessageAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  text           String
+  // An event card: everyone in the chat gets a reminder an hour before and
+  // at the start (services/chat.js).
+  eventTitle     String?
+  eventAt        DateTime?
+  createdAt      DateTime     @default(now())
+  editedAt       DateTime?
+  deletedAt      DateTime?
+
+  @@index([conversationId, id])
+  @@index([eventAt])
 }

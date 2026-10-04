@@ -38,7 +38,12 @@ async function missedCalls(now) {
       callTimestampMs: { gte: oldest, lte: newest },
       // The call center's job (Employee.job): someone else's monitored phone
       // isn't a sales line to call back from.
-      employee: { active: true, AND: [hasCallsWhere(), jobWhere(["call_center"])], user: { is: { telegram: { is: { chatId: { not: null } } } } } },
+      // …and someone a notification reaches (Telegram or the Ledger app).
+      employee: {
+        active: true,
+        AND: [hasCallsWhere(), jobWhere(["call_center"])],
+        user: { is: { OR: [{ telegram: { is: { chatId: { not: null } } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }] } },
+      },
     },
     select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { userId: true } } },
     orderBy: { callTimestampMs: "asc" },
@@ -238,9 +243,15 @@ async function followUpReminders() {
 async function cleanup(now) {
   if (now.minutes !== at(4)) return;
   await prisma.telegramNotice.deleteMany({ where: { sentAt: { lt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000) } } });
+  await require("../notify").cleanup();
 }
 
-const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, recordingAlerts, diskAlerts, cleanup };
+// Reminders people set (services/reminders.js), the moment they're due.
+const reminders = () => require("../reminders").sendDue();
+// Event cards in chats (services/chat.js): an hour before and at the start.
+const chatEvents = () => require("../chat").eventReminders();
+
+const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, reminders, chatEvents, recordingAlerts, diskAlerts, cleanup };
 
 let running = false;
 async function tick() {

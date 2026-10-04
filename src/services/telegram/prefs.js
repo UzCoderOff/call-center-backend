@@ -21,6 +21,7 @@ const KINDS = [
   { key: "cases", label: "Ishlar", hint: "shartnoma tuzilganda, sizga ish biriktirilganda" },
   { key: "followUps", label: "Eslatmalar", hint: "mijozga qoʻngʻiroq yoki qaror muddati kelganda" },
   { key: "strikes", label: "Ogohlantirishlar", hint: "javobsiz qoʻngʻiroqqa oʻz vaqtida qayta qoʻngʻiroq qilinmaganda" },
+  { key: "chat", label: "Chat", hint: "yangi xabarlar — Ledger ilovasi boʻlmasa" },
 ];
 const KEYS = KINDS.map((k) => k.key);
 
@@ -52,6 +53,8 @@ function applicableKinds(user) {
   if (isManagerUser(user) || user.role === "LAWYER" || hasCalls(e) || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
   // Late call-back strikes: the call center, and the managers (over the limit).
   if (isManagerUser(user) || isCallCenter(e)) out.push("strikes");
+  // Chat messages (services/chat.js): here only for people without the app.
+  out.push("chat");
   return out;
 }
 

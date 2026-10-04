@@ -4,7 +4,8 @@ Ledger runs its own phone system: **Asterisk on the same server**, next to the
 backend.
 
 - **Incoming calls:** clients call the company number, and the call-center
-  operators are rung in turn.
+  operators are rung one by one — whoever has gone longest without a call
+  first; a decline or no answer moves it to the next.
 - **Staff calls:** staff call clients and each other from the Ledger app.
 - **Recording:** every client call is recorded on the server.
 - **Calls in Ledger:** every call appears in Ledger by itself, exactly like a
@@ -13,7 +14,7 @@ backend.
 
 ```
 client's phone ──► outside line (SkyLine) ──► Asterisk [company-line] ──► queue "callcenter"
-                                                   │                        │ rings operators in turn
+                                                   │                        │ rings operators one by one
                                                    │                        ▼
 Ledger app (TLS + SRTP) ◄──────────────── [ring-person] ◄── wake? ── Ledger (127.0.0.1:4001)
                                                    │
@@ -104,7 +105,7 @@ database. If it's lost, every phone simply signs in again.
    - **Username and password:** as shown
    - The certificate is Ledger's own, so accept it if the app asks.
 4. Dial **500**: you play a client calling the company line, and the
-   operators' softphones ring in turn.
+   operators' softphones ring one by one (longest without a call first).
 5. Colleagues call each other by phone ID (201, 202…).
 
 ## The outside line (SkyLine)

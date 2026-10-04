@@ -84,7 +84,7 @@ router.patch("/me/prefs", async (req, res, next) => {
 
 router.post("/me/test", async (req, res, next) => {
   try {
-    const ok = await notifyUser(req.user.id, null, "✅ Sinov xabari. Ledger xabarlari shu yerga keladi.");
+    const ok = await notifyUser(req.user.id, null, "✅ Sinov xabari. Ledger xabarlari shu yerga keladi.", undefined, { app: false });
     if (!ok) return res.status(409).json({ error: "not_connected" });
     res.json({ ok: true });
   } catch (err) {

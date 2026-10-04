@@ -129,6 +129,8 @@ app.use("/api/materials", materialRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/reminders", require("./routes/reminders"));
+app.use("/api/chat", require("./routes/chat"));
 app.use("/api/performance", performanceRoutes);
 app.use("/api/holidays", daysOffRoutes.holidays);
 app.use("/api/absences", daysOffRoutes.absences);

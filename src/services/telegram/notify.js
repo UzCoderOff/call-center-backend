@@ -2,20 +2,27 @@ const prisma = require("../../lib/prisma");
 const env = require("../../config/env");
 const api = require("./api");
 const { wants } = require("./prefs");
+const app = require("../notify");
 
-// Sending a notification to a person: only if the bot is set up, they have
-// connected their Telegram, their account is active, and they haven't
-// switched that kind off.
+// Sending a notification to a person: on Telegram if the bot is set up and
+// they've connected it, and in the Ledger app (app 3.0+, services/notify.js)
+// — only while their account is active and they haven't switched that kind
+// off.
 
 const USER_CONTEXT = { employee: true, calendar: true, telegram: true };
 
 const enabled = () => Boolean(env.telegram.token);
+// Notifications go somewhere at all: the bot, the app, or both.
+const anyChannel = () => enabled() || app.configured();
 
-function reachable(user) {
-  if (!user?.active || !user.telegram?.chatId) return false;
+function active(user) {
+  if (!user?.active) return false;
   if (user.role === "EMPLOYEE" && user.employee && !user.employee.active) return false;
   return true;
 }
+
+// Telegram connected (and the account active).
+const reachable = (user) => active(user) && Boolean(user.telegram?.chatId);
 
 // Stop sending to a chat that blocked the bot or no longer exists.
 async function disconnect(linkId) {
@@ -34,21 +41,36 @@ async function sendTo(user, text, extra) {
 }
 
 // `kind` null: always sent (a reply the person asked for, a test message).
-async function notifyUser(userOrId, kind, text, extra) {
-  if (!enabled()) return false;
+// `app: false`: Telegram only (e.g. the Telegram test message); `appExtra`:
+// what only the app shows ({ kind, phone, tag }, services/notify.js).
+async function notifyUser(userOrId, kind, text, extra, { app: toApp = true, appExtra = {} } = {}) {
+  if (!anyChannel()) return false;
   const user =
     typeof userOrId === "object" && userOrId.telegram !== undefined
       ? userOrId
       : await prisma.user.findUnique({ where: { id: typeof userOrId === "object" ? userOrId.id : userOrId }, include: USER_CONTEXT });
-  if (!reachable(user)) return false;
+  if (!active(user)) return false;
   if (kind && !wants(user, kind)) return false;
-  return sendTo(user, text, extra);
+  let delivered = false;
+  if (enabled() && user.telegram?.chatId) delivered = await sendTo(user, text, extra);
+  if (toApp) {
+    try {
+      if (await app.notifyApp(user.id, { kind, ...app.fromTelegram(text), ...appExtra })) delivered = true;
+    } catch (err) {
+      console.error(`[notify] app notification to user ${user.id} failed:`, err.message);
+    }
+  }
+  return delivered;
 }
 
-// Everyone with Telegram connected, with what notify needs to know.
+// Everyone notifications can reach — Telegram connected or the Ledger app
+// with push — with what notify needs to know.
 function linkedUsers(where = {}) {
   return prisma.user.findMany({
-    where: { active: true, telegram: { chatId: { not: null } }, ...where },
+    where: {
+      active: true,
+      AND: [where, { OR: [{ telegram: { chatId: { not: null } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }] }],
+    },
     include: USER_CONTEXT,
   });
 }
@@ -67,4 +89,4 @@ async function once(key, send) {
   return send();
 }
 
-module.exports = { notifyUser, linkedUsers, once, enabled, reachable, disconnect, USER_CONTEXT };
+module.exports = { notifyUser, linkedUsers, once, enabled, anyChannel, reachable, disconnect, USER_CONTEXT };

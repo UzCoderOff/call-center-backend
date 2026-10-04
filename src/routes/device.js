@@ -122,6 +122,36 @@ router.post("/push", requireDevice, async (req, res, next) => {
   }
 });
 
+// One of this person's notifications, for the app to show (Google push
+// carried only its id — services/notify.js).
+router.get("/notices/:id", requireDevice, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const notice = Number.isInteger(id) ? await prisma.notice.findUnique({ where: { id } }) : null;
+    if (!notice || notice.userId !== req.user.id) return res.status(404).json({ error: "not_found" });
+    res.json(require("../services/notify").publicNotice(notice));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// "Remind me" on a call coming in: { phone, name?, minutes } — a reminder to
+// call this number back (services/reminders.js).
+router.post("/reminders", requireDevice, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const phone = typeof b.phone === "string" ? b.phone.trim() : "";
+    const minutes = Number(b.minutes);
+    if (!/^[+\d][\d\s()-]{2,30}$/.test(phone)) return res.status(400).json({ error: "invalid phone" });
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) return res.status(400).json({ error: "invalid minutes" });
+    const { callBackReminder, publicReminder } = require("../services/reminders");
+    const row = await callBackReminder(req.user, { phone, name: b.name, minutes });
+    res.status(201).json(publicReminder(row));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // This phone's sign-in to the phone line: a new secret for their phone ID,
 // given to this phone only (the previous phone or test softphone signs out
 // of the line). Shown once; the app keeps it in the Android Keystore.
