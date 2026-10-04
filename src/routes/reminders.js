@@ -3,7 +3,7 @@ const prisma = require("../lib/prisma");
 const { requireAuth, isManager } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
 const { canAccessClient, accessibleClientIds } = require("../lib/clientAccess");
-const { REMINDER_INCLUDE, publicReminder, personName } = require("../services/reminders");
+const { REMINDER_INCLUDE, publicReminder, personName, planOne } = require("../services/reminders");
 
 // Reminders: anyone sets them for themselves; the boss and the developer
 // also for anyone. At the time the person gets it in the Ledger app and on
@@ -124,6 +124,7 @@ router.post("/", async (req, res, next) => {
     if (!data.title) throw badRequest("title is required");
     if (!data.dueAt) throw badRequest("invalid dueAt");
     const row = await prisma.reminder.create({ data, include: REMINDER_INCLUDE });
+    planOne(row);
     res.status(201).json((await forViewer(req.user, [row]))[0]);
   } catch (err) {
     next(err);
@@ -154,6 +155,7 @@ router.patch("/:id", async (req, res, next) => {
     }
     if (b.done !== undefined) data.doneAt = b.done ? new Date() : null;
     const updated = await prisma.reminder.update({ where: { id: row.id }, data, include: REMINDER_INCLUDE });
+    planOne(updated);
     res.json((await forViewer(req.user, [updated]))[0]);
   } catch (err) {
     next(err);

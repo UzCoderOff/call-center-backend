@@ -142,9 +142,24 @@ async function unreadCount(conversationId, user, mark) {
   });
 }
 
-async function totalUnread(user) {
+// { total, byConv: { [conversationId]: { n: unread, last: newest message id } } }
+// — the menu badge; the portal leaves out what it has just read itself.
+async function unreadSummary(user) {
   const list = await listFor(user);
-  return list.filter((c) => !c.muted).reduce((sum, c) => sum + c.unread, 0);
+  const byConv = {};
+  let total = 0;
+  for (const c of list) {
+    if (c.muted || c.unread === 0) continue;
+    byConv[c.id] = { n: c.unread, last: c.lastMessage?.id ?? 0 };
+    total += c.unread;
+  }
+  return { total, byConv };
+}
+
+// Everyone whose screens show this conversation changed (services/live.js).
+async function bumpConversation(conv, extraUserIds = []) {
+  const people = await recipients(conv);
+  require("./live").bump([...people.map((p) => p.user.id), ...extraUserIds]);
 }
 
 async function markRead(conversationId, userId, messageId) {
@@ -208,6 +223,17 @@ async function eventReminders() {
     where: { deletedAt: null, eventAt: { gt: new Date(now - 30 * 60 * 1000), lte: new Date(now + 60 * 60 * 1000) } },
     include: { conversation: { include: { client: { select: { name: true } } } } },
   });
+  // The next marks (an hour before, the start) before the minute's next
+  // look: on the second.
+  const { onTime } = require("../lib/onTime");
+  const ahead = await prisma.message.findMany({
+    where: { deletedAt: null, eventAt: { gt: new Date(now), lte: new Date(now + 62 * 60 * 1000) } },
+    select: { id: true, eventAt: true },
+  });
+  for (const m of ahead) {
+    onTime(`chat-event-soon:${m.id}`, new Date(m.eventAt.getTime() - 60 * 60 * 1000), eventReminders);
+    onTime(`chat-event-now:${m.id}`, m.eventAt, eventReminders);
+  }
   for (const m of rows) {
     const startsIn = m.eventAt.getTime() - now;
     const stage = startsIn <= 0 ? "now" : "soon";
@@ -240,7 +266,8 @@ module.exports = {
   recipients,
   displayTitle,
   listFor,
-  totalUnread,
+  unreadSummary,
+  bumpConversation,
   markRead,
   publicMessage,
   preview,

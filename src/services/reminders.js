@@ -70,7 +70,26 @@ function reminderText(r, f) {
   return lines.filter(Boolean).join("\n");
 }
 
-// Every minute: the reminders whose time has come, each once.
+// Reminders due before the next minute's look get a timer of their own, so
+// they go out on the second (src/lib/onTime.js).
+async function planSoon() {
+  const { onTime, LOOK_AHEAD_MS } = require("../lib/onTime");
+  const soon = await prisma.reminder.findMany({
+    where: { doneAt: null, sentAt: null, dueAt: { gt: new Date(), lte: new Date(Date.now() + LOOK_AHEAD_MS) } },
+    select: { id: true, dueAt: true },
+  });
+  for (const r of soon) onTime(`reminder:${r.id}`, r.dueAt, sendDue);
+}
+
+// A reminder made or moved: if it's due within the minute, on the second.
+function planOne(reminder) {
+  const { onTime, cancel } = require("../lib/onTime");
+  cancel(`reminder:${reminder.id}`);
+  if (!reminder.doneAt && !reminder.sentAt) onTime(`reminder:${reminder.id}`, new Date(reminder.dueAt), sendDue);
+}
+
+// Every minute (and on the second for those just due): the reminders whose
+// time has come, each once.
 async function sendDue() {
   const { notifyUser } = require("./telegram/notify");
   const f = require("./telegram/format");
@@ -90,6 +109,7 @@ async function sendDue() {
     const shown = visible ? r : { ...r, client: null };
     await notifyUser(r.userId, null, reminderText(shown, f), undefined, { appExtra: { kind: "reminder", phone: r.phone, tag: `reminder:${r.id}` } });
   }
+  await planSoon();
 }
 
 async function canSee(userId, clientId) {
@@ -98,4 +118,4 @@ async function canSee(userId, clientId) {
   return Boolean(user) && (await canAccessClient(user, clientId));
 }
 
-module.exports = { REMINDER_INCLUDE, publicReminder, callBackReminder, reminderText, sendDue, personName, STALE_MS };
+module.exports = { REMINDER_INCLUDE, publicReminder, callBackReminder, reminderText, sendDue, planOne, personName, STALE_MS };

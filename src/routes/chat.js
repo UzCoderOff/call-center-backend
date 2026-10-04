@@ -5,12 +5,12 @@ const { badRequest, parseId } = require("../utils/params");
 const { requireClientAccess } = require("../lib/clientAccess");
 const chat = require("../services/chat");
 
-// Staff chat — the rules are in services/chat.js. The portal polls (every
-// few seconds while a chat is open); phones get a push (app) or a Telegram
-// message (no app) for new messages.
+// Staff chat — the rules are in services/chat.js. Open screens hear about
+// changes at once (services/live.js, GET /api/live); phones and browsers
+// get a push, Telegram the people with neither.
 //
 //   GET    /api/chat                      my conversations, unread counts
-//   GET    /api/chat/unread               { total } for the menu badge
+//   GET    /api/chat/unread               { total, byConv } for the menu badge
 //   GET    /api/chat/people               everyone (for groups, private chats)
 //   POST   /api/chat/groups               { title, memberIds } (developer)
 //   POST   /api/chat/direct               { userId } (boss, developer) -> the chat with them
@@ -18,6 +18,7 @@ const chat = require("../services/chat");
 //   GET    /api/chat/:id                  one conversation (title, members, what I may do)
 //   PATCH  /api/chat/:id                  { title?, memberIds? } groups (developer)
 //   DELETE /api/chat/:id                  groups (developer)
+//   POST   /api/chat/:id/read             { messageId } — read up to there
 //   PUT    /api/chat/:id/mute             { muted }
 //   GET    /api/chat/:id/messages         ?after=<id> (new ones) | ?before=<id> (older), up to 50; marks read
 //   POST   /api/chat/:id/messages         { text, event?: { title, at } }
@@ -96,7 +97,7 @@ router.get("/", async (req, res, next) => {
 
 router.get("/unread", async (req, res, next) => {
   try {
-    res.json({ total: await chat.totalUnread(req.user) });
+    res.json(await chat.unreadSummary(req.user));
   } catch (err) {
     next(err);
   }
@@ -207,6 +208,20 @@ router.delete("/:id", async (req, res, next) => {
   }
 });
 
+// { messageId } — read up to there (sent in the background; the portal
+// has already shown it as read).
+router.post("/:id/read", async (req, res, next) => {
+  try {
+    const { conv } = await conversationFor(req);
+    const messageId = parseId(req.body?.messageId, "messageId");
+    await chat.markRead(conv.id, req.user.id, messageId);
+    require("../services/live").bump([req.user.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.put("/:id/mute", async (req, res, next) => {
   try {
     const { conv } = await conversationFor(req);
@@ -241,7 +256,10 @@ router.get("/:id/messages", async (req, res, next) => {
           })
         : [];
     const newest = rows.length ? rows[rows.length - 1].id : null;
-    if (!before) await chat.markRead(conv.id, req.user.id, newest);
+    if (!before && newest) {
+      await chat.markRead(conv.id, req.user.id, newest);
+      require("../services/live").bump([req.user.id]);
+    }
     res.json({
       messages: rows.map((m) => chat.publicMessage(m, req.user)),
       changed: changed.map((m) => chat.publicMessage(m, req.user)),
@@ -278,8 +296,12 @@ router.post("/:id/messages", async (req, res, next) => {
     await prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: message.createdAt } });
     await chat.markRead(conv.id, req.user.id, message.id);
     res.status(201).json(chat.publicMessage(message, req.user));
-    // After answering: the others hear about it.
-    chat.notifyMessage(conv, message, req.user).catch((err) => console.error("[chat] notify failed:", err.message));
+    // After answering: open screens update at once, then the notifications.
+    chat
+      .bumpConversation(conv, [req.user.id])
+      .catch((err) => console.error("[chat] live update failed:", err.message))
+      .then(() => chat.notifyMessage(conv, message, req.user))
+      .catch((err) => console.error("[chat] notify failed:", err.message));
   } catch (err) {
     next(err);
   }
@@ -295,6 +317,7 @@ router.patch("/:id/messages/:mid", async (req, res, next) => {
     if (!text && !message.eventAt) throw badRequest("text is required");
     const updated = await prisma.message.update({ where: { id: message.id }, data: { text: text || "", editedAt: new Date() }, include: { author: chat.PERSON } });
     res.json(chat.publicMessage(updated, req.user));
+    chat.bumpConversation(conv).catch(() => {});
   } catch (err) {
     next(err);
   }
@@ -309,6 +332,7 @@ router.delete("/:id/messages/:mid", async (req, res, next) => {
     if (message.authorId !== req.user.id && !isManager(req.user)) throw forbidden();
     if (!message.deletedAt) await prisma.message.update({ where: { id: message.id }, data: { deletedAt: new Date() } });
     res.status(204).end();
+    chat.bumpConversation(conv).catch(() => {});
   } catch (err) {
     next(err);
   }

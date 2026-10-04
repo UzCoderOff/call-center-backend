@@ -36,3 +36,27 @@ test("notification text: who wrote what, events by their title, long text cut", 
   assert.equal(long.length, "A: ".length + 298);
   assert.ok(long.endsWith("…"));
 });
+
+test("live updates: a wait ends when the person's version moves, others' don't matter", async () => {
+  const live = require("../src/services/live");
+  const v0 = live.versionOf(501);
+  const waiting = live.waitFor(501, v0, { ms: 2000 });
+  live.bump([777]);
+  live.bump([501]);
+  const v1 = await waiting;
+  assert.ok(v1 > v0);
+  // Already newer than what the screen has: answered at once.
+  assert.equal(await live.waitFor(501, v0, { ms: 2000 }), v1);
+  // Nothing new: the wait ends with the same version.
+  assert.equal(await live.waitFor(502, live.versionOf(502), { ms: 30 }), live.versionOf(502));
+});
+
+test("on time: due within the minute gets a timer, later ones wait for the minute's look", async () => {
+  const { onTime, cancel } = require("../src/lib/onTime");
+  let ran = 0;
+  assert.equal(onTime("t:1", new Date(Date.now() + 10), () => ran++), true);
+  assert.equal(onTime("t:2", new Date(Date.now() + 10 * 60 * 1000), () => ran++), false);
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(ran, 1);
+  cancel("t:2");
+});

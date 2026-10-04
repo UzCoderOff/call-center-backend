@@ -154,8 +154,9 @@ router.post("/reminders", requireDevice, async (req, res, next) => {
     const minutes = Number(b.minutes);
     if (!/^[+\d][\d\s()-]{2,30}$/.test(phone)) return res.status(400).json({ error: "invalid phone" });
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 7 * 24 * 60) return res.status(400).json({ error: "invalid minutes" });
-    const { callBackReminder, publicReminder } = require("../services/reminders");
+    const { callBackReminder, publicReminder, planOne } = require("../services/reminders");
     const row = await callBackReminder(req.user, { phone, name: b.name, minutes });
+    planOne(row);
     res.status(201).json(publicReminder(row));
   } catch (err) {
     next(err);
