@@ -400,4 +400,7 @@ router.delete("/:employeeId/costs/:id", financeOnly, async (req, res, next) => {
   }
 });
 
+// Ledger AI loads people the same way (services/ai/tools.js).
+router.EMPLOYEE_SELECT = EMPLOYEE_SELECT;
+
 module.exports = router;

@@ -1402,4 +1402,4 @@ function auditSummary(r, money = true) {
   return {};
 }
 
-module.exports = { clients, cases, payments, notes, links, auditLog, canUseClients };
+module.exports = { clients, cases, payments, notes, links, auditLog, canUseClients, listQuery };

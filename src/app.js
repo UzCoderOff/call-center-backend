@@ -137,6 +137,8 @@ app.use("/api/performance", performanceRoutes);
 app.use("/api/holidays", daysOffRoutes.holidays);
 app.use("/api/absences", daysOffRoutes.absences);
 app.use("/api/cash", cashRoutes);
+// Ledger AI's settings (developer): the OpenAI key, model, daily limit.
+app.use("/api/ai", require("./routes/ai"));
 
 // Android app: sign-in with a portal account, device-token session refresh,
 // "collect calls?" config. Authenticated by device token, not the cookie.

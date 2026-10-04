@@ -278,6 +278,7 @@ router.post("/:id/messages", async (req, res, next) => {
     let text = cleanText(b.text, 4000);
     let eventTitle = null;
     let eventAt = null;
+    if (b.event && conv.kind === "assistant") throw badRequest("no events here");
     if (b.event) {
       eventTitle = cleanText(b.event.title, 120);
       eventAt = new Date(b.event.at);
@@ -296,6 +297,14 @@ router.post("/:id/messages", async (req, res, next) => {
     await prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: message.createdAt } });
     await chat.markRead(conv.id, req.user.id, message.id);
     res.status(201).json(chat.publicMessage(message, req.user));
+    // Ledger AI: it answers (services/ai/assistant.js) — nobody else to tell.
+    if (conv.kind === "assistant") {
+      require("../services/live").bump([req.user.id]);
+      require("../services/ai/assistant")
+        .reply(conv, req.user)
+        .catch((err) => console.error("[ai] reply failed:", err.message));
+      return;
+    }
     // After answering: open screens update at once, then the notifications.
     chat
       .bumpConversation(conv, [req.user.id])

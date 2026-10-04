@@ -196,4 +196,7 @@ router.get("/export", async (req, res, next) => {
   }
 });
 
+// Ledger AI reads the same figures (services/ai/tools.js).
+router.financeData = financeData;
+
 module.exports = router;

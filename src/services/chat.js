@@ -11,6 +11,8 @@ const { canAccessClient, clientScope } = require("../lib/clientAccess");
 //   direct    the boss or the developer can write to anyone privately (and
 //             they can answer); nobody else starts private chats — staff
 //             use Telegram for that
+//   assistant "Ledger AI" — the boss's and the developer's own chat with the
+//             assistant (services/ai/assistant.js); only they see it
 //
 // An event card in a chat (Message.eventAt): everyone in the chat gets a
 // reminder an hour before and at the start (eventReminders).
@@ -41,7 +43,8 @@ async function access(user, conv) {
       const member = isDeveloper(user) || (await isMember(conv.id, user.id));
       return { read: member, write: member, manage: isDeveloper(user) };
     }
-    case "direct": {
+    case "direct":
+    case "assistant": {
       const member = await isMember(conv.id, user.id);
       return { read: member, write: member, manage: false };
     }
@@ -62,7 +65,7 @@ async function isMember(conversationId, userId) {
 // read mark / mute row, or null).
 async function recipients(conv) {
   let users;
-  if (conv.kind === "group" || conv.kind === "direct") {
+  if (conv.kind === "group" || conv.kind === "direct" || conv.kind === "assistant") {
     const rows = await prisma.conversationMember.findMany({ where: { conversationId: conv.id }, include: { user: PERSON } });
     return rows.filter((r) => activeUser(r.user)).map((r) => ({ user: r.user, member: r }));
   }
@@ -80,6 +83,7 @@ async function recipients(conv) {
 // The name a conversation goes by for this person.
 async function displayTitle(conv, viewer) {
   if (conv.kind === "everyone") return "Hamma";
+  if (conv.kind === "assistant") return "Ledger AI";
   if (conv.kind === "group") return conv.title || "Guruh";
   if (conv.kind === "client") {
     const client = conv.client || (await prisma.client.findUnique({ where: { id: conv.clientId }, select: { name: true } }));
@@ -92,9 +96,20 @@ async function displayTitle(conv, viewer) {
   return "Chat";
 }
 
-// The conversations this person sees, newest first (the Everyone chat on top).
+// Who has Ledger AI (for now the boss and the developer).
+const hasAssistant = (user) => isManager(user);
+
+// Their own Ledger AI chat, made the first time.
+async function ensureAssistant(user) {
+  const found = await prisma.conversation.findFirst({ where: { kind: "assistant", members: { some: { userId: user.id } } } });
+  return found || prisma.conversation.create({ data: { kind: "assistant", createdById: user.id, members: { create: [{ userId: user.id }] } } });
+}
+
+// The conversations this person sees, newest first (the Everyone chat on
+// top, then Ledger AI).
 async function listFor(user) {
   await ensureEveryone();
+  if (hasAssistant(user)) await ensureAssistant(user);
   const developer = isDeveloper(user);
   const rows = await prisma.conversation.findMany({
     where: {
@@ -102,6 +117,7 @@ async function listFor(user) {
         { kind: "everyone" },
         { kind: "group", ...(developer ? {} : { members: { some: { userId: user.id } } }) },
         { kind: "direct", members: { some: { userId: user.id } } },
+        ...(hasAssistant(user) ? [{ kind: "assistant", members: { some: { userId: user.id } } }] : []),
         { kind: "client", lastMessageAt: { not: null }, client: { is: clientScope(user) } },
       ],
     },
@@ -124,7 +140,13 @@ async function listFor(user) {
       muted: Boolean(mark?.muted),
     });
   }
-  return out.sort((a, b) => (a.kind === "everyone" ? -1 : b.kind === "everyone" ? 1 : (b.lastMessageAt?.getTime?.() ?? 0) - (a.lastMessageAt?.getTime?.() ?? 0)));
+  const pinned = { everyone: 0, assistant: 1 };
+  return out.sort((a, b) => {
+    const pa = pinned[a.kind] ?? 2;
+    const pb = pinned[b.kind] ?? 2;
+    if (pa !== pb) return pa - pb;
+    return (b.lastMessageAt?.getTime?.() ?? 0) - (a.lastMessageAt?.getTime?.() ?? 0);
+  });
 }
 
 // Messages from others since their read mark — for a newcomer, only since
@@ -137,7 +159,8 @@ async function unreadCount(conversationId, user, mark) {
       deletedAt: null,
       id: { gt: mark?.lastReadMessageId ?? 0 },
       createdAt: { gt: user.createdAt ?? new Date(0) },
-      NOT: { authorId: user.id },
+      // Not their own — Ledger AI's answers (no author) count too.
+      OR: [{ authorId: null }, { authorId: { not: user.id } }],
     },
   });
 }
@@ -262,6 +285,8 @@ module.exports = {
   canStartDirect,
   activeUser,
   ensureEveryone,
+  ensureAssistant,
+  hasAssistant,
   access,
   recipients,
   displayTitle,

@@ -43,6 +43,23 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### Next release: Ledger AI (boss and developer)
+
+- **Chat → Ledger AI** (pinned under "Hamma", only BOSS and DEVELOPER):
+  questions in Uzbek or Russian about calls, missed calls not called back,
+  Natijalar, the call funnel, Moliya (only with the Moliya switch),
+  clients and their cases, bookings, tasks and next steps. Read-only: it
+  calls Ledger's own lookups (`src/services/ai/tools.js`, same access rules
+  as the pages) and answers from what they return. OpenAI Chat Completions,
+  plain fetch (`src/services/ai/openai.js`).
+- **Sozlamalar → Sunʼiy intellekt** (developer): paste the OpenAI API key
+  (kept encrypted with a key derived from `JWT_SECRET`, never shown again —
+  changing `JWT_SECRET` means pasting it again), model (default
+  `gpt-5-mini`), questions per person per day (default 60), "Tekshirish",
+  and this month's questions/tokens.
+- **No `.env` change, no migration.** (`OPENAI_BASE_URL` exists only for a
+  test stand-in.)
+
 ### This release (2026-10-04): chat, reminders, notifications, two jobs per person — phone line built but OFF
 
 - **Chat** (menu → Chat): the Everyone chat, groups the developer makes, a
