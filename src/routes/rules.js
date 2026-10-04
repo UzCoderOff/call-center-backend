@@ -7,6 +7,7 @@ const { setSetting } = require("../lib/settings");
 const { asksForm } = require("../services/autoReport");
 const s = require("../services/strikes");
 const { jobsOf, jobFields, jobWhere, hasJob } = require("../lib/jobs");
+const { archiveRules, saveArchiveRules } = require("../services/clientArchive");
 
 // The firm's rules for the call center, and what follows from them.
 //
@@ -14,6 +15,8 @@ const { jobsOf, jobFields, jobWhere, hasJob } = require("../lib/jobs");
 //   PUT  /api/rules/strikes        change it (developer)
 //   GET  /api/rules/call-center    who counts as the call center, and what to pick by
 //   PUT  /api/rules/call-center    { add: [employeeId], remove: [employeeId] } (developer)
+//   GET  /api/rules/client-archive quiet consultations to the archive: { enabled, days } (managers)
+//   PUT  /api/rules/client-archive change it (developer)
 //   GET  /api/strikes?month=&employeeId=   strikes (managers: anyone's; staff: their own)
 //   POST /api/strikes/:id/cancel   { reason } (managers) — kept, marked
 //   POST /api/strikes/:id/restore  (managers)
@@ -37,6 +40,38 @@ rules.get("/strikes", async (req, res, next) => {
     const r = await s.strikeRules();
     if (isManager(req.user)) return res.json({ ...r, canEdit: req.user.role === "DEVELOPER" });
     res.json({ enabled: r.enabled, minutes: r.minutes, from: r.from, to: r.to, limit: r.limit });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// Consultations gone quiet go to the archive by themselves
+// (services/clientArchive.js): on/off and after how many days.
+rules.get("/client-archive", managersOnly, async (req, res, next) => {
+  try {
+    res.json({ ...(await archiveRules()), canEdit: req.user.role === "DEVELOPER" });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+rules.put("/client-archive", developerOnly, async (req, res, next) => {
+  try {
+    const patch = {};
+    if (req.body?.enabled !== undefined) {
+      if (typeof req.body.enabled !== "boolean") throw badRequest("enabled must be true or false");
+      patch.enabled = req.body.enabled;
+    }
+    if (req.body?.days !== undefined) {
+      const days = Number(req.body.days);
+      if (!Number.isInteger(days) || days < 3 || days > 365) throw badRequest("days must be 3–365");
+      patch.days = days;
+    }
+    const before = await archiveRules();
+    await saveArchiveRules(patch, req.user.id);
+    const after = await archiveRules();
+    await prisma.auditLog.create({ data: { userId: req.user.id, action: "rules.clientArchive", entity: "setting", entityId: null, detail: { before, after } } });
+    res.json({ ...after, canEdit: true });
   } catch (err) {
     sendError(err, res, next);
   }
