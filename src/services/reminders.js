@@ -65,7 +65,7 @@ function reminderText(r, f) {
     r.client ? `Mijoz: ${f.escapeHtml(r.client.name)}` : null,
     r.phone ? `Raqam: ${f.escapeHtml(f.phoneCompact(r.phone))}` : null,
     r.createdById && r.createdById !== r.userId && r.createdBy ? `Eslatma qoʻydi: ${f.escapeHtml(personName(r.createdBy))}` : null,
-    f.portalLink("/reminders", "Eslatmalarni ochish"),
+    f.portalLink("/tasks/reminders", "Eslatmalarni ochish"),
   ];
   return lines.filter(Boolean).join("\n");
 }
