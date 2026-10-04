@@ -46,7 +46,9 @@ async function issueSecret(employeeId, deviceId = null) {
     where: { id: row.id },
     data: { ha1Enc, secretDeviceId: deviceId, secretIssuedAt: new Date(), wakeFailStreak: 0, restingUntil: null },
   });
-  scheduleApply();
+  // The phone signs in the moment it has the secret: Asterisk must know it
+  // first (a failed sign-in would also count toward fail2ban).
+  await Promise.race([applyNow(), new Promise((resolve) => setTimeout(resolve, 5000))]);
   return { ext: row.ext, secret };
 }
 
@@ -112,6 +114,14 @@ function scheduleApply() {
   }, 1500);
 }
 
+// Right away, and awaited (scheduleApply waits a moment to batch changes).
+function applyNow() {
+  if (!state.enabled) return Promise.resolve();
+  clearTimeout(timer);
+  chain = chain.then(apply).catch((err) => console.error("[pbx] updating the phone line failed:", err.message));
+  return chain;
+}
+
 async function apply() {
   if (!state.enabled) return;
   const [members, settings] = await Promise.all([lineMembers(), pbxSettings()]);
@@ -126,4 +136,4 @@ async function apply() {
   await require("./presence").reconcile();
 }
 
-module.exports = { FIRST_EXT, nextExt, ensureExtension, issueSecret, revokeDevice, lineMembers, globalsFor, scheduleApply, apply };
+module.exports = { FIRST_EXT, nextExt, ensureExtension, issueSecret, revokeDevice, lineMembers, globalsFor, scheduleApply, applyNow, apply };
