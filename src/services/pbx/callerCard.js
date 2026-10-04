@@ -53,6 +53,14 @@ const RELATION = {
   colleague: "hamkasbi",
 };
 
+// The line's own numbers (extensions.conf): the company line and the tests.
+const SERVICE = {
+  500: "Firma liniyasi",
+  600: "Ovozni tekshirish",
+  601: "Sinov qoʻngʻirogʻi",
+  602: "Sinov: yangi raqam",
+};
+
 const canBook = (user) => isManager(user) || user.employee?.calendarAccess === "book";
 const canAddClient = (user) =>
   isManager(user) || isLawyer(user) || hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
@@ -60,6 +68,8 @@ const canAddClient = (user) =>
 async function callerCard(user, number) {
   const raw = String(number ?? "").trim();
   const actions = { canBook: canBook(user), canAddClient: canAddClient(user) };
+
+  if (SERVICE[raw]) return { kind: "service", name: SERVICE[raw], ...actions, canBook: false, canAddClient: false };
 
   // A colleague calling through the line by phone ID.
   if (isExtension(raw)) {
