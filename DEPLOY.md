@@ -43,22 +43,42 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-03): two jobs per person
+### This release (2026-10-04): chat, reminders, notifications, two jobs per person — phone line built but OFF
 
-- **Someone can do more than one job** (e.g. call center + coordinator, or
-  office + call center). Xodimlar → person → Ish sozlamalari → «Ish turi»
-  is now a multi-choice: the first one chosen is the main job (it decides
-  their home page). Everything that follows the job — the call-back list,
-  missed-call Telegram, strikes, Calls/Home switches, client sections,
-  Natijalar — now counts all of their jobs. Positions can preset more than
-  one too. Settings → Call center adds or removes the call-center job and
-  leaves the others as they are.
-- `npm run backup`, `pm2 stop all`, `npx prisma migrate deploy`, `npx prisma
-  generate`, `pm2 restart all` as above. One migration, only adding:
-  - `20261005000000_extra_jobs` — `extraJobs` on Employee and Position
-    (empty: nobody's jobs change).
-- The portal goes out together with it (older portals keep working: they
-  send the single job, which leaves the other jobs as they are).
+- **Chat** (menu → Chat): the Everyone chat, groups the developer makes, a
+  chat on each client (client page → Chat) for whoever can see that client,
+  private chats the boss and developer start. Event cards (the calendar
+  button by the box): everyone in the chat is reminded an hour before and
+  at the start. Open screens update the moment something changes
+  (GET /api/live). People with neither the new app nor browser
+  notifications get chat messages on Telegram ("Chat" in their Telegram
+  settings switches that off).
+- **Reminders** (Vazifalar → Eslatmalar): for yourself; the boss and the
+  developer also for anyone. They go out on the second — Ledger app, browser
+  and Telegram.
+- **Notifications in browsers**: the home page offers "Bildirishnomalar shu
+  brauzerda" (and Profile). Everything the staff bot sends on Telegram also
+  goes there — and to phones with Ledger app 3.0 (not out yet).
+- **Two jobs per person** (Xodimlar → person → Ish turi, multi-choice).
+- **Tidier menu**: Chat in the tab bar, "Koʻproq" as tiles, Eslatmalar inside
+  Vazifalar; a client page's smaller actions as a row of round buttons.
+- **Ledger's own phone line** (pbx/README.md) is in this release but stays
+  OFF: it only starts with `PBX_AMI_SECRET` in `.env`, which production does
+  not have yet. Phone call monitoring keeps working as before.
+- `.env` (new, all optional):
+  - `FCM_SERVICE_ACCOUNT_FILE=/home/ubuntu/secrets/firebase-ledger.json` —
+    Google push to Ledger app 3.0.
+  - `WEB_PUSH_PUBLIC_KEY` / `WEB_PUSH_PRIVATE_KEY` — browser notifications
+    (`npx web-push generate-vapid-keys`).
+- One new package (`web-push`); the auto-deploy installs it. Migrations, only
+  adding:
+  - `20261005000000_extra_jobs` — `extraJobs` on Employee and Position.
+  - `20261006000000_pbx_calling` — phone IDs and phone-line call fields
+    (unused while the line is off).
+  - `20261007000000_device_push` — a phone's Google push address.
+  - `20261008000000_notices_reminders_chat` — notifications, reminders, chat.
+  - `20261009000000_web_push` — browsers with notifications on.
+- The portal goes out right after (it needs this backend).
 
 ### Earlier release (2026-10-03): old consultations to the archive by themselves; missed reports filled in by the developer
 
