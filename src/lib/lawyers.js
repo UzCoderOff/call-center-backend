@@ -3,11 +3,14 @@ const cl = require("../services/clients");
 
 // The firm's lawyers are portal accounts: BOSS (sees everything — and may
 // take cases too) or LAWYER (sees only their own calendar and the cases
-// assigned to them). A case points at one (ClientCase.lawyerId) and keeps
-// their name in ClientCase.lawyer for lists and exports.
+// assigned to them). A case points at its main one (ClientCase.lawyerId) and
+// keeps their name in ClientCase.lawyer for lists and exports; more can work
+// on it too (ClientCase.extraLawyers).
 
 const LAWYER_ROLES = ["BOSS", "LAWYER"];
 const SELECT = { id: true, username: true, name: true, role: true, active: true, calendar: { select: { name: true } } };
+// Enough of an account for displayName.
+const LAWYER_NAME = { id: true, username: true, name: true, calendar: { select: { name: true } } };
 
 // Their name on cases: the account's name, else its calendar's, else the
 // username.
@@ -49,4 +52,4 @@ function matchLawyer(text, accounts) {
   return hits.length === 1 ? hits[0] : null;
 }
 
-module.exports = { LAWYER_ROLES, displayName, lawyerAccounts, lawyerById, matchLawyer };
+module.exports = { LAWYER_ROLES, LAWYER_NAME, displayName, lawyerAccounts, lawyerById, matchLawyer };

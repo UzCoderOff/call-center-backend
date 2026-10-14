@@ -199,17 +199,22 @@ async function onContract({ caseId, byUserId }) {
   }
 }
 
-// A case handed to someone -> them (unless they did it themselves).
-async function onAssigned({ caseId, role, byUserId }) {
+// A case handed to someone -> them (unless they did it themselves). role
+// "extra_lawyer": one more lawyer on it (`userId`).
+async function onAssigned({ caseId, role, userId: extraId, byUserId }) {
   const k = await prisma.clientCase.findUnique({ where: { id: caseId }, include: CASE_INCLUDE });
   if (!k) return;
-  const userId = role === "coordinator" ? k.coordinator?.userId : k.lawyerId;
+  const userId = role === "coordinator" ? k.coordinator?.userId : role === "extra_lawyer" ? extraId : k.lawyerId;
   if (!userId || userId === byUserId) return;
   const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
   const text = [
     "📁 <b>Sizga ish biriktirildi</b>",
     caseLine(k),
-    role === "coordinator" ? "Siz — koordinator: toʻlovlar, muddatlar va mijoz bilan aloqa." : "Siz — advokat.",
+    role === "coordinator"
+      ? "Siz — koordinator: toʻlovlar, muddatlar va mijoz bilan aloqa."
+      : role === "extra_lawyer"
+        ? `Siz — shu ishdagi advokatlardan birisiz${k.lawyer ? ` (asosiy advokat: ${f.escapeHtml(k.lawyer)})` : ""}.`
+        : "Siz — advokat.",
     by ? `Biriktirdi: ${f.escapeHtml(f.personName(by))}` : null,
     f.portalLink(`/clients/${k.client.id}`, "Ishni ochish"),
   ];
@@ -346,6 +351,25 @@ async function onSummaryStrike({ strikeId }) {
   }
 }
 
+// Someone else (the boss) added or moved something in a lawyer's own
+// calendar (routes/personalCalendar.js) -> the lawyer.
+async function onPersonalEvent({ eventId, byUserId }, moved = false) {
+  const e = await prisma.personalEvent.findUnique({ where: { id: eventId }, include: { case: { select: { client: { select: { name: true } } } } } });
+  if (!e || e.deletedAt || e.ownerId === byUserId) return;
+  const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
+  const today = firmNow().date;
+  const time = e.start == null ? "kun boʻyi" : `${f.clock(e.start)}${e.end != null ? `–${f.clock(e.end)}` : ""}`;
+  const text = [
+    moved ? "🗓 <b>Kalendaringizdagi yozuv koʻchirildi</b>" : "🗓 <b>Kalendaringizga yozuv qoʻshildi</b>",
+    `<b>${f.relativeDay(e.date, today)}, ${time}</b> — ${f.escapeHtml(e.title)}`,
+    e.place ? `Joy: ${f.escapeHtml(e.place)}` : null,
+    e.case?.client ? `Mijoz: ${f.escapeHtml(e.case.client.name)}` : null,
+    by ? `${moved ? "Koʻchirdi" : "Qoʻshdi"}: ${f.escapeHtml(f.personName(by))}` : null,
+    f.portalLink(`/calendar?view=mine&day=${e.date}`, "Kalendarni ochish"),
+  ];
+  await notifyUser(e.ownerId, "calendar", text.filter(Boolean).join("\n"));
+}
+
 function register() {
   safeOn("appointment.booked", onBooked);
   safeOn("appointments.cancelled", onCancelled);
@@ -359,6 +383,8 @@ function register() {
   safeOn("strike.created", onStrike);
   safeOn("consultation.summary", onConsultationSummary);
   safeOn("summary.strike", onSummaryStrike);
+  safeOn("personal.added", (x) => onPersonalEvent(x));
+  safeOn("personal.moved", (x) => onPersonalEvent(x, true));
 }
 
-module.exports = { register, onConsultationSummary, onSummaryStrike, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, onTargetsSet, onContract, onAssigned, onFollowUpAssigned, onStrike, followUpText, followUpButton, FOLLOW_UP_MESSAGE_INCLUDE, taskText, taskButton, TASK_INCLUDE };
+module.exports = { register, onPersonalEvent, onConsultationSummary, onSummaryStrike, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, onTargetsSet, onContract, onAssigned, onFollowUpAssigned, onStrike, followUpText, followUpButton, FOLLOW_UP_MESSAGE_INCLUDE, taskText, taskButton, TASK_INCLUDE };

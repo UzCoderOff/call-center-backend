@@ -43,7 +43,49 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-14): the boss's feedback — consultation summaries, planned stages, payment corrections; open chats; Ledger AI does things; Claude
+### This release (2026-10-14, second): lawyers' own calendars, tidier consultation calendar, several lawyers per case, clients being worked on first, only the call center's and coordinators' calls, what's-new notices
+
+- **Lawyers' own calendar** (`routes/personalCalendar.js`, table
+  `PersonalEvent`): Kalendar → «Mening kunim» for each lawyer account (the
+  boss: «Advokatlar kuni», one lawyer or everyone together). Court, meetings,
+  work, personal time — one day as a timeline (tap an hour to add, tap an
+  item to change or move it) or the week as a list. The lawyer's case dates
+  and booked consultations show there by themselves. The boss can add to a
+  lawyer's day; the lawyer is told (Telegram/app kind "calendar"). Today's
+  items are in their 8:30 morning summary.
+- **Consultation calendar**: the lawyer (or the boss/developer) switches it
+  off and on («Konsultatsiya qabul qiladi»); off: staff don't see it and
+  can't book (`409 calendar_off`), bookings already made stay. The day is
+  tidier: free times are small buttons in one row per stretch; the lawyer
+  changes the day with one tap (Ish kuni / Band / Dam olish / Oʻz vaqtim),
+  closes a single time from its button, and opens busy time again by tapping
+  it.
+- **Several lawyers on a case** (table `CaseExtraLawyer`): the main one stays
+  `ClientCase.lawyerId`; managers add more in "Tayinlash". Each sees the case
+  as its lawyer (`lib/clientAccess.js` `lawyerCaseWhere`), hears about it,
+  and it's on the timeline.
+- **Clients**: «Mijozlar» starts with the cases being worked on — how many,
+  this week's court dates and deadlines, how many owe — and each row shows
+  the matter, the next date (red within 3 days), the lawyers and how much is
+  paid. The operators' targets card moved to «Konsultatsiyalar». A client's
+  page has «Pul holati»: contract / given / left, overdue, next payment,
+  consultation fees (Moliya, or the case's coordinator).
+- **Calls**: only the call center's and coordinators' calls count
+  (`lib/calling.js`). Anyone else's phone stops sending its call log (the
+  app's switch reads `collectCalls: false`), and their old calls are left out
+  of numbers, lists and alerts. The weekly AI report says call numbers come
+  from the phones' logs and are approximate until the phone line.
+- **What's new** (`services/news.js`): after a release, the boss gets one
+  summary, staff a line or two only when it touches their work (kind
+  "news", working hours, within 3 days). The developer gets each release's
+  result from the auto-deploy log (`~/autodeploy/autodeploy.log`, or
+  `AUTODEPLOY_LOG`): ✅ deployed / ❌ failed / ⏸ held (kind "deploys"). Next
+  release: add its notes at the top of `NEWS`.
+- Migration — only adding: `20261015000000_lawyers_personal_calendar`
+  (tables `CaseExtraLawyer`, `PersonalEvent`).
+- **No `.env` change, no app update.** The portal goes out right after.
+
+### Earlier release (2026-10-14): the boss's feedback — consultation summaries, planned stages, payment corrections; open chats; Ledger AI does things; Claude
 
 - **Case key dates**: the investigation's steps are kinds of their own (tergov
   harakati, soʻroq, yuzlashtirish, gumonlanuvchi / ayblanuvchi sifatida jalb

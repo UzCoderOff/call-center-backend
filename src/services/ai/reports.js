@@ -112,6 +112,9 @@ async function weeklyReport({ force = false } = {}) {
       ...(canSeeFinance(viewer) ? ["5. **Pul** — muddati oʻtgan toʻlovlar va xavf (agar boʻlsa)."] : []),
       `${canSeeFinance(viewer) ? 6 : 5}. **Bu hafta qilinadigan 3 ish** — aniq, bajarsa boʻladigan.`,
       "Hammasi 350 soʻzdan oshmasin.",
+      // Calls (src/lib/calling.js): only the call center's and coordinators'
+      // phones, from their phones' call logs — no firm line yet.
+      "Qoʻngʻiroqlar haqida: raqamlar faqat call-markaz va koordinatorlarniki (boshqalarning qoʻngʻiroqlari hisoblanmaydi). Ular xodimlarning telefonidagi qoʻngʻiroqlar roʻyxatidan olinadi, shuning uchun taxminiy — firma telefon liniyasi (IP-telefoniya) ulanguncha. Qoʻngʻiroq raqamlariga ortiqcha urgʻu bermang va ular asosida keskin xulosa qilmang; asosiy eʼtibor konsultatsiya, shartnoma va mijozlarda boʻlsin. Hisobotda bu haqda bir marta, qisqa eslatib oʻting.",
       ...COMMON_RULES,
       scriptRule(settings.reportScript),
     ].join("\n");

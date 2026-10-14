@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { countedCallsWhere } = require("../lib/calling");
 
 // Call statistics for the dashboard and the employee detail page. A fixed
 // number of grouped queries no matter how many employees there are, rather
@@ -64,11 +65,14 @@ function finalize(stats, delays) {
   return stats;
 }
 
-// employeeIds: array of Employee.id to include, or null for everyone.
+// employeeIds: array of Employee.id to include, or null for everyone. Only
+// the calls that count (src/lib/calling.js: the call center's and the
+// coordinators' phones) — anyone else's are left out.
 // Returns { totals, byEmployee: Map<employeeId, stats> }.
 async function computeCallStats({ employeeIds = null, from, to }) {
   const where = {
     ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
+    ...countedCallsWhere(),
     ...timeWhere(from, to),
   };
 
@@ -140,6 +144,7 @@ async function computeDailySeries({ employeeIds = null, from, to, tzOffsetMin = 
   const calls = await prisma.callLog.findMany({
     where: {
       ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
+      ...countedCallsWhere(),
       ...timeWhere(start, end),
     },
     select: { callTimestampMs: true, missed: true },

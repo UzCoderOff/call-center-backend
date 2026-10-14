@@ -1,6 +1,6 @@
 const prisma = require("../../lib/prisma");
 const { jobWhere } = require("../../lib/jobs");
-const { hasCallsWhere } = require("../../lib/calling");
+const { CALL_JOBS, hasCallsWhere } = require("../../lib/calling");
 const { worksOn } = require("../workdays");
 const env = require("../../config/env");
 const { firmNow, shiftDate, isoWeekday, weekStartOf } = require("../../lib/firmTime");
@@ -175,7 +175,8 @@ function recordingLine(r) {
 async function recordingAlerts(now) {
   if (!WORK_DAYS.includes(isoWeekday(now.date)) || now.minutes < at(10) || now.minutes >= at(13)) return;
   const { getRecordingHealth } = require("../syncHealth");
-  const employees = await prisma.employee.findMany({ where: { active: true, collectCalls: true }, select: { id: true, name: true, employeeId: true, userId: true } });
+  // Phones that should be sending calls (src/lib/calling.js).
+  const employees = await prisma.employee.findMany({ where: { active: true, collectCalls: true, ...jobWhere(CALL_JOBS) }, select: { id: true, name: true, employeeId: true, userId: true } });
   const health = await getRecordingHealth(employees);
   const bad = employees.filter((e) => RECORDING_PROBLEMS.includes(health.get(e.id)?.status));
   if (bad.length === 0) return;

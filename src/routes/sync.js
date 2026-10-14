@@ -1,4 +1,5 @@
 const express = require("express");
+const { collectsCalls } = require("../lib/calling");
 const multer = require("multer");
 const prisma = require("../lib/prisma");
 const { phoneKey } = require("../lib/phone");
@@ -81,7 +82,8 @@ async function authenticate(req) {
     return err;
   };
   if (!employee.active) throw reject(401, "inactive_employee", "employee is inactive");
-  if (!employee.collectCalls) throw reject(403, "collection_disabled", "call collection is off for this employee");
+  // Off, or a job whose calls don't matter (src/lib/calling.js).
+  if (!collectsCalls(employee)) throw reject(403, "collection_disabled", "call collection is off for this employee");
 
   return { employee, device, payload };
 }

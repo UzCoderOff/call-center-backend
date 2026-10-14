@@ -1,9 +1,10 @@
 const express = require("express");
+const { displayName, LAWYER_NAME } = require("../lib/lawyers");
 const prisma = require("../lib/prisma");
 const { requireAuth, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
 const { firmNow, shiftDate } = require("../lib/firmTime");
-const { caseRole, CONTRACT_STATUSES } = require("../lib/clientAccess");
+const { caseRole, CONTRACT_STATUSES, lawyerCaseWhere, EXTRA_LAWYERS } = require("../lib/clientAccess");
 const { canSeeCaseMoney } = require("../lib/finance");
 const { isCoordinator } = require("../lib/jobs");
 const cl = require("../services/clients");
@@ -55,7 +56,7 @@ function sendError(err, res, next) {
 async function caseForHistory(user, caseId) {
   const kase = await prisma.clientCase.findUnique({
     where: { id: caseId },
-    select: { id: true, clientId: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, client: { select: { createdById: true, archivedAt: true, cases: { select: { operatorId: true } } } } },
+    select: { id: true, clientId: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS, client: { select: { createdById: true, archivedAt: true, cases: { select: { operatorId: true } } } } },
   });
   if (!kase) throw fail(404, "not_found");
   const role = caseRole(user, kase, kase.client);
@@ -76,7 +77,7 @@ caseItems.use(requireAuth, gate);
 // Whose cases "mine" are.
 function mineWhere(user) {
   if (isManager(user)) return { status: "contract" };
-  if (isLawyer(user)) return { lawyerId: user.id, status: { in: CONTRACT_STATUSES } };
+  if (isLawyer(user)) return { ...lawyerCaseWhere(user.id), status: { in: CONTRACT_STATUSES } };
   if (isCoordinator(user.employee)) return { coordinatorId: user.employee.id };
   return { coordinatorId: user.employee?.id ?? -1 };
 }
@@ -102,6 +103,7 @@ caseItems.get("/", async (req, res, next) => {
         contractAmount: true,
         lawyer: true,
         lawyerId: true,
+        extraLawyers: { select: { user: { select: LAWYER_NAME } } },
         coordinatorId: true,
         operatorId: true,
         client: { select: { id: true, name: true, nextCallAt: true, nextCallNote: true, phones: { select: { phone: true }, orderBy: { id: "asc" }, take: 1 } } },
@@ -128,6 +130,7 @@ caseItems.get("/", async (req, res, next) => {
         contractDate: k.contractDate,
         lawyer: k.lawyer,
         lawyerId: k.lawyerId,
+        extraLawyers: k.extraLawyers.map((x) => ({ id: x.user.id, name: displayName(x.user) })),
         coordinator: k.coordinator,
         operator: k.operator,
         client: { id: k.client.id, name: k.client.name, phone: k.client.phones[0]?.phone ?? null, nextCallAt: k.client.nextCallAt, nextCallNote: k.client.nextCallNote },
@@ -158,7 +161,7 @@ caseItems.get("/upcoming", async (req, res, next) => {
   try {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 14));
     const from = today();
-    const caseWhere = isManager(req.user) ? {} : isLawyer(req.user) ? { lawyerId: req.user.id } : { coordinatorId: req.user.employee?.id ?? -1 };
+    const caseWhere = isManager(req.user) ? {} : isLawyer(req.user) ? lawyerCaseWhere(req.user.id) : { coordinatorId: req.user.employee?.id ?? -1 };
     const window = { gte: from, lte: shiftDate(from, days) };
     const CASE = { select: { id: true, matter: true, client: { select: { id: true, name: true } } } };
     const [rows, planned] = await Promise.all([

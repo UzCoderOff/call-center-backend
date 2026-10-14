@@ -117,6 +117,10 @@ model User {
   summaryStrikes   SummaryStrike[]      @relation("SummaryStrikeUser")
   summaryStrikesCancelled SummaryStrike[] @relation("SummaryStrikeCancelledBy")
   aiSuggestions    AiSuggestion[]       @relation("AiSuggestionFor")
+  casesHelping     CaseExtraLawyer[]    @relation("CaseExtraLawyerUser")
+  casesHelpAdded   CaseExtraLawyer[]    @relation("CaseExtraLawyerBy")
+  personalEvents   PersonalEvent[]      @relation("PersonalEventOwner")
+  personalAdded    PersonalEvent[]      @relation("PersonalEventBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -736,6 +740,10 @@ model ClientCase {
   // exactly the clients with a case assigned to them.
   lawyerId      Int?
   lawyerAccount User? @relation("CaseLawyer", fields: [lawyerId], references: [id], onDelete: SetNull)
+  // More lawyers working on it besides the main one (2026-10-14). Each sees
+  // the case as its lawyer does (src/lib/clientAccess.js).
+  extraLawyers  CaseExtraLawyer[]
+  personalEvents PersonalEvent[]
 
   @@index([clientId])
   @@index([operatorId, consultationDate])
@@ -1465,4 +1473,46 @@ model WebPushSubscription {
   lastOkAt  DateTime?
 
   @@index([userId])
+}
+
+// A lawyer working on a case besides its main one (ClientCase.lawyerId) —
+// they see and work on it the same way. Managers add and remove them.
+model CaseExtraLawyer {
+  id        Int        @id @default(autoincrement())
+  caseId    Int
+  case      ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  userId    Int
+  user      User       @relation("CaseExtraLawyerUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedById Int?
+  addedBy   User?      @relation("CaseExtraLawyerBy", fields: [addedById], references: [id], onDelete: SetNull)
+  createdAt DateTime   @default(now())
+
+  @@unique([caseId, userId])
+  @@index([userId])
+}
+
+// A lawyer's own calendar (2026-10-14): court, meetings, work, personal
+// time — not consultations (those are the Calendar's appointments). Every
+// lawyer account has one; managers see them all. Its day also shows the
+// lawyer's case dates and booked consultations (routes/personalCalendar.js).
+model PersonalEvent {
+  id          Int         @id @default(autoincrement())
+  ownerId     Int
+  owner       User        @relation("PersonalEventOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  date        String // "YYYY-MM-DD"
+  start       Int? // minutes from midnight; null: the whole day
+  end         Int?
+  kind        String      @default("meeting") // "court" | "meeting" | "work" | "personal" | "other"
+  title       String
+  place       String?
+  note        String?
+  caseId      Int?
+  case        ClientCase? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  createdById Int?
+  createdBy   User?       @relation("PersonalEventBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  @@index([ownerId, date])
 }

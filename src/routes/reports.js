@@ -32,6 +32,8 @@ const AUTO_EMPLOYEE = {
   userId: true,
   collectCalls: true,
   pbxCalling: true,
+  job: true,
+  extraJobs: true,
   autoReport: true,
   alsoForm: true,
   reportTemplateId: true,
@@ -41,7 +43,7 @@ const AUTO_EMPLOYEE = {
 };
 
 const REPORT_INCLUDE = {
-  employee: { select: { id: true, name: true, collectCalls: true, pbxCalling: true, office: { select: { id: true, name: true } } } },
+  employee: { select: { id: true, name: true, collectCalls: true, pbxCalling: true, job: true, extraJobs: true, office: { select: { id: true, name: true } } } },
   template: { select: { id: true, name: true } },
   reviewedBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
   enteredBy: { select: { id: true, username: true, employee: { select: { name: true } } } },

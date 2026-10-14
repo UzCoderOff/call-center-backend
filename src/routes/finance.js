@@ -1,4 +1,5 @@
 const express = require("express");
+const { lawyerCaseWhere } = require("../lib/clientAccess");
 const prisma = require("../lib/prisma");
 const { requireAuth, isLawyer, isManager } = require("../middleware/auth");
 const { buildWorkbook } = require("../lib/xlsx");
@@ -53,8 +54,10 @@ async function financeData(user, monthParam) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw badRequest("invalid month");
 
   const lawyer = isLawyer(user);
-  const caseScope = lawyer ? { lawyerId: user.id } : {};
-  const paymentScope = lawyer ? { OR: [{ case: { lawyerId: user.id } }, { appointment: { calendar: { ownerId: user.id } } }] } : {};
+  // A lawyer: their cases (main lawyer or one of the others), and their
+  // consultations.
+  const caseScope = lawyer ? lawyerCaseWhere(user.id) : {};
+  const paymentScope = lawyer ? { OR: [{ case: lawyerCaseWhere(user.id) }, { appointment: { calendar: { ownerId: user.id } } }] } : {};
   const firstMonth = shiftMonth(month, -5);
 
   const [payments, trendPayments, cases, appointments, reports, templates] = await Promise.all([

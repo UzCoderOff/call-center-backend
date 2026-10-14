@@ -8,9 +8,9 @@ const { refreshSearch, clientsByPhoneKeys } = require("../lib/clientsDb");
 const cl = require("../services/clients");
 const importer = require("../services/clientImport");
 const { buildXlsx } = require("../lib/xlsx");
-const { lawyerAccounts, lawyerById } = require("../lib/lawyers");
+const { lawyerAccounts, lawyerById, displayName, LAWYER_NAME } = require("../lib/lawyers");
 const { canSeeFinance, canSeeCaseMoney, financeForbidden, caseWithoutMoney, isConsultation, CONSULTATION } = require("../lib/finance");
-const { CONTRACT_STATUSES, clientScope, workScope, ownCaseWhere, caseRole, clientLevel, requireClientAccess, accessibleClientIds, clientIndexFor } = require("../lib/clientAccess");
+const { CONTRACT_STATUSES, clientScope, workScope, ownCaseWhere, caseRole, clientLevel, requireClientAccess, accessibleClientIds, clientIndexFor, lawyerCaseWhere, isCaseLawyer, EXTRA_LAWYERS } = require("../lib/clientAccess");
 const { isCoordinator, isCallCenter, hasJob, jobsOf } = require("../lib/jobs");
 const { hasCalls } = require("../lib/calling");
 const history = require("../services/caseHistory");
@@ -159,6 +159,22 @@ async function lawyerFor(requested, req, current) {
   return { lawyerId: lawyer.id, lawyer: lawyer.name };
 }
 
+// More lawyers on a case (managers): extraLawyerIds, the whole list (the
+// main lawyer left out). undefined: not given. -> [{ id, name }]
+async function extraLawyersFor(requested, req, mainId) {
+  if (requested === undefined) return undefined;
+  if (!isManager(req.user)) throw Object.assign(new Error("forbidden"), { status: 403 });
+  if (!Array.isArray(requested) || requested.length > 10) throw badRequest("extraLawyerIds must be a list");
+  const out = [];
+  for (const raw of [...new Set(requested.map(Number))]) {
+    if (raw === mainId) continue;
+    const lawyer = await lawyerById(parseId(raw, "extraLawyerIds"));
+    if (!lawyer) throw badRequest("unknown lawyer");
+    out.push(lawyer);
+  }
+  return out;
+}
+
 async function loadClient(id) {
   const client = await prisma.client.findUnique({ where: { id }, select: { id: true, archivedAt: true } });
   if (!client) {
@@ -180,6 +196,29 @@ function linkedSummary(c) {
 // Records who did what; `detail` keeps a copy of anything removed.
 function audit(db, req, action, entity, entityId, detail) {
   return db.auditLog.create({ data: { userId: req.user.id, action, entity, entityId, detail } });
+}
+
+// The client's money as a whole, over the cases whose money this person
+// sees (each already withMoney): what the contracts come to, what's been
+// paid and what's left, what's overdue and the next payment due — plus the
+// consultation fees they paid. null when they see no case's money.
+function clientMoney(cases, payments) {
+  const withContract = cases.filter((k) => k.contractAmount);
+  if (cases.length === 0) return null;
+  const nexts = cases.map((k) => (k.schedule?.next ? { ...k.schedule.next, caseId: k.id } : null)).filter(Boolean);
+  const overdueSince = cases.map((k) => k.schedule?.overdueSince).filter(Boolean).sort()[0] ?? null;
+  return {
+    cases: withContract.length,
+    contract: withContract.reduce((s, k) => s + k.contractAmount, 0),
+    paid: cases.reduce((s, k) => s + (k.paid || 0), 0),
+    remaining: withContract.reduce((s, k) => s + (k.remaining || 0), 0),
+    overdue: cases.reduce((s, k) => s + (k.schedule?.overdue || 0), 0),
+    overdueSince,
+    next: nexts.sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1))[0] ?? null,
+    // Left to pay that no schedule covers yet.
+    unscheduled: withContract.reduce((s, k) => s + (k.schedule ? Math.max(0, (k.remaining || 0) - k.schedule.items.reduce((x, i) => x + i.left, 0)) : k.remaining || 0), 0),
+    consultationFees: payments.filter((p) => p.kind === "consultation").reduce((s, p) => s + p.amount, 0),
+  };
 }
 
 // Case numbers with the payment summary the portal shows — and, when the
@@ -246,7 +285,11 @@ async function listQuery(q, user) {
   if (q.legalStage) caseWhere.legalStage = cl.oneOf(q.legalStage, cl.LEGAL_STAGES, "legalStage");
   // "none": cases nobody is assigned to yet — to find and fill in.
   if (q.operatorId) caseWhere.operatorId = q.operatorId === "none" ? null : parseId(q.operatorId, "operatorId");
-  if (q.lawyerId) caseWhere.lawyerId = q.lawyerId === "none" ? null : parseId(q.lawyerId, "lawyerId");
+  // A lawyer's: the main one or one of the others on it.
+  if (q.lawyerId) {
+    if (q.lawyerId === "none") caseWhere.lawyerId = null;
+    else caseWhere.AND = [lawyerCaseWhere(parseId(q.lawyerId, "lawyerId"))];
+  }
   if (q.coordinatorId && isManager(user)) caseWhere.coordinatorId = q.coordinatorId === "none" ? null : parseId(q.coordinatorId, "coordinatorId");
   if (q.lawyer) caseWhere.lawyer = String(q.lawyer);
   if (q.filter === "active") caseWhere.status = caseWhere.status || { in: cl.OPEN_STATUSES };
@@ -263,7 +306,7 @@ async function listQuery(q, user) {
   }
   if (q.filter === "debt") {
     // Moliya (a lawyer: their own cases), or a coordinator's own cases.
-    if (canSeeFinance(user)) and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? { lawyerId: user.id } : {}) } });
+    if (canSeeFinance(user)) and.push({ id: { in: await clientIdsWithDebt(isLawyer(user) ? lawyerCaseWhere(user.id) : {}) } });
     else if (isCoordinator(user.employee)) and.push({ id: { in: await clientIdsWithDebt({ coordinatorId: user.employee.id }) } });
     else throw financeForbidden();
   }
@@ -298,6 +341,8 @@ clients.get("/", async (req, res, next) => {
     // How many each section has with the same filters — for the tabs.
     const sectionCount = async (section) => prisma.client.count({ where: (await listQuery({ ...req.query, section }, req.user)).where });
     const sections = req.query.section ? Object.fromEntries(await Promise.all(sectionsFor(req.user).map(async (s) => [s, await sectionCount(s)]))) : null;
+    // The cases being worked on: what's coming up this week in them.
+    const overview = req.query.section === "clients" && page === 1 && !req.query.q ? await clientsOverview(req.user) : null;
     const [rows, total] = await Promise.all([
       prisma.client.findMany({
         where,
@@ -308,14 +353,19 @@ clients.get("/", async (req, res, next) => {
           phones: { select: { phone: true }, orderBy: { id: "asc" } },
           cases: {
             // A lawyer: their own cases only.
-            ...(isLawyer(req.user) ? { where: { lawyerId: req.user.id } } : {}),
+            ...(isLawyer(req.user) ? { where: lawyerCaseWhere(req.user.id) } : {}),
             orderBy: { updatedAt: "desc" },
             select: {
               id: true,
               status: true,
               legalStage: true,
+              matter: true,
+              number: true,
               lawyer: true,
               lawyerId: true,
+              extraLawyers: { orderBy: { id: "asc" }, select: { userId: true, user: { select: LAWYER_NAME } } },
+              // The next key date (a hearing, a deadline…).
+              dates: { where: { deletedAt: null, date: { gte: today() } }, orderBy: [{ date: "asc" }, { time: "asc" }], take: 1, select: { kind: true, date: true, time: true, title: true } },
               operatorId: true,
               coordinatorId: true,
               consultationDate: true,
@@ -352,23 +402,56 @@ clients.get("/", async (req, res, next) => {
         const visible = cases.filter((k) => roles.get(k.id) && roles.get(k.id) !== "result");
         const withMoneyCases = visible.filter((k) => canSeeCaseMoney(req.user, k));
         const latest = visible[0] || null;
+        const caseOut = ({ payments, contractAmount, operatorId, coordinatorId, extraLawyers, dates, ...k }) => ({
+          ...k,
+          extraLawyers: extraLawyers.map((x) => ({ id: x.user.id, name: displayName(x.user) })),
+          nextDate: dates[0] ?? null,
+          // How far the contract is paid, when they see its money.
+          ...(canSeeCaseMoney(req.user, latest) ? { contractAmount, paid: cl.paymentSummary(contractAmount, payments).paid } : {}),
+        });
         return {
           ...c,
           phone,
-          latestCase: latest
-            ? (({ payments, contractAmount, operatorId, coordinatorId, ...k }) => (canSeeCaseMoney(req.user, latest) ? { ...k, contractAmount } : k))(latest)
-            : null,
+          latestCase: latest ? caseOut(latest) : null,
           caseCount: visible.length,
           ...(withMoneyCases.length ? { debt: withMoneyCases.reduce((sum, k) => sum + cl.paymentSummary(k.contractAmount, k.payments).remaining, 0) } : {}),
         };
       }),
       pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
       ...(sections ? { sections } : {}),
+      ...(overview ? { overview } : {}),
     });
   } catch (err) {
     sendError(err, res, next);
   }
 });
+
+// The top of "Mijozlar" (the cases being worked on): their key dates in the
+// next 7 days, and — for whoever sees the money — how many clients owe.
+async function clientsOverview(user) {
+  // The cases they work on after the contract: everything (managers), a
+  // lawyer's, a coordinator's — not an operator's past results.
+  const own = isManager(user) ? {} : isLawyer(user) ? lawyerCaseWhere(user.id) : isCoordinator(user.employee) ? { coordinatorId: user.employee.id } : null;
+  if (!own) return null;
+  const from = today();
+  const caseWhere = { AND: [own, { status: { in: CONTRACT_STATUSES } }, { client: { archivedAt: null } }] };
+  const [dates, active] = await Promise.all([
+    prisma.caseDate.findMany({
+      where: { deletedAt: null, date: { gte: from, lte: shiftDate(from, 6) }, case: caseWhere },
+      orderBy: [{ date: "asc" }, { time: "asc" }],
+      take: 30,
+      select: { id: true, kind: true, date: true, time: true, title: true, place: true, case: { select: { id: true, client: { select: { id: true, name: true } } } } },
+    }),
+    prisma.clientCase.count({ where: { AND: [own, { status: "contract" }, { client: { archivedAt: null } }] } }),
+  ]);
+  const money = canSeeFinance(user) || (!isLawyer(user) && isCoordinator(user.employee));
+  const debtors = money ? (await clientIdsWithDebt(canSeeFinance(user) ? (isLawyer(user) ? lawyerCaseWhere(user.id) : {}) : { coordinatorId: user.employee.id })).length : null;
+  return {
+    active,
+    week: dates.map((d) => ({ id: d.id, kind: d.kind, date: d.date, time: d.time, title: d.title, place: d.place, caseId: d.case.id, clientId: d.case.client.id, clientName: d.case.client.name })),
+    debtors,
+  };
+}
 
 async function clientIdsWithDebt(caseWhere = {}) {
   const cases = await prisma.clientCase.findMany({
@@ -550,6 +633,7 @@ clients.post("/", async (req, res, next) => {
 // dates and their own calls, nothing of the case.
 const CASE_INCLUDE = {
   operator: { select: { id: true, name: true } },
+  extraLawyers: { orderBy: { id: "asc" }, select: { userId: true, user: { select: LAWYER_NAME } } },
   coordinator: { select: { id: true, name: true } },
   payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
   installments: true,
@@ -688,7 +772,7 @@ clients.get("/:id", async (req, res, next) => {
 
     const caseOut = (k) => {
       const base = moneyIds.has(k.id) ? withMoney(k) : caseWithoutMoney(k);
-      return { ...base, permissions: casePermissions(req.user, roles.get(k.id), k) };
+      return { ...base, extraLawyers: k.extraLawyers.map((x) => ({ id: x.user.id, name: displayName(x.user) })), permissions: casePermissions(req.user, roles.get(k.id), k) };
     };
     // Payments: consultation fees for everyone who sees the client; the rest
     // only on cases whose money they see (Moliya: all, unattached ones too).
@@ -713,6 +797,8 @@ clients.get("/:id", async (req, res, next) => {
       results: results.map((k) => ({ id: k.id, status: k.status, consultationDate: k.consultationDate, contractDate: k.contractDate, coordinator: k.coordinator?.name ?? null })),
       payments: shownPayments,
       finance: canSeeFinance(req.user),
+      // Altogether: given, left, overdue, next (the cases whose money they see).
+      money: moneyIds.size ? clientMoney(visible.filter((k) => moneyIds.has(k.id)).map(withMoney), shownPayments) : null,
       events: shownEvents,
       links: lawyer
         ? []
@@ -954,7 +1040,10 @@ async function coordinatorFor(requested, req) {
 cases.patch("/:id", async (req, res, next) => {
   try {
     const id = parseId(req.params.id);
-    const current = await prisma.clientCase.findUnique({ where: { id }, include: { client: { select: { createdById: true, cases: { select: { operatorId: true } } } } } });
+    const current = await prisma.clientCase.findUnique({
+      where: { id },
+      include: { extraLawyers: { select: { userId: true, user: { select: LAWYER_NAME } } }, client: { select: { createdById: true, cases: { select: { operatorId: true } } } } },
+    });
     if (!current) return res.status(404).json({ error: "not_found" });
     const role = caseRole(req.user, current, current.client);
     if (!role) return res.status(404).json({ error: "not_found" });
@@ -976,6 +1065,11 @@ cases.patch("/:id", async (req, res, next) => {
     if (lawyer) Object.assign(data, lawyer);
     const coordinatorId = await coordinatorFor(b.coordinatorId, req);
     if (coordinatorId !== undefined) data.coordinatorId = coordinatorId;
+    // More lawyers on it (managers): the whole list, the main one left out.
+    const extra = await extraLawyersFor(b.extraLawyerIds, req, data.lawyerId !== undefined ? data.lawyerId : current.lawyerId);
+    const extraBefore = current.extraLawyers.map((x) => x.userId);
+    const added = extra ? extra.filter((l) => !extraBefore.includes(l.id)) : [];
+    const removed = extra ? current.extraLawyers.filter((x) => !extra.some((l) => l.id === x.userId)) : [];
     // A stage picked straight from a list (older portals): a history row
     // dated today, so the history stays whole.
     const stage = legalStage === undefined ? undefined : cl.oneOf(legalStage, cl.LEGAL_STAGES, "legalStage");
@@ -1004,6 +1098,16 @@ cases.patch("/:id", async (req, res, next) => {
         }
       }
       if (data.lawyerId !== undefined && data.lawyerId !== current.lawyerId) await log("assign", "", { role: "lawyer", from: current.lawyer || null, to: data.lawyer || null });
+      // The main lawyer is never one of the others too.
+      if (c.lawyerId) await tx.caseExtraLawyer.deleteMany({ where: { caseId: id, userId: c.lawyerId } });
+      for (const l of added) {
+        await tx.caseExtraLawyer.upsert({ where: { caseId_userId: { caseId: id, userId: l.id } }, update: {}, create: { caseId: id, userId: l.id, addedById: req.user.id } });
+        await log("assign", "", { role: "extra_lawyer", from: null, to: l.name });
+      }
+      for (const x of removed) {
+        await tx.caseExtraLawyer.deleteMany({ where: { caseId: id, userId: x.userId } });
+        await log("assign", "", { role: "extra_lawyer", from: displayName(x.user), to: null });
+      }
       if (data.status === "declined" && current.status !== "declined") await log("lost", "", { reason: data.lostReason ?? current.lostReason ?? null, note: data.lostNote ?? null });
       const changes = TRACKED.filter((f) => data[f] !== undefined && (data[f] ?? null) !== (current[f] ?? null)).map((f) => ({ field: f, from: shortened(current[f] ?? null), to: shortened(data[f] ?? null) }));
       if (changes.length) await log("case_edit", "", { changes });
@@ -1017,6 +1121,7 @@ cases.patch("/:id", async (req, res, next) => {
     if (data.status === "contract" && current.status !== "contract" && !CONTRACT_STATUSES.includes(current.status)) bus.emit("case.contract", { caseId: id, byUserId: req.user.id });
     if (data.coordinatorId && data.coordinatorId !== current.coordinatorId) bus.emit("case.assigned", { caseId: id, role: "coordinator", byUserId: req.user.id });
     if (data.lawyerId && data.lawyerId !== current.lawyerId) bus.emit("case.assigned", { caseId: id, role: "lawyer", byUserId: req.user.id });
+    for (const l of added) bus.emit("case.assigned", { caseId: id, role: "extra_lawyer", userId: l.id, byUserId: req.user.id });
     res.json(canSeeCaseMoney(req.user, updated) ? updated : caseWithoutMoney(updated));
   } catch (err) {
     sendError(err, res, next);
@@ -1029,9 +1134,9 @@ cases.put("/:id/installments", async (req, res, next) => {
   try {
     if (!canSeeFinance(req.user)) throw financeForbidden();
     const id = parseId(req.params.id);
-    const current = await prisma.clientCase.findUnique({ where: { id }, select: { id: true, clientId: true, lawyerId: true } });
+    const current = await prisma.clientCase.findUnique({ where: { id }, select: { id: true, clientId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS } });
     if (!current) return res.status(404).json({ error: "not_found" });
-    if (isLawyer(req.user) ? current.lawyerId !== req.user.id : false) return res.status(404).json({ error: "not_found" });
+    if (isLawyer(req.user) ? !isCaseLawyer(current, req.user.id) : false) return res.status(404).json({ error: "not_found" });
     if (!isLawyer(req.user)) await requireClientAccess(req.user, current.clientId);
     const items = normalizeSchedule(req.body?.items);
     await prisma.$transaction([

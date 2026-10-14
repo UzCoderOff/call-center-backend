@@ -6,7 +6,7 @@ const { computeCallStats, computeDailySeries, blankStats } = require("../service
 const { getSyncHealth } = require("../services/syncHealth");
 const { diskSpace } = require("../services/diskSpace");
 const { JOBS, parseJobs, hasJob, isCallCenter, jobsOf } = require("../lib/jobs");
-const { hasCalls } = require("../lib/calling");
+const { CALL_JOBS, hasCalls, countedCallsWhere } = require("../lib/calling");
 const { computeFunnel } = require("../services/funnel");
 const { strikeCounts } = require("../services/strikes");
 const { DEFAULT_FEE } = require("../services/consultationFee");
@@ -25,6 +25,7 @@ async function needsCallbackPreview(employeeIds) {
     followUp: { in: NEEDS_CALLBACK_STATUSES },
     callTimestampMs: { gte: BigInt(Date.now() - FOLLOW_UP_WINDOW_MS) },
     ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
+    ...countedCallsWhere(),
   };
   const [count, items] = await Promise.all([
     prisma.callLog.count({ where }),
@@ -107,10 +108,11 @@ router.get("/", async (req, res, next) => {
       orderBy: { name: "asc" },
     });
     // ?jobs=call_center,… — whose phones these numbers are about (the portal
-    // asks for the call center by default). Without it: everyone's.
-    const jobs = parseJobs(req.query.jobs);
-    const employees = jobs ? everyone.filter((e) => jobsOf(e).some((j) => jobs.includes(j))) : everyone;
-    const employeeIds = jobs ? employees.map((e) => e.id) : null;
+    // asks for the call center by default). Only jobs whose calls matter
+    // count (src/lib/calling.js); without it: all of those.
+    const jobs = (parseJobs(req.query.jobs) || CALL_JOBS).filter((j) => CALL_JOBS.includes(j));
+    const employees = everyone.filter((e) => jobsOf(e).some((j) => jobs.includes(j)));
+    const employeeIds = employees.map((e) => e.id);
     // How many people with calls (their phone, or Ledger's line) each job
     // has, for the portal's switches.
     const phonesByJob = Object.fromEntries(JOBS.map((j) => [j, everyone.filter((e) => e.active && hasCalls(e) && hasJob(e, j)).length]));

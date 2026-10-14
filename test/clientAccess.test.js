@@ -18,8 +18,18 @@ test("the developer and the boss see every client", () => {
 });
 
 test("a lawyer sees the clients with a case of theirs", () => {
-  assert.deepEqual(a.clientScope(lawyer), { cases: { some: { lawyerId: 3 } } });
-  assert.deepEqual(a.ownCaseWhere(lawyer), { lawyerId: 3 });
+  const theirs = { OR: [{ lawyerId: 3 }, { extraLawyers: { some: { userId: 3 } } }] };
+  assert.deepEqual(a.clientScope(lawyer), { cases: { some: theirs } });
+  assert.deepEqual(a.ownCaseWhere(lawyer), theirs);
+});
+
+test("a case can have more lawyers than its main one; each works on it as its lawyer", () => {
+  const kase = { status: "contract", operatorId: 7, coordinatorId: null, lawyerId: 9, extraLawyers: [{ userId: 3 }] };
+  assert.equal(a.caseRole(lawyer, kase), "lawyer");
+  assert.equal(a.caseRole(lawyer, { ...kase, extraLawyers: [] }), null);
+  assert.equal(a.caseRole(lawyer, { ...kase, lawyerId: 3, extraLawyers: undefined }), "lawyer");
+  assert.equal(a.isCaseLawyer(kase, 9), true);
+  assert.equal(a.isCaseLawyer(kase, 4), false);
 });
 
 test("staff open the clients they're operator or coordinator of, or added while nobody is", () => {

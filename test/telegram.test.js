@@ -7,25 +7,29 @@ const f = require("../src/services/telegram/format");
 
 test("each person gets the notification kinds that fit their job", () => {
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", autoReport: true, reportTemplateId: 3 }, calendar: null };
-  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "chat"]);
+  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "chat", "news"]);
 
   const clerk = { role: "EMPLOYEE", employee: { collectCalls: false, calendarAccess: "none", autoReport: false, reportTemplateId: 3 }, calendar: null };
-  assert.deepEqual(applicableKinds(clerk), ["digest", "reportReminder", "materials", "tasks", "targets", "chat"]);
+  assert.deepEqual(applicableKinds(clerk), ["digest", "reportReminder", "materials", "tasks", "targets", "chat", "news"]);
 
   const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
-  assert.deepEqual(applicableKinds(lawyer), ["appointments", "digest", "materials", "planning", "summaries", "tasks", "cases", "followUps", "chat"]);
+  assert.deepEqual(applicableKinds(lawyer), ["appointments", "digest", "materials", "planning", "summaries", "tasks", "cases", "followUps", "chat", "calendar", "news"]);
 
   const boss = { role: "BOSS", employee: null, calendar: null };
-  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "followUps", "strikes", "aiReports", "chat"]);
+  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "followUps", "strikes", "aiReports", "chat", "calendar", "news"]);
 
   // A monitored phone that isn't the call center's: no call-back alerts.
+  const developer = { role: "DEVELOPER", employee: null, calendar: null };
+  assert.ok(applicableKinds(developer).includes("deploys"));
+  assert.ok(!applicableKinds(boss).includes("deploys"));
+
   const coordinator = { role: "EMPLOYEE", employee: { job: "coordinator", collectCalls: true, calendarAccess: "none" }, calendar: null };
-  assert.deepEqual(applicableKinds(coordinator), ["digest", "materials", "tasks", "targets", "recordings", "cases", "followUps", "chat"]);
+  assert.deepEqual(applicableKinds(coordinator), ["digest", "materials", "tasks", "targets", "recordings", "cases", "followUps", "chat", "news"]);
 });
 
 test("everything is on until switched off, and unrelated saved keys are ignored", () => {
   const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
-  assert.deepEqual(effectivePrefs(lawyer, null), { appointments: true, digest: true, materials: true, planning: true, summaries: true, tasks: true, cases: true, followUps: true, chat: true });
+  assert.deepEqual(effectivePrefs(lawyer, null), { appointments: true, digest: true, materials: true, planning: true, summaries: true, tasks: true, cases: true, followUps: true, chat: true, calendar: true, news: true });
   assert.deepEqual(effectivePrefs(lawyer, { digest: false, missedCalls: false }), {
     appointments: true,
     digest: false,
@@ -36,6 +40,8 @@ test("everything is on until switched off, and unrelated saved keys are ignored"
     cases: true,
     followUps: true,
     chat: true,
+    calendar: true,
+    news: true,
   });
 });
 

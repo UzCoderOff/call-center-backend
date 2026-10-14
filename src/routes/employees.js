@@ -6,7 +6,7 @@ const { generateUniqueEmployeeId } = require("../utils/employeeId");
 const { generateTempPassword } = require("../lib/tempPassword");
 const { parseId, badRequest } = require("../utils/params");
 const { getSyncHealth } = require("../services/syncHealth");
-const { hasCalls } = require("../lib/calling");
+const { hasCalls, collectsCalls } = require("../lib/calling");
 const pbxProvision = require("../services/pbx/provision");
 
 const router = express.Router();
@@ -171,7 +171,7 @@ router.get("/", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       include: EMPLOYEE_INCLUDE,
       orderBy: { name: "asc" },
     });
-    const health = await getSyncHealth(employees.filter((e) => e.collectCalls));
+    const health = await getSyncHealth(employees.filter((e) => collectsCalls(e)));
     res.json(employees.map((e) => publicEmployee(e, req.user.role, health.get(e.id) ?? null)));
   } catch (err) {
     next(err);
@@ -266,7 +266,7 @@ router.get("/:id", async (req, res, next) => {
     const employee = await prisma.employee.findUnique({ where: { id }, include: EMPLOYEE_INCLUDE });
     if (!employee) return res.status(404).json({ error: "not_found" });
 
-    const health = employee.collectCalls ? (await getSyncHealth([employee])).get(employee.id) : null;
+    const health = collectsCalls(employee) ? (await getSyncHealth([employee])).get(employee.id) : null;
     const body = publicEmployee(employee, req.user.role, health);
 
     if (isManager) {

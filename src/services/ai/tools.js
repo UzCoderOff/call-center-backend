@@ -8,6 +8,7 @@ const { hasCalls } = require("../../lib/calling");
 const { clientScope } = require("../../lib/clientAccess");
 const { clientIndex } = require("../../lib/clientsDb");
 const { computeCallStats } = require("../stats");
+const { countedCallsWhere } = require("../../lib/calling");
 const { computeFunnel } = require("../funnel");
 const { DEFAULT_FEE } = require("../consultationFee");
 const { monthPerformance } = require("../performance");
@@ -142,6 +143,7 @@ const TOOLS = [
         followUp: { in: ["pending", "attempted"] },
         callTimestampMs: { gte: BigInt(Date.now() - 7 * 24 * 3600 * 1000) },
         ...(people ? { employeeId: { in: people.map((e) => e.id) } } : {}),
+        ...countedCallsWhere(),
       };
       const [total, calls] = await Promise.all([
         prisma.callLog.count({ where }),

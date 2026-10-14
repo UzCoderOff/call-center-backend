@@ -95,6 +95,7 @@ async function callerCard(user, number) {
           operator: { select: { name: true } },
           coordinator: { select: { name: true } },
           lawyerAccount: { select: { name: true, username: true } },
+          extraLawyers: { select: { userId: true } },
         },
       },
       followUps: { where: { status: "open" }, orderBy: { dueAt: "asc" }, take: 1 },

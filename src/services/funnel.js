@@ -1,6 +1,7 @@
 const prisma = require("../lib/prisma");
 const { firmDate } = require("../lib/firmTime");
 const { phoneKey } = require("../lib/phone");
+const { countedCallsWhere } = require("../lib/calling");
 
 // From calls to contracts, counted by people (phone numbers), not by calls —
 // ten calls from one person are one person. For some phones (the call
@@ -31,7 +32,8 @@ const connected = (c) => !c.missed && c.durationSeconds > 0;
 // employeeIds: whose phones (null: everyone's). from/to: epoch ms.
 async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now(), db = prisma }) {
   const range = { ...(from != null ? { gte: BigInt(from) } : {}), ...(to != null ? { lte: BigInt(to) } : {}) };
-  const own = employeeIds ? { employeeId: { in: employeeIds } } : {};
+  // The phones whose calls count (src/lib/calling.js).
+  const own = { ...(employeeIds ? { employeeId: { in: employeeIds } } : {}), ...countedCallsWhere() };
   const calls = await db.callLog.findMany({
     where: { ...own, phoneKey: { not: null }, callTimestampMs: range },
     select: { phoneKey: true, callType: true, missed: true, durationSeconds: true, callTimestampMs: true },

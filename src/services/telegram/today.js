@@ -2,12 +2,13 @@ const prisma = require("../../lib/prisma");
 const env = require("../../config/env");
 const { firmNow, firmDayRange, shiftDate, isoWeekday, weekStartOf } = require("../../lib/firmTime");
 const { computeCallStats } = require("../stats");
+const { countedCallsWhere } = require("../../lib/calling");
 const m = require("../materials");
 const f = require("./format");
 const { isManagerUser, ownsCalendar, booksAppointments } = require("./prefs");
 const { canSeeFinance } = require("../../lib/finance");
 const { hasCalls } = require("../../lib/calling");
-const { workScope } = require("../../lib/clientAccess");
+const { workScope, lawyerCaseWhere } = require("../../lib/clientAccess");
 const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 
 // "My day" for one person — the morning message and the bot's "Bugun"
@@ -104,7 +105,7 @@ const DATE_WORDS = {
 // The key dates in their cases today and tomorrow (hearings, deadlines):
 // a lawyer's and a coordinator's own cases, every case for managers.
 async function caseDateLines(user, now) {
-  const caseWhere = isManagerUser(user) ? {} : user.role === "LAWYER" ? { lawyerId: user.id } : isCoordinator(user.employee) ? { coordinatorId: user.employee.id } : null;
+  const caseWhere = isManagerUser(user) ? {} : user.role === "LAWYER" ? lawyerCaseWhere(user.id) : isCoordinator(user.employee) ? { coordinatorId: user.employee.id } : null;
   if (!caseWhere) return [];
   const rows = await prisma.caseDate.findMany({
     where: { deletedAt: null, date: { gte: now.date, lte: shiftDate(now.date, 1) }, case: { ...caseWhere, client: { archivedAt: null } } },
@@ -119,6 +120,27 @@ async function caseDateLines(user, now) {
       const when = `${r.date === now.date ? "Bugun" : "Ertaga"}${r.time != null ? `, ${f.clock(r.time)}` : ""}`;
       const what = [DATE_WORDS[r.kind] || DATE_WORDS.other, r.title ? f.escapeHtml(r.title) : null].filter(Boolean).join(": ");
       return `${when} — ${what} · ${f.escapeHtml(r.case.client.name)}${r.place ? ` · ${f.escapeHtml(r.place)}` : ""}`;
+    }),
+  ];
+}
+
+// Today in their own calendar (routes/personalCalendar.js): lawyer accounts.
+const PERSONAL_WORDS = { court: "Sud", meeting: "Uchrashuv", work: "Ish", personal: "Shaxsiy", other: "" };
+async function personalLines(user, now) {
+  if (user.role !== "LAWYER" && user.role !== "BOSS") return [];
+  const rows = await prisma.personalEvent.findMany({
+    where: { ownerId: user.id, date: now.date, deletedAt: null },
+    orderBy: [{ start: "asc" }, { id: "asc" }],
+    take: 20,
+    select: { kind: true, start: true, end: true, title: true, place: true },
+  });
+  if (rows.length === 0) return [];
+  return [
+    `🗓 <b>Kalendaringizda bugun (${rows.length})</b>`,
+    ...rows.map((r) => {
+      const when = r.start == null ? "Kun boʻyi" : `${f.clock(r.start)}${r.end != null ? `–${f.clock(r.end)}` : ""}`;
+      const what = [PERSONAL_WORDS[r.kind], f.escapeHtml(r.title)].filter(Boolean).join(": ");
+      return `${when} — ${what}${r.place ? ` · ${f.escapeHtml(r.place)}` : ""}`;
     }),
   ];
 }
@@ -169,7 +191,7 @@ async function managerLines(user, now) {
     prisma.clientCase.count({ where: { consultationDate: yesterday } }),
     prisma.clientCase.count({ where: { contractDate: yesterday } }),
     prisma.payment.aggregate({ where: { date: yesterday }, _sum: { amount: true } }),
-    prisma.callLog.count({ where: { missed: true, followUp: "pending", callTimestampMs: { gte: BigInt(from), lte: BigInt(to) } } }),
+    prisma.callLog.count({ where: { missed: true, followUp: "pending", callTimestampMs: { gte: BigInt(from), lte: BigInt(to) }, ...countedCallsWhere() } }),
   ]);
   const lines = [`📊 <b>Kecha (${f.day(yesterday)})</b>`];
   lines.push(`Qoʻngʻiroqlar: ${totals.totalCalls}, javobsiz: ${totals.missedCalls}${pendingMissed > 0 ? ` (hali qayta qoʻngʻiroq qilinmagan: ${pendingMissed})` : ""}`);
@@ -192,6 +214,7 @@ async function myDay(user, { now = firmNow(), morning = false } = {}) {
     await managerLines(user, now),
     await taskLines(user, now),
     await followUpLines(user, now.date),
+    await personalLines(user, now),
     await caseDateLines(user, now),
     await appointmentLines(user, now.date, now),
     await clientLines(user, now.date),

@@ -75,7 +75,22 @@ async function aiTick() {
   }
 }
 
+// What's new after a release, and the developer's note on each release
+// (services/news.js).
+const NEWS_EVERY_MS = 2 * 60 * 1000;
+async function newsTick() {
+  try {
+    const news = require("./news");
+    await news.deployTick();
+    await news.newsTick();
+  } catch (err) {
+    console.error("[news] failed:", err.message);
+  }
+}
+
 function start() {
+  setTimeout(newsTick, 45 * 1000).unref();
+  setInterval(newsTick, NEWS_EVERY_MS).unref();
   setTimeout(aiTick, 90 * 1000).unref();
   setInterval(aiTick, AI_EVERY_MS).unref();
   setTimeout(strikesTick, 30 * 1000).unref();
@@ -84,4 +99,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick };
+module.exports = { start, strikesTick, archiveTick, aiTick, newsTick };

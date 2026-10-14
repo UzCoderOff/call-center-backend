@@ -50,7 +50,9 @@ function parseWeekStart(value) {
 
 async function loadCalendar(req, id, { manage = false } = {}) {
   const calendar = await prisma.calendar.findUnique({ where: { id: parseId(id, "calendarId") } });
-  if (!calendar || (!calendar.active && req.user.role !== "DEVELOPER")) {
+  // Switched off (not taking consultations): only its owner and the
+  // managers still open it — to switch it back on.
+  if (!calendar || (!calendar.active && !isManager(req.user) && calendar.ownerId !== req.user.id)) {
     const err = new Error("not_found");
     err.status = 404;
     throw err;
@@ -166,7 +168,8 @@ calendars.get("/", async (req, res, next) => {
   try {
     if (!canView(req.user) && !isLawyer(req.user)) return res.json([]);
     const rows = await prisma.calendar.findMany({
-      where: req.user.role === "DEVELOPER" ? {} : { active: true, ...(isLawyer(req.user) ? { ownerId: req.user.id } : {}) },
+      // Switched-off calendars: for their owner and the developer.
+      where: req.user.role === "DEVELOPER" ? {} : isLawyer(req.user) ? { ownerId: req.user.id } : { OR: [{ active: true }, { ownerId: req.user.id }] },
       include: { owner: { select: { id: true, username: true } } },
       orderBy: { name: "asc" },
     });
@@ -181,6 +184,8 @@ calendars.get("/", async (req, res, next) => {
         owner: c.owner,
         isMine: c.ownerId === req.user.id,
         canManage: manage,
+        // May switch it on/off: its owner and the managers.
+        canSwitch: manage || isManager(req.user),
         ...(manage ? { usual: cal.usualWeekOf(c), planning: await planningStatus(c.id) } : {}),
       });
     }
@@ -211,16 +216,19 @@ calendars.post("/", requireRole("DEVELOPER"), async (req, res, next) => {
 
 // Name, and the usual week every new week starts from: workDays [1-7],
 // dayStart/dayEnd (minutes), lunch { start, end } or null, slotMinutes.
+// `active`: taking consultations or not — its owner and the managers (the
+// boss only that). Switching off keeps the bookings already made.
 calendars.patch("/:id", async (req, res, next) => {
   try {
-    const calendar = await loadCalendar(req, req.params.id, { manage: true });
     const body = req.body || {};
+    const onlyActive = Object.keys(body).length === 1 && body.active !== undefined;
+    const calendar = await loadCalendar(req, req.params.id, { manage: !(onlyActive && isManager(req.user)) });
     const data = cal.normalizeUsualWeek(body, calendar);
     if (body.name !== undefined) {
       if (typeof body.name !== "string" || !body.name.trim()) throw badRequest("name is required");
       data.name = body.name.trim().slice(0, 80);
     }
-    if (body.active !== undefined && req.user.role === "DEVELOPER") data.active = Boolean(body.active);
+    if (body.active !== undefined) data.active = Boolean(body.active);
     const updated = await prisma.calendar.update({ where: { id: calendar.id }, data });
     res.json({ id: updated.id, name: updated.name, active: updated.active, slotMinutes: updated.slotMinutes, usual: cal.usualWeekOf(updated) });
   } catch (err) {
@@ -342,6 +350,8 @@ calendars.post("/:id/appointments", async (req, res, next) => {
     const manage = canManage(req.user, calendar);
     // Staff with "book" access and managers; the owner into their own.
     if (!canBook(req.user) && !manage) return res.status(403).json({ error: "forbidden" });
+    // Not taking consultations now.
+    if (!calendar.active) return res.status(409).json({ error: "calendar_off" });
 
     const b = req.body || {};
     if (!isValidDate(b.date)) throw badRequest("invalid date");

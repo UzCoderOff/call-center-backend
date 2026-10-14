@@ -5,8 +5,9 @@ const { isManager, isLawyer } = require("../middleware/auth");
 // (2026-09-30, extended 2026-10-02 — a case changes hands at the contract):
 //
 //   managers (developer, head of the firm)  everything
-//   lawyer       the cases assigned to them — all of each case (money only
-//                with the Moliya switch, src/lib/finance.js)
+//   lawyer       the cases assigned to them — as the main lawyer or one of
+//                the others on it (CaseExtraLawyer) — all of each case
+//                (money only with the Moliya switch, src/lib/finance.js)
 //   coordinator  the cases assigned to them after the contract — all of each
 //                case, its money too: payments, schedule, what's overdue
 //   operator     (call center) their clients while it's a consultation —
@@ -31,11 +32,19 @@ const LEVELS = ["manager", "coordinator", "lawyer", "operator", "result"];
 
 const employeeIdOf = (user) => user?.employee?.id ?? null;
 
+// A lawyer's cases (a case `where`): the main lawyer, or one of the others
+// working on it. Never spread next to another OR.
+const lawyerCaseWhere = (userId) => ({ OR: [{ lawyerId: userId }, { extraLawyers: { some: { userId } } }] });
+// The same for one case; `kase` needs lawyerId and extraLawyers ({ userId }).
+const isCaseLawyer = (kase, userId) => kase.lawyerId === userId || (kase.extraLawyers || []).some((l) => l.userId === userId);
+// What to select on a case for isCaseLawyer.
+const EXTRA_LAWYERS = { select: { userId: true } };
+
 // A Prisma `where` for the clients this person may open ({} = all) —
 // including the ones they only see as a result.
 function clientScope(user) {
   if (isManager(user)) return {};
-  if (isLawyer(user)) return { cases: { some: { lawyerId: user.id } } };
+  if (isLawyer(user)) return { cases: { some: lawyerCaseWhere(user.id) } };
   const me = employeeIdOf(user);
   if (!me) return { id: -1 };
   return {
@@ -52,7 +61,7 @@ function clientScope(user) {
 // client list) — not the ones they only see as a past result.
 function workScope(user) {
   if (isManager(user)) return {};
-  if (isLawyer(user)) return { cases: { some: { lawyerId: user.id } } };
+  if (isLawyer(user)) return { cases: { some: lawyerCaseWhere(user.id) } };
   const me = employeeIdOf(user);
   if (!me) return { id: -1 };
   return {
@@ -67,18 +76,18 @@ function workScope(user) {
 // Their own cases, for case-level filters ({} = all).
 function ownCaseWhere(user) {
   if (isManager(user)) return {};
-  if (isLawyer(user)) return { lawyerId: user.id };
+  if (isLawyer(user)) return lawyerCaseWhere(user.id);
   const me = employeeIdOf(user) ?? -1;
   return { OR: [{ operatorId: me }, { coordinatorId: me }] };
 }
 
 // This person's role on one case: "manager" | "lawyer" | "coordinator" |
 // "operator" | "result" | null. `kase` needs status, operatorId,
-// coordinatorId, lawyerId; `client` (createdById, and whether any of its
+// coordinatorId, lawyerId, extraLawyers; `client` (createdById, and whether any of its
 // cases has an operator) for the "added it, nobody's operator yet" rule.
 function caseRole(user, kase, client = null) {
   if (isManager(user)) return "manager";
-  if (isLawyer(user)) return kase.lawyerId === user.id ? "lawyer" : null;
+  if (isLawyer(user)) return isCaseLawyer(kase, user.id) ? "lawyer" : null;
   const me = employeeIdOf(user);
   if (!me) return null;
   if (kase.coordinatorId === me) return "coordinator";
@@ -105,7 +114,7 @@ function clientLevel(user, client) {
   return { level, roles };
 }
 
-const ACCESS_SELECT = { id: true, createdById: true, archivedAt: true, cases: { select: { id: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true } } };
+const ACCESS_SELECT = { id: true, createdById: true, archivedAt: true, cases: { select: { id: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS } } };
 
 function notFound() {
   const err = new Error("not_found");
@@ -195,6 +204,9 @@ async function clientIndexFor(user, keys, db = prisma) {
 
 module.exports = {
   CONTRACT_STATUSES,
+  lawyerCaseWhere,
+  isCaseLawyer,
+  EXTRA_LAWYERS,
   isContractPhase,
   clientScope,
   workScope,

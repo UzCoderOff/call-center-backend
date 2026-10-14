@@ -1,4 +1,5 @@
 const express = require("express");
+const { collectsCalls } = require("../lib/calling");
 const prisma = require("../lib/prisma");
 const env = require("../config/env");
 const { startSession, endSession, publicMe } = require("../lib/session");
@@ -93,7 +94,8 @@ router.get("/config", requireDevice, async (req, res, next) => {
       user: publicMe(req.user),
       // The one switch that decides whether this phone asks for call-log /
       // storage permissions and runs background sync at all.
-      collectCalls: Boolean(employee?.active && employee.collectCalls),
+      // Only the jobs whose calls matter (src/lib/calling.js).
+      collectCalls: Boolean(employee?.active && collectsCalls(employee)),
       syncIntervalMinutes: SYNC_INTERVAL_MINUTES,
       calling: await callingFor(req.device, employee),
       latestApp: env.appLatest.versionCode ? env.appLatest : null,
