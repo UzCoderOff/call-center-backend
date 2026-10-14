@@ -25,7 +25,7 @@ const env = require("../config/env");
 //   /api/clients                 list + search; create
 //   /api/clients/:id             one client with everything about them
 //   /api/clients/:id/cases       add a case        /api/client-cases/:id  change one
-//   /api/clients/:id/payments    add a payment     /api/client-payments/:id  delete
+//   /api/clients/:id/payments    add a payment     /api/client-payments/:id  correct, delete
 //   /api/clients/:id/notes       add a note        /api/client-notes/:id  delete
 //   /api/clients/:id/links       connect clients   /api/client-links/:id  disconnect
 //   /api/clients/targets         operators' monthly consultations/contracts
@@ -555,6 +555,12 @@ const CASE_INCLUDE = {
   installments: true,
   stages: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
   dates: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { time: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
+  // Its consultations' summaries ("suhbat yakuni", services/consultSummary.js).
+  consultations: {
+    where: { summaryAt: { not: null } },
+    orderBy: [{ date: "desc" }, { start: "desc" }],
+    select: { id: true, date: true, start: true, summary: true, summaryAt: true, summaryById: true, summaryBy: PERSON, calendar: { select: { id: true, name: true, ownerId: true } } },
+  },
 };
 
 // What this person may do on a case, for the portal's buttons (the server
@@ -665,7 +671,7 @@ clients.get("/:id", async (req, res, next) => {
         },
         orderBy: [{ date: "desc" }, { start: "desc" }],
         take: 50,
-        include: { calendar: { select: { id: true, name: true } }, bookedBy: PERSON },
+        include: { calendar: { select: { id: true, name: true, ownerId: true } }, bookedBy: PERSON },
       }),
     ]);
 
@@ -715,7 +721,9 @@ clients.get("/:id", async (req, res, next) => {
             ...linksTo.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "to", other: shownLink(l.from) })),
           ],
       calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
-      appointments,
+      // A consultation's summary only with its case (someone on another of
+      // the client's cases sees that it happened, not what was said).
+      appointments: appointments.map((a) => (manager || a.calendar?.ownerId === req.user.id || !a.caseId || visibleIds.has(a.caseId) ? a : { ...a, summary: null })),
       contacts: contacts.map(({ phoneKey: _k, ...c }) => c),
       followUps: [...openFollowUps, ...closedFollowUps].map(({ client: _c, ...f }) => f),
       files: files.filter((f) => caseVisible(f.caseId)).map(({ path: _p, ...f }) => f),
@@ -911,15 +919,17 @@ cases.use(requireAuth, gate);
 //   operator     the consultation: what it's about, its status up to the
 //                contract, its dates, themselves as operator, its lawyer
 const CASE_FIELDS = {
-  lawyer: ["status", "legalStage", "number", "matter", "court", "closedDate", "lostReason", "lostNote"],
-  coordinator: ["number", "court", "legalStage"],
-  operator: ["matter", "status", "startDate", "consultationDate", "operatorId", "lawyerId", "lawyer", "number", "lostReason", "lostNote"],
+  lawyer: ["status", "legalStage", "number", "matter", "details", "court", "closedDate", "lostReason", "lostNote"],
+  coordinator: ["number", "court", "legalStage", "details"],
+  operator: ["matter", "details", "status", "startDate", "consultationDate", "operatorId", "lawyerId", "lawyer", "number", "lostReason", "lostNote"],
 };
 // An operator moves a consultation along — up to the contract (or "didn't
 // continue"); finishing a contract is the lawyer's and the managers'.
 const OPERATOR_STATUSES = ["consultation", "call_again", "contract", "declined"];
-// Changes shown on the timeline field by field (money is kept out of it).
-const TRACKED = ["matter", "number", "court", "startDate", "consultationDate", "contractDate", "closedDate"];
+// Changes shown on the timeline field by field (money is kept out of it;
+// long text shortened).
+const TRACKED = ["matter", "details", "number", "court", "startDate", "consultationDate", "contractDate", "closedDate"];
+const shortened = (v) => (typeof v === "string" && v.length > 120 ? `${v.slice(0, 117)}…` : v);
 
 async function employeeName(tx, id) {
   if (id == null) return null;
@@ -983,7 +993,7 @@ cases.patch("/:id", async (req, res, next) => {
           await tx.caseStage.updateMany({ where: { caseId: id, deletedAt: null }, data: { deletedAt: new Date() } });
           await log("stage_row", "", { action: "clear" });
         }
-        c = await history.syncCaseStage(tx, id);
+        c = await history.syncCaseStage(tx, id, today());
       }
       for (const [field, key] of [
         ["operatorId", "operator"],
@@ -995,7 +1005,7 @@ cases.patch("/:id", async (req, res, next) => {
       }
       if (data.lawyerId !== undefined && data.lawyerId !== current.lawyerId) await log("assign", "", { role: "lawyer", from: current.lawyer || null, to: data.lawyer || null });
       if (data.status === "declined" && current.status !== "declined") await log("lost", "", { reason: data.lostReason ?? current.lostReason ?? null, note: data.lostNote ?? null });
-      const changes = TRACKED.filter((f) => data[f] !== undefined && (data[f] ?? null) !== (current[f] ?? null)).map((f) => ({ field: f, from: current[f] ?? null, to: data[f] ?? null }));
+      const changes = TRACKED.filter((f) => data[f] !== undefined && (data[f] ?? null) !== (current[f] ?? null)).map((f) => ({ field: f, from: shortened(current[f] ?? null), to: shortened(data[f] ?? null) }));
       if (changes.length) await log("case_edit", "", { changes });
       if (data.contractAmount !== undefined && data.contractAmount !== current.contractAmount) {
         await audit(tx, req, "case.amount", "case", id, { clientId: c.clientId, from: current.contractAmount, to: data.contractAmount });
@@ -1089,6 +1099,59 @@ clients.post("/:id/payments", async (req, res, next) => {
 
 const payments = express.Router();
 payments.use(requireAuth, gate, noLawyers);
+
+// Correcting a payment ({ amount?, date?, method?, kind?, note?, caseId? }):
+// managers any time (a contract payment only with Moliya); whoever recorded
+// it on the day they recorded it (firm time), while they may still record it
+// — a consultation fee: anyone working with the client; a contract payment:
+// Moliya, or the case's coordinator. Later, a mistake goes to a manager (the
+// cash may already be handed over). The audit log keeps the before and
+// after.
+payments.patch("/:id", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    const payment = await prisma.payment.findUnique({ where: { id } });
+    if (!payment) return res.status(404).json({ error: "not_found" });
+    const { roles } = await requireClientAccess(req.user, payment.clientId, { write: true });
+    const manager = isManager(req.user);
+    const coordinatorOf = (caseId) => caseId != null && roles.get(caseId) === "coordinator";
+    const mayRecordMoney = (caseId) => canSeeFinance(req.user) || coordinatorOf(caseId);
+    // Who may touch this one at all.
+    const mine = payment.recordedById === req.user.id;
+    if (!isConsultation(payment) && !mayRecordMoney(payment.caseId)) return res.status(404).json({ error: "not_found" });
+    if (!manager && !mine && !(!isConsultation(payment) && coordinatorOf(payment.caseId))) return res.status(403).json({ error: "forbidden" });
+    if (!manager && firmNow(payment.createdAt).date !== today()) return res.status(403).json({ error: "correction_window_passed" });
+
+    const b = req.body || {};
+    const data = cl.normalizePaymentChange(b);
+    if (b.caseId !== undefined) {
+      if (b.caseId === null || b.caseId === "") data.caseId = null;
+      else {
+        const k = await prisma.clientCase.findFirst({ where: { id: parseId(b.caseId, "caseId"), clientId: payment.clientId }, select: { id: true } });
+        if (!k || (!manager && (!roles.get(k.id) || roles.get(k.id) === "result"))) throw badRequest("case is not this client's");
+        data.caseId = k.id;
+      }
+    }
+    const after = { ...payment, ...data };
+    // Becoming (or moving) a contract payment needs the right to record one there.
+    if (!isConsultation(after) && !mayRecordMoney(after.caseId)) throw financeForbidden();
+    if (Object.keys(data).length === 0) throw badRequest("nothing to change");
+    // No longer a consultation fee: it no longer pays for an appointment.
+    if (isConsultation(payment) && !isConsultation(after)) data.appointmentId = null;
+    let updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.payment.update({ where: { id }, data: { ...data, editedAt: new Date() } });
+      await audit(tx, req, "payment.edit", "payment", id, { clientId: payment.clientId, before: payment, after: u });
+      await tx.client.update({ where: { id: payment.clientId }, data: { updatedAt: new Date() } });
+      return u;
+    });
+    if ((isConsultation(updated) || isConsultation(payment)) && (await linkConsultationFees(prisma, payment.clientId)) > 0) {
+      updated = await prisma.payment.findUnique({ where: { id } });
+    }
+    res.json(updated);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
 // Removing a payment: managers — a contract payment only with Moliya.
 payments.delete("/:id", managersOnly, async (req, res, next) => {
   try {
@@ -1387,7 +1450,7 @@ auditLog.get("/", async (req, res, next) => {
 // case or payment belonged to.
 function auditClientId(r) {
   if (r.entity === "client") return r.entityId;
-  return r.detail?.case?.clientId ?? r.detail?.payment?.clientId ?? null;
+  return r.detail?.case?.clientId ?? r.detail?.payment?.clientId ?? r.detail?.clientId ?? null;
 }
 
 // A short, safe description of what an entry changed (not the whole copy).
@@ -1397,6 +1460,10 @@ function auditSummary(r, money = true) {
   if (r.action === "client.merge") return { merged: d.merged?.name || null };
   if (r.action === "case.delete") return { matter: d.case?.matter || null, payments: d.case?.payments?.length || 0 };
   if (r.action === "payment.delete") return { amount: money || d.payment?.kind === CONSULTATION ? d.payment?.amount ?? null : null };
+  if (r.action === "payment.edit") {
+    const shown = money || (d.before?.kind === CONSULTATION && d.after?.kind === CONSULTATION);
+    return { amount: shown ? d.after?.amount ?? null : null };
+  }
   if (r.action === "clients.bulk") return { clients: d.clients, cases: d.cases, kind: d.kind, name: d.name ?? null };
   if (r.entity === "material") return { title: d.title ?? null, file: d.name ?? null };
   return {};

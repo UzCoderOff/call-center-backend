@@ -19,7 +19,8 @@ const { canUseClients } = require("./clients");
 //   GET    /api/client-cases?view=unassigned  managers: contracts without a
 //                                             coordinator or a lawyer
 //   GET    /api/client-cases/upcoming?days=   key dates coming up in my cases
-//   POST   /api/client-cases/:id/stages       { stage, date, court?, note? }
+//   POST   /api/client-cases/:id/stages       { stage, date, court?, note? } — a
+//                                             date ahead: a planned stage
 //   PATCH  /api/client-stages/:id             correct a stage row
 //   DELETE /api/client-stages/:id             remove it (kept, hidden)
 //   POST   /api/client-cases/:id/dates        { kind, date, time?, title?, place?, note? }
@@ -109,7 +110,7 @@ caseItems.get("/", async (req, res, next) => {
         payments: { select: { amount: true, kind: true, date: true } },
         installments: { select: { dueDate: true, amount: true } },
         dates: { where: { deletedAt: null, date: { gte: now } }, orderBy: [{ date: "asc" }, { time: "asc" }], take: 1, select: { id: true, kind: true, date: true, time: true, title: true, place: true } },
-        stages: { where: { deletedAt: null }, orderBy: [{ date: "desc" }, { id: "desc" }], take: 1, select: { stage: true, date: true } },
+        stages: { where: { deletedAt: null }, orderBy: [{ date: "desc" }, { id: "desc" }], select: { stage: true, date: true } },
       },
     });
     const out = rows.map((k) => {
@@ -120,7 +121,9 @@ caseItems.get("/", async (req, res, next) => {
         number: k.number,
         status: k.status,
         legalStage: k.legalStage,
-        stageSince: k.stages[0]?.date ?? null,
+        stageSince: k.stages.find((r) => r.date <= now)?.date ?? null,
+        // The next planned stage, if one is set (a date still ahead).
+        plannedStage: k.stages.filter((r) => r.date > now).at(-1) ?? null,
         court: k.court,
         contractDate: k.contractDate,
         lawyer: k.lawyer,
@@ -149,19 +152,31 @@ caseItems.get("/", async (req, res, next) => {
   }
 });
 
-// Key dates coming up (today on) in the cases this person works on.
+// Key dates coming up (today on) in the cases this person works on — and
+// the stages planned in that time (kind "stage", with `stage`).
 caseItems.get("/upcoming", async (req, res, next) => {
   try {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 14));
     const from = today();
     const caseWhere = isManager(req.user) ? {} : isLawyer(req.user) ? { lawyerId: req.user.id } : { coordinatorId: req.user.employee?.id ?? -1 };
-    const rows = await prisma.caseDate.findMany({
-      where: { deletedAt: null, date: { gte: from, lte: shiftDate(from, days) }, case: { ...caseWhere, client: { archivedAt: null } } },
-      orderBy: [{ date: "asc" }, { time: "asc" }],
-      take: 200,
-      select: { id: true, kind: true, date: true, time: true, title: true, place: true, case: { select: { id: true, matter: true, client: { select: { id: true, name: true } } } } },
-    });
-    res.json(rows);
+    const window = { gte: from, lte: shiftDate(from, days) };
+    const CASE = { select: { id: true, matter: true, client: { select: { id: true, name: true } } } };
+    const [rows, planned] = await Promise.all([
+      prisma.caseDate.findMany({
+        where: { deletedAt: null, date: window, case: { ...caseWhere, client: { archivedAt: null } } },
+        orderBy: [{ date: "asc" }, { time: "asc" }],
+        take: 200,
+        select: { id: true, kind: true, date: true, time: true, title: true, place: true, case: CASE },
+      }),
+      prisma.caseStage.findMany({
+        where: { deletedAt: null, date: { ...window, gt: from }, case: { ...caseWhere, client: { archivedAt: null } } },
+        orderBy: { date: "asc" },
+        take: 100,
+        select: { id: true, stage: true, date: true, court: true, case: CASE },
+      }),
+    ]);
+    const stages = planned.map((r) => ({ id: `s${r.id}`, kind: "stage", stage: r.stage, date: r.date, time: null, title: null, place: r.court, case: r.case }));
+    res.json([...rows, ...stages].sort((a, b) => (a.date === b.date ? (a.time ?? -1) - (b.time ?? -1) : a.date < b.date ? -1 : 1)));
   } catch (err) {
     sendError(err, res, next);
   }
@@ -174,8 +189,8 @@ caseItems.post("/:id/stages", async (req, res, next) => {
     const data = history.normalizeStage(req.body, {}, today());
     const row = await prisma.$transaction(async (tx) => {
       const created = await tx.caseStage.create({ data: { ...data, caseId: kase.id, createdById: req.user.id } });
-      await history.syncCaseStage(tx, kase.id);
-      await logEvent(tx, req, kase, "stage_row", { action: "add", stage: created.stage, date: created.date, court: created.court ?? null });
+      await history.syncCaseStage(tx, kase.id, today());
+      await logEvent(tx, req, kase, "stage_row", { action: created.date > today() ? "plan" : "add", stage: created.stage, date: created.date, court: created.court ?? null });
       await touch(tx, kase.clientId);
       return created;
     });
@@ -201,7 +216,7 @@ stages.patch("/:id", async (req, res, next) => {
     const data = history.normalizeStage(req.body, row, today());
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.caseStage.update({ where: { id: row.id }, data });
-      await history.syncCaseStage(tx, kase.id);
+      await history.syncCaseStage(tx, kase.id, today());
       await logEvent(tx, req, kase, "stage_row", { action: "edit", stage: u.stage, date: u.date, before: { stage: row.stage, date: row.date } });
       await tx.auditLog.create({ data: { userId: req.user.id, action: "stage.edit", entity: "case", entityId: kase.id, detail: { clientId: kase.clientId, before: row, after: u } } });
       await touch(tx, kase.clientId);
@@ -218,7 +233,7 @@ stages.delete("/:id", async (req, res, next) => {
     const { row, kase } = await stageRow(req);
     await prisma.$transaction(async (tx) => {
       await tx.caseStage.update({ where: { id: row.id }, data: { deletedAt: new Date() } });
-      await history.syncCaseStage(tx, kase.id);
+      await history.syncCaseStage(tx, kase.id, today());
       await logEvent(tx, req, kase, "stage_row", { action: "remove", stage: row.stage, date: row.date });
       await tx.auditLog.create({ data: { userId: req.user.id, action: "stage.delete", entity: "case", entityId: kase.id, detail: { clientId: kase.clientId, row } } });
       await touch(tx, kase.clientId);

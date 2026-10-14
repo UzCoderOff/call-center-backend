@@ -13,10 +13,10 @@ test("each person gets the notification kinds that fit their job", () => {
   assert.deepEqual(applicableKinds(clerk), ["digest", "reportReminder", "materials", "tasks", "targets", "chat"]);
 
   const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
-  assert.deepEqual(applicableKinds(lawyer), ["appointments", "digest", "materials", "planning", "tasks", "cases", "followUps", "chat"]);
+  assert.deepEqual(applicableKinds(lawyer), ["appointments", "digest", "materials", "planning", "summaries", "tasks", "cases", "followUps", "chat"]);
 
   const boss = { role: "BOSS", employee: null, calendar: null };
-  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "followUps", "strikes", "chat"]);
+  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "followUps", "strikes", "aiReports", "chat"]);
 
   // A monitored phone that isn't the call center's: no call-back alerts.
   const coordinator = { role: "EMPLOYEE", employee: { job: "coordinator", collectCalls: true, calendarAccess: "none" }, calendar: null };
@@ -25,12 +25,13 @@ test("each person gets the notification kinds that fit their job", () => {
 
 test("everything is on until switched off, and unrelated saved keys are ignored", () => {
   const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
-  assert.deepEqual(effectivePrefs(lawyer, null), { appointments: true, digest: true, materials: true, planning: true, tasks: true, cases: true, followUps: true, chat: true });
+  assert.deepEqual(effectivePrefs(lawyer, null), { appointments: true, digest: true, materials: true, planning: true, summaries: true, tasks: true, cases: true, followUps: true, chat: true });
   assert.deepEqual(effectivePrefs(lawyer, { digest: false, missedCalls: false }), {
     appointments: true,
     digest: false,
     materials: true,
     planning: true,
+    summaries: true,
     tasks: true,
     cases: true,
     followUps: true,

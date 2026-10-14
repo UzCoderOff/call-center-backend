@@ -86,7 +86,20 @@ async function missedLines(user, now) {
   return count > 0 ? [`☎️ Qayta qoʻngʻiroq kutayotgan javobsiz qoʻngʻiroqlar: <b>${count}</b> ta`] : [];
 }
 
-const DATE_WORDS = { hearing: "Sud majlisi", summons: "Chaqiruv", deadline: "Muddat", meeting: "Uchrashuv", other: "Muhim sana" };
+const DATE_WORDS = {
+  hearing: "Sud majlisi",
+  investigative_action: "Tergov harakati",
+  interrogation: "Soʻroq",
+  confrontation: "Yuzlashtirish",
+  suspect_questioning: "Gumonlanuvchi sifatida soʻroq",
+  accused_questioning: "Ayblanuvchi sifatida soʻroq",
+  charge_announced: "Ayb eʼlon qilish",
+  case_review: "Ish bilan tanishish",
+  summons: "Chaqiruv",
+  deadline: "Muddat",
+  meeting: "Uchrashuv",
+  other: "Muhim sana",
+};
 
 // The key dates in their cases today and tomorrow (hearings, deadlines):
 // a lawyer's and a coordinator's own cases, every case for managers.

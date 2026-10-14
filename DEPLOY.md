@@ -43,7 +43,74 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### Next release: Ledger AI (boss and developer)
+### This release (2026-10-14): the boss's feedback — consultation summaries, planned stages, payment corrections; open chats; Ledger AI does things; Claude
+
+- **Case key dates**: the investigation's steps are kinds of their own (tergov
+  harakati, soʻroq, yuzlashtirish, gumonlanuvchi / ayblanuvchi sifatida jalb
+  qilish va soʻroq, ayb eʼlon qilish, ish bilan tanishish), grouped Sud /
+  Tergov / Boshqa in the form.
+- **Planned stages**: a stage can be dated ahead (up to 3 years). It shows as
+  "rejada", is listed with the coming dates, and becomes the case's stage on
+  its day (hourly job, with a timeline entry).
+- **Payments**: each payment can be corrected (pencil): managers any time
+  (contract money with Moliya); whoever recorded it only on the same day.
+  The audit log keeps before/after. The case's money shows contract / paid /
+  left as three numbers.
+- **"Ishning mohiyati va tafsilotlari"**: a long text on each case, shown at
+  the top of the case on the client page.
+- **Consultation summary ("suhbat yakuni")**: the specialist who held the
+  consultation (the calendar's owner; the boss and developer may too) writes
+  what it was about, the advice, the conclusion — and whether the client is a
+  potential one. Potential + "thinking it over / call back / meet again"
+  puts a dated next step on the operator who brought the client (their home,
+  Telegram, the app remind them); "signed" makes the case a contract; not
+  potential closes it as "didn't continue" with the reason. Entry points: the
+  calendar appointment, the lawyer's home card, the client page banner,
+  Telegram (`/consultations/:id`). Reminders: 30 minutes after it ends and at
+  18:00 (new Telegram kind "summaries"). **Strike rule** (Sozlamalar → Suhbat
+  yakuni, managers): off until switched on; summaries not written by the end
+  of the day (or N hours) count per month; the managers hear when over the
+  limit. Lists only look at consultations from the day this is released.
+- **Chat**: anyone can write to anyone privately; the developer reads every
+  private chat (eye icon → "Barcha shaxsiy yozishmalar", read only) and every
+  private chat says so. The boss makes groups too (the one who made it, and
+  the developer, change it). Tap a chat's name: who's in it.
+- **Ledger AI**:
+  - does things after a yes: reminders, tasks, a client's next step, monthly
+    targets, client notes (`src/services/ai/actions.js`). Each one is a card
+    in the chat — "Tasdiqlash / Bekor qilish" — or a spoken/typed "ha";
+  - reads the daily reports (who sent, who didn't, what they wrote);
+  - new analysis lookups: week-by-week trends with each person's trajectory,
+    the client radar (late next steps, potential clients not signed, quiet
+    contracts, overdue money), why consultations are lost.
+  - Voice is NOT in Ledger: the models are being tried first on the PC
+    (`call-center/voice-lab`).
+- **Claude (Anthropic) in Ledger** — Sozlamalar → Claude (developer). The key
+  comes from the Console organization the Max plan's monthly API credit goes
+  to (separate from the plan's weekly limit). Everything is OFF until switched
+  on there:
+  - the Ledger AI chat can answer with Claude (switch back any time);
+  - weekly report (Monday 8:00) and monthly lost-client analysis (1st,
+    9:00) into the managers' Ledger AI chat and Telegram (kind "aiReports");
+  - AI suggestions about clients (Monday), each for the person on that
+    client — a card on their home page (`AiSuggestion`);
+  - "AI" on a client's file (PDF, picture, .docx, .txt): summary, case
+    details, dates, stage, risks — each added with one tap
+    (`ClientFile.aiAnalysis` keeps it);
+  - the consultation summary drafted from the lawyer's rough notes.
+  - A monthly cap in USD (default 80); cost per feature is shown there.
+  - Claude Opus/Sonnet calls carry `fallbacks: "default"` (beta
+    `server-side-fallback-2026-07-01`). New package: `@anthropic-ai/sdk`.
+- Migrations — only adding:
+  - `20261014000000_case_details_summaries`: `ClientCase.details`,
+    `Payment.editedAt`, `Appointment.caseId/summary/summaryAt/summaryById`,
+    `Message.data`, table `SummaryStrike`.
+  - `20261014120000_ai_claude`: `ClientFile.aiAnalysis/aiAnalyzedAt`, table
+    `AiSuggestion`.
+- **No `.env` change, no app update.** The portal goes out right after (it
+  needs this backend).
+
+### Earlier release: Ledger AI (boss and developer)
 
 - **Chat → Ledger AI** (pinned under "Hamma", only BOSS and DEVELOPER):
   questions in Uzbek or Russian about calls, missed calls not called back,

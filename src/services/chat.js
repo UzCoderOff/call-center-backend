@@ -2,15 +2,18 @@ const prisma = require("../lib/prisma");
 const { isManager } = require("../middleware/auth");
 const { canAccessClient, clientScope } = require("../lib/clientAccess");
 
-// Staff chat (src/routes/chat.js). The firm's rules (2026-10-03):
+// Staff chat (src/routes/chat.js). The firm's rules (2026-10-03, changed
+// 2026-10-14):
 //
 //   everyone  one chat with every active account in it
-//   group     only the developer makes them and picks who's in
+//   group     the boss and the developer make them and pick who's in; the
+//             one who made it (and the developer) changes it. Everyone in
+//             it sees who's in it.
 //   client    a chat on each client, for whoever can see that client
 //             (src/lib/clientAccess.js) — checked on every read and write
-//   direct    the boss or the developer can write to anyone privately (and
-//             they can answer); nobody else starts private chats — staff
-//             use Telegram for that
+//   direct    anyone can write to anyone privately. They're work chats: the
+//             developer can read every one (not write in it), and the chat
+//             itself says so
 //   assistant "Ledger AI" — the boss's and the developer's own chat with the
 //             assistant (services/ai/assistant.js); only they see it
 //
@@ -20,7 +23,10 @@ const { canAccessClient, clientScope } = require("../lib/clientAccess");
 const PERSON = { select: { id: true, username: true, name: true, role: true, active: true, employee: { select: { name: true, active: true } } } };
 const personName = (u) => (u ? u.employee?.name || u.name || u.username : null);
 const isDeveloper = (user) => user?.role === "DEVELOPER";
-const canStartDirect = (user) => isManager(user); // BOSS, DEVELOPER
+// Anyone may start a private chat (2026-10-14).
+const canStartDirect = (user) => activeUser(user);
+// Who makes groups: the boss and the developer.
+const canMakeGroups = (user) => isManager(user);
 
 // While someone has the chat open (their read mark moved this recently),
 // new messages don't buzz their phone.
@@ -40,13 +46,18 @@ async function access(user, conv) {
     case "everyone":
       return { read: true, write: true, manage: false };
     case "group": {
-      const member = isDeveloper(user) || (await isMember(conv.id, user.id));
-      return { read: member, write: member, manage: isDeveloper(user) };
+      const member = await isMember(conv.id, user.id);
+      const developer = isDeveloper(user);
+      return { read: member || developer, write: member || developer, manage: developer || (member && conv.createdById === user.id), member };
     }
-    case "direct":
+    case "direct": {
+      // The developer reads every private chat — and writes only in their own.
+      const member = await isMember(conv.id, user.id);
+      return { read: member || isDeveloper(user), write: member, manage: false, member };
+    }
     case "assistant": {
       const member = await isMember(conv.id, user.id);
-      return { read: member, write: member, manage: false };
+      return { read: member, write: member, manage: false, member };
     }
     case "client": {
       const ok = await canAccessClient(user, conv.clientId);
@@ -90,8 +101,10 @@ async function displayTitle(conv, viewer) {
     return client?.name || "Mijoz";
   }
   if (conv.kind === "direct") {
-    const other = await prisma.conversationMember.findFirst({ where: { conversationId: conv.id, NOT: { userId: viewer.id } }, include: { user: PERSON } });
-    return personName(other?.user) || "Shaxsiy";
+    const people = await prisma.conversationMember.findMany({ where: { conversationId: conv.id }, include: { user: PERSON }, orderBy: { id: "asc" } });
+    // Someone else's private chat (the developer looking): both names.
+    if (!people.some((m) => m.userId === viewer.id)) return people.map((m) => personName(m.user)).join(" ↔ ") || "Shaxsiy";
+    return personName(people.find((m) => m.userId !== viewer.id)?.user) || "Shaxsiy";
   }
   return "Chat";
 }
@@ -106,7 +119,8 @@ async function ensureAssistant(user) {
 }
 
 // The conversations this person sees, newest first (the Everyone chat on
-// top, then Ledger AI).
+// top, then Ledger AI). Their own — the developer's oversight of everyone
+// else's private chats is a list of its own (overview()).
 async function listFor(user) {
   await ensureEveryone();
   if (hasAssistant(user)) await ensureAssistant(user);
@@ -136,7 +150,8 @@ async function listFor(user) {
       clientId: conv.clientId,
       lastMessage: last ? { id: last.id, text: last.text, eventTitle: last.eventTitle, author: personName(last.author), mine: last.authorId === user.id, createdAt: last.createdAt } : null,
       lastMessageAt: conv.lastMessageAt,
-      unread: await unreadCount(conv.id, user, mark),
+      // A group the developer looks after but isn't in: nothing "unread".
+      unread: conv.kind === "group" && !mark ? 0 : await unreadCount(conv.id, user, mark),
       muted: Boolean(mark?.muted),
     });
   }
@@ -147,6 +162,32 @@ async function listFor(user) {
     if (pa !== pb) return pa - pb;
     return (b.lastMessageAt?.getTime?.() ?? 0) - (a.lastMessageAt?.getTime?.() ?? 0);
   });
+}
+
+// The developer: every private chat between other people, newest first —
+// who, how many messages, the last one.
+async function overview(user) {
+  if (!isDeveloper(user)) return [];
+  const rows = await prisma.conversation.findMany({
+    where: { kind: "direct", members: { none: { userId: user.id } }, lastMessageAt: { not: null } },
+    orderBy: { lastMessageAt: "desc" },
+    take: 300,
+    include: { members: { include: { user: PERSON } }, _count: { select: { messages: { where: { deletedAt: null } } } } },
+  });
+  const out = [];
+  for (const conv of rows) {
+    const last = await prisma.message.findFirst({ where: { conversationId: conv.id, deletedAt: null }, orderBy: { id: "desc" }, include: { author: PERSON } });
+    out.push({
+      id: conv.id,
+      kind: conv.kind,
+      title: conv.members.map((m) => personName(m.user)).join(" ↔ "),
+      people: conv.members.map((m) => ({ id: m.userId, name: personName(m.user) })),
+      messages: conv._count.messages,
+      lastMessage: last ? { id: last.id, text: last.text, eventTitle: last.eventTitle, author: personName(last.author), createdAt: last.createdAt } : null,
+      lastMessageAt: conv.lastMessageAt,
+    });
+  }
+  return out;
 }
 
 // Messages from others since their read mark — for a newcomer, only since
@@ -201,6 +242,8 @@ function publicMessage(m, viewer) {
     text: m.deletedAt ? "" : m.text,
     deleted: Boolean(m.deletedAt),
     event: m.eventAt && !m.deletedAt ? { title: m.eventTitle, at: m.eventAt } : null,
+    // Ledger AI: something it offers to do (services/ai/actions.js).
+    action: m.data?.action && !m.deletedAt ? { summary: m.data.action.summary, status: m.data.action.status, error: m.data.action.error ?? null } : null,
     author: m.author ? { id: m.author.id, name: personName(m.author), role: m.author.role } : null,
     mine: m.authorId === viewer.id,
     createdAt: m.createdAt,
@@ -283,6 +326,8 @@ module.exports = {
   personName,
   isDeveloper,
   canStartDirect,
+  canMakeGroups,
+  overview,
   activeUser,
   ensureEveryone,
   ensureAssistant,

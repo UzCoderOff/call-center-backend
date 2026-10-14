@@ -20,6 +20,7 @@
     "backup:restore": "node scripts/offsite-restore.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@prisma/client": "^6.19.3",
     "bcryptjs": "3.0.3",
     "cookie-parser": "1.4.7",

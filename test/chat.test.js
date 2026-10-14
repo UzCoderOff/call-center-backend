@@ -12,6 +12,7 @@ test("a chat message as the portal sees it", () => {
     text: "Salom",
     deleted: false,
     event: null,
+    action: null,
     author: { id: 3, name: "Aziz Rahimov", role: "EMPLOYEE" },
     mine: false,
     createdAt: new Date(0),

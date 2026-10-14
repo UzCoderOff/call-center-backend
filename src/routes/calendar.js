@@ -36,7 +36,7 @@ const canManage = (user, calendar) => user.role === "DEVELOPER" || calendar.owne
 
 const APPOINTMENT_INCLUDE = {
   bookedBy: { select: { id: true, username: true, employee: { select: { name: true } } } },
-  calendar: { select: { id: true, name: true } },
+  calendar: { select: { id: true, name: true, ownerId: true } },
   // The consultation fee paid for it, if any (visible to everyone who sees
   // the appointment — src/lib/finance.js).
   payments: { where: { kind: "consultation" }, select: { id: true, amount: true, method: true, date: true } },
@@ -100,7 +100,16 @@ function busyOnly(a) {
 async function shownAppointments(user, list, { manage = false } = {}) {
   if (manage || isManager(user)) return list;
   const mine = await accessibleClientIds(user, list.map((a) => a.clientId));
-  return list.map((a) => (a.bookedById === user.id || (a.clientId && mine.has(a.clientId)) ? a : busyOnly(a)));
+  return list.map((a) => (a.bookedById === user.id || (a.clientId && mine.has(a.clientId)) ? withoutSummary(a, user) : busyOnly(a)));
+}
+
+// The consultation summary stays with the specialist who held it and the
+// managers here; everyone else reads it on the client's page, where their
+// access to that case is checked (routes/consultations.js too).
+function withoutSummary(a, user) {
+  if (!a || isManager(user) || a.calendar?.ownerId === user.id || !("summary" in a)) return a;
+  const { summary, summaryAt, summaryById, ...rest } = a;
+  return rest;
 }
 
 // May this person open this appointment (its details, act on it)?
@@ -563,7 +572,7 @@ appointments.patch("/:id", async (req, res, next) => {
     if (data.status === "cancelled" && appointment.status !== "cancelled") {
       events.emit("appointments.cancelled", { appointmentIds: [appointment.id], byUserId: req.user.id });
     }
-    res.json(updated);
+    res.json(withoutSummary(updated, req.user));
   } catch (err) {
     next(err);
   }
@@ -602,7 +611,7 @@ appointments.post("/:id/fee", async (req, res, next) => {
       return tx.appointment.findUnique({ where: { id: appointment.id }, include: APPOINTMENT_INCLUDE });
     });
     if (!updated) return res.status(400).json({ error: "phone_required_for_fee" });
-    res.status(201).json(updated);
+    res.status(201).json(withoutSummary(updated, req.user));
   } catch (err) {
     next(err);
   }

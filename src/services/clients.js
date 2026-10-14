@@ -23,9 +23,13 @@ const LEGAL_STAGES = [
   "review",
   "supreme_review",
 ];
-// The dates that matter in a case (CaseDate.kind): a court hearing, an
+// The dates that matter in a case (CaseDate.kind): a court hearing; the
+// investigation's steps (the boss's list, 2026-10-14) — an investigative
+// action, questioning, a confrontation, being brought in and questioned as a
+// suspect / as the accused, the charge announced, reading the case file; an
 // investigator's summons, a deadline (appeal by…), a meeting.
-const DATE_KINDS = ["hearing", "summons", "deadline", "meeting", "other"];
+const INVESTIGATION_KINDS = ["investigative_action", "interrogation", "confrontation", "suspect_questioning", "accused_questioning", "charge_announced", "case_review"];
+const DATE_KINDS = ["hearing", ...INVESTIGATION_KINDS, "summons", "deadline", "meeting", "other"];
 const CLOSED_STATUSES = ["done", "declined"];
 // Why a consultation didn't continue ("declined"): the price, still thinking
 // it over (and stopped answering), didn't trust us, went to another lawyer,
@@ -133,6 +137,7 @@ function normalizeCase(input, current = {}, today) {
     if (value !== undefined) data[key] = value;
   };
   set("matter", text(input.matter, 500));
+  set("details", text(input.details, 6000));
   set("number", text(input.number, 80));
   set("lawyer", text(input.lawyer, 120));
   set("status", oneOf(input.status, STATUSES, "status") ?? undefined);
@@ -196,9 +201,34 @@ function normalizePayment(input) {
   };
 }
 
+// A correction to a recorded payment: only the fields sent.
+function normalizePaymentChange(input) {
+  const b = input || {};
+  const data = {};
+  if (b.amount !== undefined) {
+    const value = amount(b.amount, "amount");
+    if (!value) throw new ClientError("amount is required");
+    data.amount = value;
+  }
+  if (b.date !== undefined) {
+    const day = date(b.date, "date");
+    if (!day) throw new ClientError("date is required");
+    data.date = day;
+  }
+  if (b.method !== undefined) data.method = oneOf(b.method, PAYMENT_METHODS, "method");
+  if (b.kind !== undefined) {
+    const kind = oneOf(b.kind, PAYMENT_KINDS, "kind");
+    if (!kind) throw new ClientError("invalid kind");
+    data.kind = kind;
+  }
+  if (b.note !== undefined) data.note = text(b.note, 300);
+  return data;
+}
+
 module.exports = {
   LOST_REASONS,
   DATE_KINDS,
+  INVESTIGATION_KINDS,
   CLOSED_STATUSES,
   STATUSES,
   OPEN_STATUSES,
@@ -219,4 +249,5 @@ module.exports = {
   normalizeCase,
   paymentSummary,
   normalizePayment,
+  normalizePaymentChange,
 };

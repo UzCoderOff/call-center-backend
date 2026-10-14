@@ -113,6 +113,10 @@ model User {
   conversationsBy  Conversation[]       @relation("ConversationBy")
   chatMemberships  ConversationMember[]
   messages         Message[]            @relation("MessageAuthor")
+  summariesWritten Appointment[]        @relation("AppointmentSummaryBy")
+  summaryStrikes   SummaryStrike[]      @relation("SummaryStrikeUser")
+  summaryStrikesCancelled SummaryStrike[] @relation("SummaryStrikeCancelledBy")
+  aiSuggestions    AiSuggestion[]       @relation("AiSuggestionFor")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -591,11 +595,24 @@ model Appointment {
   clientInformed Boolean   @default(false)
   // The consultation fee paid for it (see Payment.appointmentId).
   payments       Payment[]
+  // The case this consultation was about (set when its summary is written).
+  caseId         Int?
+  case           ClientCase? @relation("AppointmentCase", fields: [caseId], references: [id], onDelete: SetNull)
+  // "Suhbat yakuni": what the specialist who held the consultation (the
+  // calendar's owner) wrote afterwards — services/consultSummary.js:
+  // { topic, advice, conclusion, prospect: "potential" | "not_potential",
+  //   next: { kind, dueAt, note } | null, lostReason?, lostNote? }.
+  summary        Json?
+  summaryAt      DateTime?
+  summaryById    Int?
+  summaryBy      User?     @relation("AppointmentSummaryBy", fields: [summaryById], references: [id], onDelete: SetNull)
+  summaryStrike  SummaryStrike?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   @@index([calendarId, date])
   @@index([phoneKey])
+  @@index([summaryAt])
 }
 
 // ------------------------------------------------------------------ clients
@@ -640,6 +657,7 @@ model Client {
   contacts     ClientContact[]
   followUps    ClientFollowUp[]
   files        ClientFile[]
+  aiSuggestions AiSuggestion[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -668,6 +686,11 @@ model ClientCase {
   clientId         Int
   client           Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
   matter           String?
+  // "Ishning mohiyati va tafsilotlari": what the matter is about, in detail —
+  // what happened, what the client wants (the boss, 2026-10-14). `matter`
+  // stays its short name.
+  details          String?
+  consultations    Appointment[]     @relation("AppointmentCase")
   number           String?
   // The lawyer by name, as shown and exported. Kept in step with lawyerId
   // when the lawyer has an account; a name alone for anyone else.
@@ -738,6 +761,8 @@ model Payment {
   // appointment it paid for.
   appointmentId Int?
   appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  // Corrected after it was recorded (the audit log has the before/after).
+  editedAt      DateTime?
   createdAt     DateTime     @default(now())
 
   @@index([clientId])
@@ -1215,6 +1240,29 @@ model Strike {
   @@index([employeeId, month])
 }
 
+// A consultation summary not written in time (Setting "summaryRule", off
+// until a manager switches it on — services/consultSummary.js): the
+// specialist who held it, counted per month like late call-backs. Written
+// later: it stays, with when. A manager can cancel one with a reason.
+model SummaryStrike {
+  id            Int         @id @default(autoincrement())
+  userId        Int
+  user          User        @relation("SummaryStrikeUser", fields: [userId], references: [id], onDelete: Cascade)
+  appointmentId Int         @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  // "YYYY-MM" of the consultation, firm time.
+  month         String
+  deadlineAt    DateTime
+  writtenAt     DateTime?
+  cancelledAt   DateTime?
+  cancelledById Int?
+  cancelledBy   User?       @relation("SummaryStrikeCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason  String?
+  createdAt     DateTime    @default(now())
+
+  @@index([userId, month])
+}
+
 // Firm-wide rules, one row per key, the value as JSON — e.g. "strikes": how
 // fast a missed call must be called back, in which hours, the monthly limit.
 model Setting {
@@ -1246,11 +1294,40 @@ model ClientFile {
   size         Int
   uploadedById Int?
   uploadedBy   User?       @relation("ClientFileBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  // What Claude read in it (services/ai/fileReader.js) — kept, so the same
+  // file isn't paid for twice.
+  aiAnalysis   Json?
+  aiAnalyzedAt DateTime?
   createdAt    DateTime    @default(now())
   deletedAt    DateTime?
 
   @@index([clientId])
   @@index([caseId])
+}
+
+// Something Ledger AI suggests doing about a client (services/ai/reports.js,
+// the weekly look at every open client): for the person who works on them
+// (null: the managers). Done or dismissed by them; a newer run replaces the
+// open ones.
+model AiSuggestion {
+  id          Int       @id @default(autoincrement())
+  clientId    Int?
+  client      Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  forUserId   Int?
+  forUser     User?     @relation("AiSuggestionFor", fields: [forUserId], references: [id], onDelete: SetNull)
+  // "call" | "follow_up" | "money" | "case" | "data" | "other"
+  kind        String
+  // 1 most urgent … 3 can wait
+  priority    Int       @default(2)
+  text        String
+  why         String?
+  runId       String
+  createdAt   DateTime  @default(now())
+  doneAt      DateTime?
+  dismissedAt DateTime?
+
+  @@index([forUserId, doneAt, dismissedAt])
+  @@index([runId])
 }
 
 // What Ledger told a person — the same as its Telegram message — for the
@@ -1360,6 +1437,9 @@ model Message {
   // at the start (services/chat.js).
   eventTitle     String?
   eventAt        DateTime?
+  // Ledger AI: something it offers to do, waiting for a yes
+  // (services/ai/actions.js) — { action: { tool, args, summary, status } }.
+  data           Json?
   createdAt      DateTime     @default(now())
   editedAt       DateTime?
   deletedAt      DateTime?

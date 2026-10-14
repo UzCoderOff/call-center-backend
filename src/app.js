@@ -137,6 +137,11 @@ app.use("/api/performance", performanceRoutes);
 app.use("/api/holidays", daysOffRoutes.holidays);
 app.use("/api/absences", daysOffRoutes.absences);
 app.use("/api/cash", cashRoutes);
+// Consultation summaries ("suhbat yakuni") and their rule.
+app.use("/api/consultations", require("./routes/consultations"));
+// Ledger AI's suggestions about clients (services/ai/reports.js).
+app.use("/api/ai-suggestions", require("./routes/aiSuggestions"));
+app.use("/api/ai-features", require("./routes/aiSuggestions").features);
 // Ledger AI's settings (developer): the OpenAI key, model, daily limit.
 app.use("/api/ai", require("./routes/ai"));
 

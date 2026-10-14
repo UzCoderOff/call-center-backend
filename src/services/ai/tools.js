@@ -347,7 +347,18 @@ const TOOLS = [
           return line;
         }),
         nextSteps: c.followUps.map((f) => ({ kind: f.kind, due: when(f.dueAt), note: f.note, who: nameOf(f.assignee) })),
-        appointments: c.appointments.map((a) => ({ date: a.date, time: hhmm(a.start), lawyer: a.calendar.name, status: a.status, format: a.format, matter: a.matter })),
+        appointments: c.appointments.map((a) => ({
+          date: a.date,
+          time: hhmm(a.start),
+          lawyer: a.calendar.name,
+          status: a.status,
+          format: a.format,
+          matter: a.matter,
+          // The consultation summary ("suhbat yakuni"), when written.
+          summary: a.summary
+            ? { prospect: a.summary.prospect, next: a.summary.next ? { kind: a.summary.next.kind, due: when(a.summary.next.dueAt) } : null, lostReason: a.summary.lostReason, topic: a.summary.topic, advice: a.summary.advice, conclusion: a.summary.conclusion }
+            : null,
+        })),
         recentCalls: calls.map((k) => ({ when: when(k.callTimestampMs), type: k.callType, minutes: Math.round(k.durationSeconds / 60), employee: k.employee.name })),
         latestNotes: c.events.map((e) => ({ at: when(e.createdAt), kind: e.kind, text: String(e.text).slice(0, 300) })),
       };
@@ -458,6 +469,95 @@ const TOOLS = [
     },
   },
   {
+    name: "trends",
+    description:
+      "Week by week (Monday-Sunday) for the last N weeks: calls, answered, missed, missed not called back, new matters, consultations, contracts, lost ones, bookings, no-shows, consultation fees (and other income with Moliya) — plus each operator's consultations and contracts per week. Use it for trajectories: what is rising or falling, who is improving or slipping.",
+    parameters: {
+      type: "object",
+      properties: { weeks: { type: "integer", description: "2-26, default 8" }, employee: { type: "string", description: "part of an employee's name, to see only them" } },
+    },
+    async run(args, user) {
+      const people = args.employee ? await employeesNamed(args.employee) : null;
+      return require("./insights").trends(user, { weeks: args.weeks, employeeIds: people ? people.map((e) => e.id) : null });
+    },
+  },
+  {
+    name: "client_radar",
+    description:
+      "Clients who need attention now, each with why: next steps that are late, open consultations with no next step, clients the lawyer called potential who still haven't signed after a week, contracts with no activity for 30 days, and (with Moliya) overdue payments. Use it to suggest who to call and what to do.",
+    parameters: { type: "object", properties: { limit: { type: "integer", description: "per list, default 20" } } },
+    async run(args, user) {
+      return require("./insights").clientRadar(user, { limit: args.limit });
+    },
+  },
+  {
+    name: "lost_reasons",
+    description:
+      "Why consultations didn't continue in a period (default: last 90 days): how many vs contracts signed, by reason, by operator, by matter, the notes written, and what lawyers wrote when they judged a client not potential.",
+    parameters: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } } },
+    async run(args, user) {
+      return require("./insights").lostReasons(user, { from: args.from, to: args.to });
+    },
+  },
+  {
+    name: "daily_reports",
+    description:
+      "Staff daily report forms for one day (default today): who sent theirs, who hasn't yet (people on a day off aren't expected), and what each one wrote — every question with its answer. Optionally only one person.",
+    parameters: {
+      type: "object",
+      properties: { date: { type: "string", description: "YYYY-MM-DD" }, employee: { type: "string", description: "part of an employee's name" } },
+    },
+    async run(args) {
+      const { asksForm } = require("../autoReport");
+      const { workingDates } = require("../workdays");
+      const date = args.date || firmNow().date;
+      if (!isValidDate(date)) throw bad("date must be YYYY-MM-DD");
+      let employees = await prisma.employee.findMany({
+        where: { active: true, reportTemplateId: { not: null } },
+        select: { id: true, name: true, autoReport: true, alsoForm: true, reportTemplateId: true, workDays: true, holidaysOff: true, reportTemplate: { select: { id: true, name: true, active: true } } },
+        orderBy: { name: "asc" },
+      });
+      employees = employees.filter((e) => asksForm(e) && e.reportTemplate?.active);
+      if (args.employee) {
+        employees = employees.filter((e) => matches(e.name, args.employee));
+        if (employees.length === 0) throw bad(`nobody with a report form matches "${args.employee}"`);
+      }
+      const [reports, days] = await Promise.all([
+        prisma.report.findMany({ where: { date, employeeId: { in: employees.map((e) => e.id) } } }),
+        workingDates(employees, date, date),
+      ]);
+      const answerText = (field, value) => {
+        if (value == null || value === "") return null;
+        if (field.type === "yesno") return value ? "ha" : "yoʻq";
+        if (field.type === "checklist") return Array.isArray(value) ? value.join(", ") : String(value);
+        if (field.type === "table") {
+          const cols = field.columns || [];
+          return (Array.isArray(value) ? value : [])
+            .slice(0, 15)
+            .map((row) => cols.map((c) => `${c.label}: ${row?.[c.id] ?? "—"}`).join("; "))
+            .join(" | ");
+        }
+        return String(value).slice(0, 600);
+      };
+      const people = employees.map((e) => {
+        const report = reports.find((r) => r.employeeId === e.id && r.templateId === e.reportTemplateId);
+        const off = days.byEmployee.get(e.id)?.off[0] || null;
+        if (!report) return { name: e.name, form: e.reportTemplate.name, sent: false, dayOff: off ? off.reason || true : false };
+        const fields = Array.isArray(report.fields) ? report.fields : [];
+        const answers = report.answers && typeof report.answers === "object" ? report.answers : {};
+        return {
+          name: e.name,
+          form: e.reportTemplate.name,
+          sent: true,
+          sentAt: when(report.submittedAt),
+          answers: fields.map((f) => ({ q: f.label, a: answerText(f, answers[f.id]) })).filter((x) => x.a != null),
+        };
+      });
+      const expected = people.filter((p) => p.sent || !p.dayOff);
+      return { date, expected: expected.length, sent: people.filter((p) => p.sent).length, notSent: expected.filter((p) => !p.sent).map((p) => p.name), people };
+    },
+  },
+  {
     name: "staff",
     description: "Who works at the firm: employees (position, office, jobs, phone ID, whether their calls are in Ledger, active) and lawyers' accounts.",
     parameters: { type: "object", properties: { include_inactive: { type: "boolean" } } },
@@ -492,6 +592,7 @@ function caseLine(k, money) {
   const line = {
     caseId: k.id,
     matter: k.matter,
+    details: k.details ? String(k.details).slice(0, 800) : null,
     number: k.number,
     status: k.status,
     legalStage: k.legalStage,

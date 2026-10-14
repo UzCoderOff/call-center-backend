@@ -239,6 +239,53 @@ async function followUpReminders() {
   }
 }
 
+// Consultation summaries (services/consultSummary.js) -> the specialist who
+// held the consultation: half an hour after it ended (each once), and at
+// 18:00 the day's ones still not written. Daytime only.
+async function summaryReminders(now) {
+  if (now.minutes < at(8) || now.minutes >= at(21)) return;
+  const s = require("../consultSummary");
+  const rule = await s.summaryRule();
+  const rows = await prisma.appointment.findMany({
+    where: s.missingWhere(rule, now),
+    select: { id: true, date: true, start: true, end: true, clientName: true, matter: true, calendar: { select: { ownerId: true } } },
+    orderBy: [{ date: "asc" }, { start: "asc" }],
+    take: 300,
+  });
+  const byOwner = new Map();
+  for (const a of rows) {
+    const list = byOwner.get(a.calendar.ownerId) || [];
+    list.push(a);
+    byOwner.set(a.calendar.ownerId, list);
+    // Half an hour after it ended (today's only: older ones are in the
+    // evening list).
+    if (a.date !== now.date || now.minutes < a.end + 30) continue;
+    const text = [
+      "📝 <b>Suhbat yakunini yozing</b>",
+      `${f.escapeHtml(a.clientName)} — bugun, ${f.clock(a.start)}`,
+      a.matter ? `Masala: ${f.escapeHtml(a.matter)}` : null,
+      rule.enabled ? `Muddat: ${f.moment(s.deadlineFor(a, rule))}` : null,
+      "Mijoz potentsialmi, keyingi qadam qanday — operator shunga qarab ishlaydi.",
+      f.portalLink(`/consultations/${a.id}`, "Yakunni yozish"),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await once(`summary-ask:${a.id}`, () => notifyUser(a.calendar.ownerId, "summaries", text));
+  }
+  if (now.minutes < at(18)) return;
+  for (const [userId, list] of byOwner) {
+    const text = [
+      `📝 <b>Yozilmagan suhbat yakunlari: ${list.length} ta</b>`,
+      ...list.slice(0, 10).map((a) => `• ${f.escapeHtml(a.clientName)} — ${f.relativeDay(a.date, now.date)}, ${f.clock(a.start)}`),
+      list.length > 10 ? `… va yana ${list.length - 10} ta` : null,
+      f.portalLink("/consultations", "Roʻyxatni ochish"),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    await once(`summary-evening:${userId}:${now.date}`, () => notifyUser(userId, "summaries", text));
+  }
+}
+
 // The "already sent" list only needs to remember a few weeks.
 async function cleanup(now) {
   if (now.minutes !== at(4)) return;
@@ -251,7 +298,7 @@ const reminders = () => require("../reminders").sendDue();
 // Event cards in chats (services/chat.js): an hour before and at the start.
 const chatEvents = () => require("../chat").eventReminders();
 
-const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, reminders, chatEvents, recordingAlerts, diskAlerts, cleanup };
+const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, summaryReminders, reminders, chatEvents, recordingAlerts, diskAlerts, cleanup };
 
 let running = false;
 async function tick() {

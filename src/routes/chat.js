@@ -12,16 +12,19 @@ const chat = require("../services/chat");
 //   GET    /api/chat                      my conversations, unread counts
 //   GET    /api/chat/unread               { total, byConv } for the menu badge
 //   GET    /api/chat/people               everyone (for groups, private chats)
-//   POST   /api/chat/groups               { title, memberIds } (developer)
-//   POST   /api/chat/direct               { userId } (boss, developer) -> the chat with them
+//   GET    /api/chat/overview             the developer: everyone else's private chats
+//   POST   /api/chat/groups               { title, memberIds } (boss, developer)
+//   POST   /api/chat/direct               { userId } (anyone) -> the chat with them
 //   GET    /api/chat/client/:clientId     the chat on a client (opens it)
 //   GET    /api/chat/:id                  one conversation (title, members, what I may do)
-//   PATCH  /api/chat/:id                  { title?, memberIds? } groups (developer)
-//   DELETE /api/chat/:id                  groups (developer)
+//   PATCH  /api/chat/:id                  { title?, memberIds? } groups (who made it, developer)
+//   DELETE /api/chat/:id                  groups (who made it, developer)
 //   POST   /api/chat/:id/read             { messageId } — read up to there
 //   PUT    /api/chat/:id/mute             { muted }
 //   GET    /api/chat/:id/messages         ?after=<id> (new ones) | ?before=<id> (older), up to 50; marks read
 //   POST   /api/chat/:id/messages         { text, event?: { title, at } }
+//   POST   /api/chat/:id/actions/:mid     { decision: "confirm" | "cancel" } — Ledger AI's
+//                                         offer to do something (its owner)
 //   PATCH  /api/chat/:id/messages/:mid    { text } (its author)
 //   DELETE /api/chat/:id/messages/:mid    its author, or a manager
 const router = express.Router();
@@ -67,13 +70,27 @@ async function memberIdsFrom(value, creatorId) {
   return [...new Set([...ids, creatorId])];
 }
 
+// Who's in it, for everyone in it: a group's or private chat's members; the
+// Everyone chat: every active account. (A client chat: whoever may see the
+// client — not listed.)
+const MEMBER_PERSON = { select: { ...chat.PERSON.select, employee: { select: { name: true, active: true, position: { select: { name: true } } } } } };
+const memberLine = (u) => ({ id: u.id, name: chat.personName(u), role: u.role, position: u.employee?.position?.name ?? null });
+
+async function membersOf(conv) {
+  if (conv.kind === "group" || conv.kind === "direct") {
+    return (await prisma.conversationMember.findMany({ where: { conversationId: conv.id }, include: { user: MEMBER_PERSON }, orderBy: { id: "asc" } }))
+      .filter((m) => chat.activeUser(m.user))
+      .map((m) => memberLine(m.user));
+  }
+  if (conv.kind === "everyone") {
+    const users = await prisma.user.findMany({ where: { active: true }, select: MEMBER_PERSON.select });
+    return users.filter(chat.activeUser).map(memberLine).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return null;
+}
+
 async function describe(conv, user, can) {
-  const members =
-    conv.kind === "group" || conv.kind === "direct"
-      ? (await prisma.conversationMember.findMany({ where: { conversationId: conv.id }, include: { user: chat.PERSON } }))
-          .filter((m) => chat.activeUser(m.user))
-          .map((m) => ({ id: m.user.id, name: chat.personName(m.user), role: m.user.role }))
-      : null;
+  const members = await membersOf(conv);
   const mark = await prisma.conversationMember.findUnique({ where: { conversationId_userId: { conversationId: conv.id, userId: user.id } } });
   return {
     id: conv.id,
@@ -81,11 +98,20 @@ async function describe(conv, user, can) {
     title: await chat.displayTitle(conv, user),
     clientId: conv.clientId,
     members,
+    createdById: conv.createdById,
     muted: Boolean(mark?.muted),
     canWrite: can.write,
     canManage: can.manage,
+    // The developer reading someone else's private chat (or a group they're
+    // not in): no read marks or mutes are kept for them there.
+    looking: can.member === false,
   };
 }
+
+// Read marks and mutes: everyone's in the Everyone and client chats; in the
+// others only for the people in them (the developer looking in doesn't
+// become a member).
+const keepsMarks = (conv, can) => !["group", "direct", "assistant"].includes(conv.kind) || can.member !== false;
 
 router.get("/", async (req, res, next) => {
   try {
@@ -111,9 +137,18 @@ router.get("/people", async (req, res, next) => {
   }
 });
 
-router.post("/groups", async (req, res, next) => {
+router.get("/overview", async (req, res, next) => {
   try {
     if (!chat.isDeveloper(req.user)) throw forbidden();
+    res.json(await chat.overview(req.user));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/groups", async (req, res, next) => {
+  try {
+    if (!chat.canMakeGroups(req.user)) throw forbidden();
     const title = cleanText(req.body?.title, 80);
     if (!title) throw badRequest("title is required");
     const memberIds = await memberIdsFrom(req.body?.memberIds, req.user.id);
@@ -184,7 +219,9 @@ router.patch("/:id", async (req, res, next) => {
       if (!data.title) throw badRequest("title is required");
     }
     if (req.body?.memberIds !== undefined) {
-      const ids = await memberIdsFrom(req.body.memberIds, req.user.id);
+      // Whoever changes it stays in it (a developer looking after a group
+      // they're not in isn't added).
+      const ids = await memberIdsFrom(req.body.memberIds, chat.isDeveloper(req.user) && !can.member ? conv.createdById ?? req.user.id : req.user.id);
       await prisma.conversationMember.deleteMany({ where: { conversationId: conv.id, userId: { notIn: ids } } });
       const have = new Set((await prisma.conversationMember.findMany({ where: { conversationId: conv.id } })).map((m) => m.userId));
       const add = ids.filter((id) => !have.has(id));
@@ -212,7 +249,8 @@ router.delete("/:id", async (req, res, next) => {
 // has already shown it as read).
 router.post("/:id/read", async (req, res, next) => {
   try {
-    const { conv } = await conversationFor(req);
+    const { conv, can } = await conversationFor(req);
+    if (!keepsMarks(conv, can)) return res.json({ ok: true });
     const messageId = parseId(req.body?.messageId, "messageId");
     await chat.markRead(conv.id, req.user.id, messageId);
     require("../services/live").bump([req.user.id]);
@@ -224,7 +262,8 @@ router.post("/:id/read", async (req, res, next) => {
 
 router.put("/:id/mute", async (req, res, next) => {
   try {
-    const { conv } = await conversationFor(req);
+    const { conv, can } = await conversationFor(req);
+    if (!keepsMarks(conv, can)) throw forbidden();
     const muted = req.body?.muted === true;
     await prisma.conversationMember.upsert({
       where: { conversationId_userId: { conversationId: conv.id, userId: req.user.id } },
@@ -239,7 +278,7 @@ router.put("/:id/mute", async (req, res, next) => {
 
 router.get("/:id/messages", async (req, res, next) => {
   try {
-    const { conv } = await conversationFor(req);
+    const { conv, can } = await conversationFor(req);
     const after = req.query.after ? parseId(req.query.after, "after") : null;
     const before = req.query.before ? parseId(req.query.before, "before") : null;
     const where = { conversationId: conv.id, ...(after ? { id: { gt: after } } : before ? { id: { lt: before } } : {}) };
@@ -256,7 +295,7 @@ router.get("/:id/messages", async (req, res, next) => {
           })
         : [];
     const newest = rows.length ? rows[rows.length - 1].id : null;
-    if (!before && newest) {
+    if (!before && newest && keepsMarks(conv, can)) {
       await chat.markRead(conv.id, req.user.id, newest);
       require("../services/live").bump([req.user.id]);
     }
@@ -273,7 +312,7 @@ router.get("/:id/messages", async (req, res, next) => {
 
 router.post("/:id/messages", async (req, res, next) => {
   try {
-    const { conv } = await conversationFor(req, true);
+    const { conv, can } = await conversationFor(req, true);
     const b = req.body || {};
     let text = cleanText(b.text, 4000);
     let eventTitle = null;
@@ -295,7 +334,8 @@ router.post("/:id/messages", async (req, res, next) => {
       include: { author: chat.PERSON },
     });
     await prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: message.createdAt } });
-    await chat.markRead(conv.id, req.user.id, message.id);
+    // A developer writing in a group they look after but aren't in: no mark.
+    if (keepsMarks(conv, can)) await chat.markRead(conv.id, req.user.id, message.id);
     res.status(201).json(chat.publicMessage(message, req.user));
     // Ledger AI: it answers (services/ai/assistant.js) — nobody else to tell.
     if (conv.kind === "assistant") {
@@ -312,6 +352,20 @@ router.post("/:id/messages", async (req, res, next) => {
       .then(() => chat.notifyMessage(conv, message, req.user))
       .catch((err) => console.error("[chat] notify failed:", err.message));
   } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/:id/actions/:mid", async (req, res, next) => {
+  try {
+    const { conv } = await conversationFor(req, true);
+    if (conv.kind !== "assistant") throw notFound();
+    const decision = req.body?.decision === "cancel" ? "cancel" : req.body?.decision === "confirm" ? "confirm" : null;
+    if (!decision) throw badRequest("decision must be confirm or cancel");
+    const result = await require("../services/ai/actions").decide(conv, parseId(req.params.mid), req.user, decision);
+    res.json(result);
+  } catch (err) {
+    if (err.toolError) return res.status(400).json({ error: err.message });
     next(err);
   }
 });
@@ -334,11 +388,13 @@ router.patch("/:id/messages/:mid", async (req, res, next) => {
 
 router.delete("/:id/messages/:mid", async (req, res, next) => {
   try {
-    const { conv } = await conversationFor(req);
+    const { conv, can } = await conversationFor(req);
     const message = await prisma.message.findUnique({ where: { id: parseId(req.params.mid) } });
     if (!message || message.conversationId !== conv.id) throw notFound();
     const { isManager } = require("../middleware/auth");
-    if (message.authorId !== req.user.id && !isManager(req.user)) throw forbidden();
+    // Someone else's message: a manager who may write in this chat (not the
+    // developer reading a private chat they aren't in).
+    if (message.authorId !== req.user.id && !(isManager(req.user) && can.write)) throw forbidden();
     if (!message.deletedAt) await prisma.message.update({ where: { id: message.id }, data: { deletedAt: new Date() } });
     res.status(204).end();
     chat.bumpConversation(conv).catch(() => {});

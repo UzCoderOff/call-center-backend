@@ -4,12 +4,15 @@ const live = require("../live");
 const { aiSettings, apiKey, recordUsage } = require("./settings");
 const { complete, OpenAiError } = require("./openai");
 const tools = require("./tools");
+const actions = require("./actions");
 
 // Ledger AI (chat kind "assistant", services/chat.js): the boss and the
 // developer ask in plain Uzbek or Russian; the model picks which of
-// Ledger's own read-only functions to call (tools.js — the same access
-// rules as the person asking) and writes the answer from what they return.
-// It never makes up a number: every figure comes from a tool.
+// Ledger's own functions to call — lookups (tools.js) and, since 2026-10-14,
+// a few actions (actions.js: reminders, tasks, next steps, targets, notes),
+// each confirmed by the person before it runs — with the same access rules
+// as the person asking, and writes the answer from what they return. It
+// never makes up a number: every figure comes from a tool.
 
 const MAX_ROUNDS = 6;
 const HISTORY = 16;
@@ -29,9 +32,18 @@ function systemPrompt(user) {
     "- Davr aytilmagan boʻlsa, «bu oy» deb oling va javobda qaysi davr ekanini yozing.",
     "- Javob qisqa va aniq boʻlsin: avval asosiy raqam yoki xulosa, keyin kerak boʻlsa qisqa roʻyxat (har biri alohida qatorda). Markdown jadval ishlatmang.",
     "- Pulni soʻmda, minglik boʻsh joy bilan yozing (masalan, 12 500 000 soʻm).",
-    "- Siz faqat oʻqiysiz: hech narsani oʻzgartira olmaysiz. Shuni soʻrashsa, Ledgerning qaysi sahifasida qilish mumkinligini ayting.",
+    ...ACTION_RULES,
   ].join("\n");
 }
+
+// What the model is told about doing things.
+const ACTION_RULES = [
+  "- Siz baʼzi ishlarni bajara olasiz: eslatma qoʻyish, xodimga vazifa berish, mijozga keyingi qadam qoʻyish, oylik reja (target) qoʻyish, mijozga izoh yozish. Boshqa narsani oʻzgartira olmaysiz — soʻrashsa, Ledgerning qaysi sahifasida qilinishini ayting.",
+  "- Har bir ish avval tayyorlanadi (vosita chaqiriladi) va foydalanuvchiga «Tasdiqlash / Bekor qilish» kartochkasi chiqadi. Hech qachon «bajarildi» demang — faqat confirm_action natijasi «done» boʻlsa ayting.",
+  "- confirm_action ni faqat foydalanuvchi aniq «ha / tasdiqlayman / mayli» degandan keyin chaqiring. Ikkilansa yoki oʻzgartirsa — cancel_action va yangisini tayyorlang.",
+  "- Vaqtni doim Toshkent vaqti bilan «YYYY-MM-DD HH:MM» koʻrinishida bering. «Ertaga», «juma kuni» kabi soʻzlarni bugungi sanadan hisoblang. Vaqt aytilmasa 10:00 deb oling va buni ayting.",
+  "- Mijoz kerak boʻlsa, avval search_clients bilan id sini toping. Ism bir nechta odamga mos kelsa — qaysi biri ekanini soʻrang.",
+];
 
 // Saves Ledger AI's answer in the chat and tells their screens and phone.
 async function post(conv, owner, text) {
@@ -62,7 +74,13 @@ async function history(conv) {
     orderBy: { id: "desc" },
     take: HISTORY,
   });
-  return rows.reverse().map((m) => ({ role: m.authorId ? "user" : "assistant", content: m.text || "" }));
+  // An action card keeps its id and where it stands, so "ha" in the next
+  // message can confirm it (confirm_action).
+  return rows.reverse().map((m) => {
+    const action = m.data?.action;
+    const content = action ? `[action_id=${m.id}, status=${action.status}] ${action.summary}` : m.text || "";
+    return { role: m.authorId ? "user" : "assistant", content };
+  });
 }
 
 function explain(err) {
@@ -75,9 +93,70 @@ function explain(err) {
   return "Hozir javob bera olmadim. Birozdan soʻng qayta urinib koʻring.";
 }
 
+// Every function this person's Ledger AI may call: lookups and actions.
+const definitions = (user) => [...tools.definitions(user), ...actions.definitions(user)];
+
+// One function call — an action is prepared in `conv` (the person's
+// assistant chat), never run straight away.
+function runTool(name, args, user, conv) {
+  return actions.handles(name) ? actions.run(name, args, user, conv) : tools.run(name, args, user);
+}
+
+// Claude's turn (Sozlamalar → "Ledger AI chatida: Claude"): the same
+// lookups and actions, through the Messages API. The chat so far goes as
+// text; within one answer, Claude's own turns go back exactly as they came.
+async function replyWithClaude(conv, user, settings) {
+  const claude = require("./claude");
+  if ((await askedToday(conv, user.id)) > settings.dailyLimit) {
+    await post(conv, user, `Bugungi savollar chegarasi (${settings.dailyLimit} ta) tugadi. Ertaga yana soʻrang yoki dasturchi chegarani oshirsin.`);
+    return;
+  }
+  // Claude's conversation starts with the person, and has no empty turns.
+  const past = (await history(conv)).filter((m) => m.content && m.content.trim());
+  while (past.length && past[0].role !== "user") past.shift();
+  const messages = past.map((m) => ({ role: m.role, content: m.content }));
+  const toolDefs = definitions(user).map((d) => ({ name: d.name, description: d.description, input_schema: d.parameters }));
+  try {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const response = await claude.create(
+        { system: systemPrompt(user), tools: toolDefs, messages, output_config: { effort: "medium" } },
+        { feature: "chat" }
+      );
+      if (response.stop_reason === "refusal") {
+        await post(conv, user, "Bu savolga javob bera olmayman.");
+        return;
+      }
+      messages.push({ role: "assistant", content: response.content });
+      if (response.stop_reason === "pause_turn") continue;
+      const uses = response.content.filter((b) => b.type === "tool_use");
+      if (uses.length === 0) {
+        await post(conv, user, claude.textOf(response) || "Javob topa olmadim.");
+        return;
+      }
+      const results = [];
+      for (const use of uses) {
+        let result;
+        try {
+          result = await runTool(use.name, use.input || {}, user, conv);
+        } catch (err) {
+          result = { error: err.message };
+        }
+        const text = JSON.stringify(result);
+        results.push({ type: "tool_result", tool_use_id: use.id, content: text.length > MAX_TOOL_RESULT ? `${text.slice(0, MAX_TOOL_RESULT)}…(qisqartirildi)` : text });
+      }
+      messages.push({ role: "user", content: results });
+    }
+    await post(conv, user, "Savol juda murakkab boʻldi — iltimos, qismlarga boʻlib soʻrang.");
+  } catch (err) {
+    console.error(`[ai] ${user.username} (claude): ${err.message}`);
+    await post(conv, user, claude.explain(err));
+  }
+}
+
 // A question was just asked in `conv` by `user`: answer it.
 async function reply(conv, user) {
   const settings = await aiSettings();
+  if (settings.enabled && settings.provider === "claude" && settings.claudeKeyEnc) return replyWithClaude(conv, user, settings);
   const key = await apiKey();
   if (!settings.enabled || !key) {
     await post(conv, user, "Ledger AI hali yoqilmagan: dasturchi Sozlamalar → Sunʼiy intellekt boʻlimida OpenAI kalitini kiritishi kerak.");
@@ -92,7 +171,7 @@ async function reply(conv, user) {
   const usage = { input: 0, output: 0 };
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const { message, usage: u } = await complete(key, { model: settings.model, messages, tools: tools.definitions(user) });
+      const { message, usage: u } = await complete(key, { model: settings.model, messages, tools: definitions(user) });
       usage.input += u?.prompt_tokens || 0;
       usage.output += u?.completion_tokens || 0;
       const calls = message.tool_calls || [];
@@ -105,7 +184,7 @@ async function reply(conv, user) {
         let result;
         try {
           const args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
-          result = await tools.run(call.function.name, args, user);
+          result = await runTool(call.function.name, args, user, conv);
         } catch (err) {
           result = { error: err.message };
         }
@@ -123,4 +202,4 @@ async function reply(conv, user) {
   }
 }
 
-module.exports = { reply, systemPrompt };
+module.exports = { reply, systemPrompt, definitions, runTool, ACTION_RULES };

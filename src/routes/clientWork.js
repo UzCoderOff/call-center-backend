@@ -28,6 +28,7 @@ const { canUseClients } = require("./clients");
 //                      PUT  /api/client-files/uploads/:uploadId … send it in pieces …
 //                      POST /api/client-files/uploads/:uploadId/finish
 //                      GET/PATCH/DELETE /api/client-files/:id
+//                      POST /api/client-files/:id/ai     Claude reads it (services/ai/fileReader.js)
 //
 // Who: whoever may work on the client (src/lib/clientAccess.js) — not
 // someone who only sees a past result. Something about one case (a
@@ -469,6 +470,23 @@ files.patch("/:id", async (req, res, next) => {
     const { path: _stored, ...out } = updated;
     res.json(out);
   } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// Claude reads the file ({ again: true }: anew) — when switched on in
+// Sozlamalar. Whoever may change things on the client; the reading is kept
+// on the file and shown to everyone who sees it.
+files.post("/:id/ai", async (req, res, next) => {
+  try {
+    const { claudeFeatureOn } = require("../services/ai/settings");
+    if (!(await claudeFeatureOn("fileReader"))) throw fail(409, "ai_off");
+    const file = await visibleFile(req, { write: true });
+    const reader = require("../services/ai/fileReader");
+    res.json(await reader.analyze(file, req.user, { again: req.body?.again === true }));
+  } catch (err) {
+    if (err.code && ["claude_off", "claude_cap"].includes(err.code)) return res.status(409).json({ error: err.code });
+    if (err.code && err.status && err.status < 500) return res.status(err.status).json({ error: err.code });
     sendError(err, res, next);
   }
 });

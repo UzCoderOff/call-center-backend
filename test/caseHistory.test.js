@@ -9,7 +9,7 @@ const { parseJobs, jobOf } = require("../src/lib/jobs");
 
 const TODAY = "2026-10-02";
 
-test("a stage row: a known stage, a real date not in the future", () => {
+test("a stage row: a known stage, a real date — past, today, or planned ahead", () => {
   assert.deepEqual(h.normalizeStage({ stage: "investigation", date: "2026-03-12", court: " Yunusobod IIB ", note: "" }, {}, TODAY), {
     stage: "investigation",
     date: "2026-03-12",
@@ -20,7 +20,10 @@ test("a stage row: a known stage, a real date not in the future", () => {
   assert.equal(h.normalizeStage({ stage: "appeal" }, {}, TODAY).date, TODAY);
   assert.throws(() => h.normalizeStage({ stage: "nonsense" }, {}, TODAY), /invalid stage/);
   assert.throws(() => h.normalizeStage({ stage: "appeal", date: "2026-02-30" }, {}, TODAY), /invalid date/);
-  assert.throws(() => h.normalizeStage({ stage: "appeal", date: "2027-01-01" }, {}, TODAY), /future/);
+  // Planned: a date ahead is fine (the boss, 2026-10-14) — not years ahead
+  // (a typo in the year).
+  assert.equal(h.normalizeStage({ stage: "appeal", date: "2027-01-01" }, {}, TODAY).date, "2027-01-01");
+  assert.throws(() => h.normalizeStage({ stage: "appeal", date: "2036-01-01" }, {}, TODAY), /too far ahead/);
   // Correcting one: only what's sent.
   assert.deepEqual(h.normalizeStage({ date: "2026-01-05" }, { id: 4, stage: "inquiry", date: "2026-01-01" }, TODAY), { date: "2026-01-05" });
 });
@@ -38,6 +41,25 @@ test("the case's stage is the latest row — by date, then by entry; removed row
   assert.equal(h.latestStage([...rows, { id: 5, stage: "appeal", date: "2026-06-01" }]).stage, "appeal");
   assert.equal(h.latestStage([]), null);
   assert.equal(h.latestStage([{ id: 1, stage: "inquiry", date: "2026-01-10", deletedAt: new Date() }]), null);
+});
+
+test("a planned stage isn't the case's stage until its day comes", () => {
+  const rows = [
+    { id: 1, stage: "investigation", date: "2026-09-01" },
+    { id: 2, stage: "sent_to_court", date: "2026-11-05" },
+  ];
+  assert.equal(h.latestStage(rows, TODAY).stage, "investigation");
+  assert.equal(h.latestStage(rows, "2026-11-05").stage, "sent_to_court");
+  // Without a day: every row (the old behaviour).
+  assert.equal(h.latestStage(rows).stage, "sent_to_court");
+  // Only planned ones: no stage yet.
+  assert.equal(h.latestStage([rows[1]], TODAY), null);
+});
+
+test("the investigation's steps are key-date kinds", () => {
+  for (const kind of ["investigative_action", "interrogation", "confrontation", "suspect_questioning", "accused_questioning", "charge_announced", "case_review"]) {
+    assert.equal(h.normalizeKeyDate({ kind, date: "2026-10-20" }).kind, kind);
+  }
 });
 
 test("a key date: a known kind, a date, an optional time of day", () => {

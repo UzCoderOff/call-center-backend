@@ -286,6 +286,66 @@ async function onStrike({ strikeId }) {
   }
 }
 
+// A consultation summary written -> the operator who brought the client
+// (their next step, if there is one), so they know how it went.
+const PROSPECT_WORDS = { potential: "✅ Potentsial mijoz", not_potential: "➖ Potentsial emas" };
+const NEXT_STEP_WORDS = { contract: "Shartnoma tuzdi", decision: "Oʻylab koʻradi — qarorini soʻrash kerak", call: "Qayta qoʻngʻiroq qilish kerak", meeting: "Yana uchrashuv" };
+const LOST_WORDS = { price: "narx", thinking: "oʻylab qoldi", trust: "ishonmadi", other_lawyer: "boshqa advokat", unreachable: "aloqaga chiqmadi", no_need: "kerak emas", not_our_field: "bizning soha emas", other: "boshqa sabab" };
+
+async function onConsultationSummary({ appointmentId, followUpId, byUserId }) {
+  const a = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: { case: { select: { operator: { select: { userId: true } } } }, summaryBy: { select: { username: true, name: true, employee: { select: { name: true } } } } },
+  });
+  if (!a?.summary) return;
+  const assignee = followUpId ? (await prisma.clientFollowUp.findUnique({ where: { id: followUpId }, select: { assigneeId: true } }))?.assigneeId : null;
+  const to = assignee ?? a.case?.operator?.userId ?? (a.bookedById !== byUserId ? a.bookedById : null);
+  if (!to || to === byUserId) return;
+  const s = a.summary;
+  const lines = [
+    `📝 <b>Konsultatsiya natijasi</b> — ${f.escapeHtml(a.clientName)}`,
+    `${PROSPECT_WORDS[s.prospect] || ""}${s.next ? ` · ${NEXT_STEP_WORDS[s.next.kind] || ""}` : ""}${s.lostReason ? ` · ${LOST_WORDS[s.lostReason] || ""}` : ""}`,
+    s.next?.dueAt ? `Qachon: ${f.moment(new Date(s.next.dueAt))}` : null,
+    s.next?.note ? f.escapeHtml(s.next.note) : null,
+    `Yakun: ${f.escapeHtml(String(s.conclusion).slice(0, 600))}`,
+    `Yozdi: ${f.escapeHtml(f.personName(a.summaryBy))}`,
+    a.clientId ? f.portalLink(`/clients/${a.clientId}`, "Mijozni ochish") : null,
+  ];
+  await notifyUser(to, "followUps", lines.filter(Boolean).join("\n"));
+}
+
+// A summary not written in time -> the specialist (where they stand this
+// month), and the managers once they're over the limit.
+async function onSummaryStrike({ strikeId }) {
+  const { summaryRule, summaryStrikeCounts } = require("../consultSummary");
+  const strike = await prisma.summaryStrike.findUnique({
+    where: { id: strikeId },
+    include: { user: { select: { id: true, username: true, name: true, employee: { select: { name: true } } } }, appointment: { select: { id: true, date: true, start: true, clientName: true } } },
+  });
+  if (!strike || strike.cancelledAt) return;
+  const rule = await summaryRule();
+  const count = (await summaryStrikeCounts(strike.month)).get(strike.userId) || 0;
+  const what = `${f.escapeHtml(strike.appointment.clientName)} — ${f.day(strike.appointment.date)}, ${f.clock(strike.appointment.start)}`;
+  await notifyUser(
+    strike.userId,
+    "summaries",
+    [
+      `⚠️ <b>Suhbat yakuni oʻz vaqtida yozilmadi (${count}/${rule.limit})</b>`,
+      what,
+      strike.writtenAt ? "Kech yozildi." : "Hali yozilmagan.",
+      f.portalLink(`/consultations/${strike.appointment.id}`, "Yakunni yozish"),
+    ].join("\n")
+  );
+  if (count > rule.limit) {
+    const text = [
+      `🚫 <b>${f.escapeHtml(f.personName(strike.user))} — ${count} ta suhbat yakuni oʻz vaqtida yozilmadi</b> (chegara ${rule.limit})`,
+      what,
+      f.portalLink("/consultations?scope=team", "Roʻyxatni ochish"),
+    ].join("\n");
+    for (const user of await linkedUsers({ role: { in: ["BOSS", "DEVELOPER"] } })) await notifyUser(user, "strikes", text);
+  }
+}
+
 function register() {
   safeOn("appointment.booked", onBooked);
   safeOn("appointments.cancelled", onCancelled);
@@ -297,6 +357,8 @@ function register() {
   safeOn("case.assigned", onAssigned);
   safeOn("followup.assigned", onFollowUpAssigned);
   safeOn("strike.created", onStrike);
+  safeOn("consultation.summary", onConsultationSummary);
+  safeOn("summary.strike", onSummaryStrike);
 }
 
-module.exports = { register, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, onTargetsSet, onContract, onAssigned, onFollowUpAssigned, onStrike, followUpText, followUpButton, FOLLOW_UP_MESSAGE_INCLUDE, taskText, taskButton, TASK_INCLUDE };
+module.exports = { register, onConsultationSummary, onSummaryStrike, onBooked, onCancelled, onMaterial, onTaskCreated, onTaskDone, onTargetsSet, onContract, onAssigned, onFollowUpAssigned, onStrike, followUpText, followUpButton, FOLLOW_UP_MESSAGE_INCLUDE, taskText, taskButton, TASK_INCLUDE };

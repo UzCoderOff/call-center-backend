@@ -77,3 +77,57 @@ test("names match however they're typed", () => {
   assert.equal(matches("Dilnoza Karimova", "aziz"), false);
   assert.equal(matches("Dilnoza Karimova", ""), false);
 });
+
+test("Ledger AI's actions: the boss and the developer only, plus confirm / cancel", () => {
+  const actions = require("../src/services/ai/actions");
+  const names = (user) => actions.definitions(user).map((d) => d.name);
+  assert.deepEqual(names({ role: "EMPLOYEE" }), []);
+  assert.deepEqual(names({ role: "LAWYER" }), []);
+  for (const n of ["create_reminder", "create_task", "add_next_step", "set_target", "add_client_note", "confirm_action", "cancel_action"]) {
+    assert.ok(names({ role: "BOSS" }).includes(n), n);
+  }
+  assert.equal(actions.handles("create_task"), true);
+  assert.equal(actions.handles("confirm_action"), true);
+  assert.equal(actions.handles("call_stats"), false);
+});
+
+test("an action's time: Tashkent time, ahead of now, not years ahead", () => {
+  const { moment } = require("../src/services/ai/actions");
+  const tomorrow = new Date(Date.now() + 5 * 3600 * 1000 + 86400000).toISOString().slice(0, 10);
+  // 14:30 in Tashkent (UTC+5) is 09:30 UTC.
+  assert.equal(moment(`${tomorrow} 14:30`).toISOString().slice(11, 16), "09:30");
+  assert.equal(moment(`${tomorrow}T14:30`).toISOString().slice(11, 16), "09:30");
+  // No time: 10:00.
+  assert.equal(moment(tomorrow).toISOString().slice(11, 16), "05:00");
+  assert.throws(() => moment("2020-01-01 10:00"), /past/);
+  assert.throws(() => moment("2099-01-01 10:00"), /too far/);
+  assert.throws(() => moment("ertaga"), /invalid/);
+  assert.throws(() => moment(""), /required/);
+});
+
+test("Claude: cost from token counts, by model (cache reads cheaper)", () => {
+  const { costOf } = require("../src/services/ai/claude");
+  // Opus 5.5: $4 in / $20 out per 1M.
+  assert.equal(costOf("claude-opus-5-5", { input_tokens: 1_000_000, output_tokens: 0 }), 4);
+  assert.equal(costOf("claude-opus-5-5", { input_tokens: 0, output_tokens: 100_000 }), 2);
+  assert.ok(Math.abs(costOf("claude-opus-5-5", { cache_read_input_tokens: 1_000_000 }) - 0.2) < 1e-9);
+  assert.ok(Math.abs(costOf("claude-haiku-5-5", { input_tokens: 1_000_000, output_tokens: 1_000_000 }) - 0.6) < 1e-9);
+  assert.equal(costOf("claude-opus-5-5", null), 0);
+});
+
+test("the file reader: a Word file's paragraphs as text; only readable kinds", () => {
+  const { zipSync, strToU8 } = require("fflate");
+  const { docxText, readable } = require("../src/services/ai/fileReader");
+  const xml = '<w:document><w:body><w:p><w:r><w:t>Sud qarori</w:t></w:r></w:p><w:p><w:r><w:t>Daʼvo &amp; talab</w:t></w:r></w:p></w:body></w:document>';
+  const docx = Buffer.from(zipSync({ "word/document.xml": strToU8(xml) }));
+  assert.equal(docxText(docx), "Sud qarori\nDaʼvo & talab");
+  assert.equal(readable("qaror.PDF"), true);
+  assert.equal(readable("rasm.jpg"), true);
+  assert.equal(readable("eski.doc"), false);
+  assert.equal(readable("audio.mp3"), false);
+});
+
+test("reports: **bold** for Telegram, everything else escaped", () => {
+  const { telegramHtml } = require("../src/services/ai/reports");
+  assert.equal(telegramHtml("**Xulosa**: 5 < 7 & ok"), "<b>Xulosa</b>: 5 &lt; 7 &amp; ok");
+});
