@@ -43,7 +43,21 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-14, second): lawyers' own calendars, tidier consultation calendar, several lawyers per case, clients being worked on first, only the call center's and coordinators' calls, what's-new notices
+### Follow-up (2026-10-14, third): calendar views, deleting unused consultation calendars
+
+- Lawyers' own calendar: Kun / Hafta / Oy. On a computer the week is seven
+  columns of hours (today's date in red), the month a grid; on a phone the
+  day is a timeline and the month shows dots. The last choice is remembered
+  per device. The names row wraps instead of hiding names off to the side.
+- Consultation calendars: switched-off ones are tucked behind "Yopiqlar (N)"
+  (staff never see them). The developer can delete one in its Sozlamalar —
+  only while it has no bookings (`DELETE /api/calendars/:id`, else
+  `409 has_appointments`); the lawyer's own calendar stays, and Team → the
+  account's calendar switch makes a new one.
+- Home: the AI suggestions card folds away from its title (remembered).
+- No migration, no `.env` change.
+
+### Earlier (2026-10-14, second): lawyers' own calendars, tidier consultation calendar, several lawyers per case, clients being worked on first, only the call center's and coordinators' calls, what's-new notices
 
 - **Lawyers' own calendar** (`routes/personalCalendar.js`, table
   `PersonalEvent`): Kalendar → «Mening kunim» for each lawyer account (the

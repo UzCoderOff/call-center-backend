@@ -13,7 +13,8 @@ const fee = require("../services/consultationFee");
 // The lawyer's calendar.
 //
 //   /api/calendars                          which calendars you can see
-//   PATCH /api/calendars/:id                name, the usual week (owner)
+//   PATCH /api/calendars/:id                name, the usual week (owner); on/off
+//   DELETE /api/calendars/:id               one with no bookings (developer)
 //   /api/calendars/:id/weeks/:weekStart     one week: plan, appointments, free slots
 //   PUT  …/weeks/:weekStart                 save the plan (owner)
 //   POST …/weeks/:weekStart/publish         show it to staff (owner)
@@ -231,6 +232,25 @@ calendars.patch("/:id", async (req, res, next) => {
     if (body.active !== undefined) data.active = Boolean(body.active);
     const updated = await prisma.calendar.update({ where: { id: calendar.id }, data });
     res.json({ id: updated.id, name: updated.name, active: updated.active, slotMinutes: updated.slotMinutes, usual: cal.usualWeekOf(updated) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Delete a consultation calendar nobody uses (the developer) — e.g. one made
+// with a lawyer account that never takes consultations. Only while it has
+// no bookings at all: a calendar with bookings keeps their history, so it's
+// switched off instead (409 has_appointments). Its owner's own calendar
+// (routes/personalCalendar.js) isn't touched; Team -> the account's
+// calendar switch makes a new one.
+calendars.delete("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id, "calendarId");
+    const calendar = await prisma.calendar.findUnique({ where: { id }, select: { id: true, _count: { select: { appointments: true } } } });
+    if (!calendar) return res.status(404).json({ error: "not_found" });
+    if (calendar._count.appointments > 0) return res.status(409).json({ error: "has_appointments", count: calendar._count.appointments });
+    await prisma.calendar.delete({ where: { id } });
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
