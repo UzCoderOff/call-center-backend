@@ -43,6 +43,70 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### This release (2026-10-15): office workers' calls back, who took the cash, adding client money from the top, each case as a project
+
+- **Office workers' calls** (`src/lib/calling.js`): anyone with the phone
+  switch syncs again and sees their own calls (Calls, and on Home under their
+  report); the app picks this up the next time it's opened and sends the
+  calls it missed since 2026-10-14 itself. Managers see office phones with the
+  "Ofis xodimlari" switch in Calls and Home (off by default). They still don't
+  count: targets, Natijalar, automatic reports, the firm's own totals, missed-
+  call and recording alerts, the clients database — those ask `countsCalls`.
+- **Who took the cash** (migration `20261015120000_payment_cash_holder`, adds
+  the nullable `Payment.cashHolderId`): every cash payment form asks
+  "Naqd pulni kim oldi?" (me / the boss / a lawyer). Kassa counts the money
+  with that person; empty = whoever recorded it, as before. Moliya → Kassa →
+  «Kimda?» lists a person's cash payments and moves a wrong one to whoever
+  really took it (`/api/cash/payments`, managers with Moliya; audit
+  `payment.cashHolder`). Cash a lawyer took shows as theirs until it's
+  received from them.
+- **Client money from the top**: the client page has «Toʻlov» under the name
+  and, on «Pul holati», «Toʻlov qoʻshish» and «Shartnoma summasi» (with
+  "save and add a payment"); Moliya has «Toʻlov qoʻshish» (find the client,
+  their page opens with the form). Payment method and kind are big buttons.
+- **Each case is a project, open right on the client page** (portal
+  `components/cases/CaseWorkspace.jsx`): the team (lawyers and coordinator),
+  next date, days in work, debt, open tasks, the case's road, and every
+  section at once — what it's about, key dates, history, tasks, money,
+  documents, stages. Several cases: a switcher (`?case=`). Old
+  `/clients/:id/cases/:caseId?tab=` links redirect there (`?section=`).
+- **Typed history** (`services/caseEntries.js`, via `POST
+  /api/clients/:id/notes` with `type`): hearing (result, next date),
+  document filed, decision (result, deadline), meeting, call. The next date
+  and the deadline become the case's key dates.
+- **"How did it go?"** (`services/outcomes.js`, `POST
+  /api/client-dates/:id/outcome`, `GET /api/client-cases/outcomes-due`): a
+  hearing (or questioning, summons) that has passed without an outcome is
+  asked about on the case page, the lawyer's home and at 18:30. One answer
+  writes the outcome, the history entry and the next date, and posts it to
+  the client's chat (`chat.postToClient`).
+- **Reminders** (Telegram/app kind `hearings`): the evening before (18:00)
+  and the morning of (07:30) each hearing/questioning/summons/deadline, to
+  the case's lawyers and coordinator.
+- **Case tasks and lists** (`routes/tasks.js`, `Task.caseId`): the people on
+  a case give each other tasks; ready-made lists in Sozlamalar → Ish
+  andozalari (Setting `caseChecklists`).
+- **The team talks in the client's chat** (one chat per client, no chat of
+  a case's own): client chats now list who's in them, for @mentions (told
+  even when the chat is muted). Developers aren't listed in shared chats
+  (Hamma, client chats) or among a case's people for tasks.
+- **Cover while away** (`LawyerCover`, `routes/covers.js`,
+  `services/covers.js`): the colleague is added to the away lawyer's open
+  cases as an extra lawyer for those days (`CaseExtraLawyer.coverId`),
+  removed when it ends; synced every 10 minutes and on each change.
+- **Calendar**: «Kim boʻsh?» (`GET /api/personal-calendar/free`), repeating
+  events (`PersonalEvent.repeat/repeatUntil/skipDates`,
+  `services/repeats.js`). No clash warnings (the firm's call).
+- **Deadline helper**: Sozlamalar → Qarordan keyingi muddatlar (Setting
+  `deadlineDays`, by stage) — the lawyers enter the days; nothing is assumed.
+- **Debts for coordinators** (`GET /api/client-cases/debts`, portal
+  `/debts`).
+- Migration `20261015180000_case_projects` adds columns and the
+  `LawyerCover` table only (hand-written `ADD COLUMN`s — nothing dropped).
+- What's-new: the boss, office workers with the phone switch, staff who
+  record payments, lawyers, coordinators (`services/news.js`).
+- No `.env` change, no app update.
+
 ### Follow-up (2026-10-14, third): calendar views, deleting unused consultation calendars
 
 - Lawyers' own calendar: Kun / Hafta / Oy. On a computer the week is seven

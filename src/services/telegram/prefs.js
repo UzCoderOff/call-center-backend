@@ -1,6 +1,6 @@
 const { MANAGER_ROLES } = require("../../middleware/auth");
 const { isCallCenter, isCoordinator } = require("../../lib/jobs");
-const { hasCalls, collectsCalls } = require("../../lib/calling");
+const { hasCalls, collectsCalls, callsMatter, countsCalls } = require("../../lib/calling");
 
 // The kinds of Telegram notification, and who each one is for. Each person
 // sees (in the portal and in the bot's Sozlamalar) only the kinds that apply
@@ -19,6 +19,7 @@ const KINDS = [
   { key: "targets", label: "Oylik reja", hint: "rahbar sizga reja qoʻyganda" },
   { key: "recordings", label: "Qoʻngʻiroq yozuvlari", hint: "telefon qoʻngʻiroqlarni yozib olmayotgan boʻlsa" },
   { key: "cases", label: "Ishlar", hint: "shartnoma tuzilganda, sizga ish biriktirilganda" },
+  { key: "hearings", label: "Sud va tergov sanalari", hint: "bir kun oldin kechqurun, oʻsha kuni ertalab va natija yozilmaganda" },
   { key: "followUps", label: "Eslatmalar", hint: "mijozga qoʻngʻiroq yoki qaror muddati kelganda" },
   { key: "strikes", label: "Ogohlantirishlar", hint: "javobsiz qoʻngʻiroqqa oʻz vaqtida qayta qoʻngʻiroq qilinmaganda" },
   { key: "summaries", label: "Suhbat yakunlari", hint: "konsultatsiyadan keyin yakun yozilmagan boʻlsa" },
@@ -51,13 +52,17 @@ function applicableKinds(user) {
   out.push("tasks");
   // Staff: their monthly plan (Natijalar), when a manager sets it.
   if (e) out.push("targets");
-  // A phone that isn't recording calls: its owner, and the managers.
-  if (collectsCalls(e) || isManagerUser(user)) out.push("recordings");
+  // A phone that isn't recording calls: its owner (when their calls count),
+  // and the managers.
+  if ((collectsCalls(e) && callsMatter(e)) || isManagerUser(user)) out.push("recordings");
   // Contracts to hand over (managers), cases handed to them (lawyers,
   // coordinators).
   if (isManagerUser(user) || user.role === "LAWYER" || isCoordinator(e)) out.push("cases");
+  // Hearings and other dates in their cases (services/outcomes.js): lawyer
+  // accounts (the boss too) and coordinators.
+  if (user.role === "LAWYER" || user.role === "BOSS" || isCoordinator(e)) out.push("hearings");
   // Follow-ups due: everyone who works with clients.
-  if (isManagerUser(user) || user.role === "LAWYER" || hasCalls(e) || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
+  if (isManagerUser(user) || user.role === "LAWYER" || countsCalls(e) || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
   // Late call-back strikes: the call center, and the managers (over the limit).
   if (isManagerUser(user) || isCallCenter(e)) out.push("strikes");
   // Ledger AI's weekly report and monthly analysis: the managers.

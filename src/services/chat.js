@@ -1,6 +1,6 @@
 const prisma = require("../lib/prisma");
 const { isManager } = require("../middleware/auth");
-const { canAccessClient, clientScope } = require("../lib/clientAccess");
+const { workScope } = require("../lib/clientAccess");
 
 // Staff chat (src/routes/chat.js). The firm's rules (2026-10-03, changed
 // 2026-10-14):
@@ -9,8 +9,12 @@ const { canAccessClient, clientScope } = require("../lib/clientAccess");
 //   group     the boss and the developer make them and pick who's in; the
 //             one who made it (and the developer) changes it. Everyone in
 //             it sees who's in it.
-//   client    a chat on each client, for whoever can see that client
-//             (src/lib/clientAccess.js) — checked on every read and write
+//   client    a chat on each client, for the people working on it now
+//             (src/lib/clientAccess.js workScope: managers, its lawyers and
+//             coordinator, its operator before the contract — not one who only
+//             sees the result) — checked on every read and write. It's also
+//             where the team discusses the client's cases (one chat per
+//             client, 2026-10-15)
 //   direct    anyone can write to anyone privately. They're work chats: the
 //             developer can read every one (not write in it), and the chat
 //             itself says so
@@ -60,12 +64,19 @@ async function access(user, conv) {
       return { read: member, write: member, manage: false, member };
     }
     case "client": {
-      const ok = await canAccessClient(user, conv.clientId);
+      const ok = await worksOnClient(user, conv.clientId);
       return { read: ok, write: ok, manage: false };
     }
     default:
       return { read: false, write: false, manage: false };
   }
+}
+
+// Whether someone is one of the people in a client's chat.
+async function worksOnClient(user, clientId) {
+  if (!clientId) return false;
+  if (isManager(user)) return true;
+  return (await prisma.client.count({ where: { AND: [{ id: clientId }, workScope(user)] } })) > 0;
 }
 
 async function isMember(conversationId, userId) {
@@ -83,7 +94,7 @@ async function recipients(conv) {
   users = (await prisma.user.findMany({ where: { active: true }, include: { employee: true } })).filter(activeUser);
   if (conv.kind === "client") {
     const allowed = [];
-    for (const u of users) if (await canAccessClient(u, conv.clientId)) allowed.push(u);
+    for (const u of users) if (await worksOnClient(u, conv.clientId)) allowed.push(u);
     users = allowed;
   }
   const members = await prisma.conversationMember.findMany({ where: { conversationId: conv.id, userId: { in: users.map((u) => u.id) } } });
@@ -132,7 +143,7 @@ async function listFor(user) {
         { kind: "group", ...(developer ? {} : { members: { some: { userId: user.id } } }) },
         { kind: "direct", members: { some: { userId: user.id } } },
         ...(hasAssistant(user) ? [{ kind: "assistant", members: { some: { userId: user.id } } }] : []),
-        { kind: "client", lastMessageAt: { not: null }, client: { is: clientScope(user) } },
+        { kind: "client", lastMessageAt: { not: null }, client: { is: workScope(user) } },
       ],
     },
     include: { client: { select: { id: true, name: true } } },
@@ -266,15 +277,38 @@ async function notifyMessage(conv, message, author) {
   const { notifyUser } = require("./telegram/notify");
   const f = require("./telegram/format");
   const authorName = personName(author);
+  // @mentioned people (Message.data.mentions): told even in a muted chat.
+  const mentioned = new Set(Array.isArray(message.data?.mentions) ? message.data.mentions : []);
   for (const { user, member } of await recipients(conv)) {
-    if (user.id === author.id || member?.muted) continue;
+    if (user.id === author.id || (member?.muted && !mentioned.has(user.id))) continue;
     if (member?.readAt && Date.now() - member.readAt.getTime() < READING_MS) continue;
-    const title = await displayTitle(conv, user);
+    const chatTitle = await displayTitle(conv, user);
+    const title = mentioned.has(user.id) ? `${authorName} sizni eslatdi · ${chatTitle}` : chatTitle;
     const body = preview(message, conv.kind === "direct" ? null : authorName);
     const link = `/chat/${conv.id}`;
     if (await app.notifyPush(user.id, { kind: "chat", title, body, link, tag: `chat:${conv.id}` })) continue;
     await notifyUser(user.id, "chat", [`💬 <b>${f.escapeHtml(title)}</b>`, f.escapeHtml(body), f.portalLink(link, "Chatni ochish")].join("\n"), undefined, { app: false });
   }
+}
+
+// Something the team should know, said in the client's chat by the person
+// who did it (a hearing's outcome…): the chat is made if needed, and
+// everyone in it is told as for any message. `author`: the signed-in user.
+async function postToClient(clientId, author, text) {
+  let conv = await prisma.conversation.findUnique({ where: { clientId } });
+  if (!conv) {
+    conv = await prisma.conversation.create({ data: { kind: "client", clientId, createdById: author.id } }).catch(async (err) => {
+      if (err.code === "P2002") return prisma.conversation.findUnique({ where: { clientId } });
+      throw err;
+    });
+  }
+  const message = await prisma.message.create({ data: { conversationId: conv.id, authorId: author.id, text }, include: { author: PERSON } });
+  await prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: message.createdAt } });
+  await markRead(conv.id, author.id, message.id);
+  bumpConversation(conv, [author.id])
+    .then(() => notifyMessage(conv, message, author))
+    .catch((err) => console.error("[chat] client post failed:", err.message));
+  return message;
 }
 
 // Every minute: event cards an hour before and at the start -> everyone in
@@ -335,6 +369,8 @@ module.exports = {
   access,
   recipients,
   displayTitle,
+  postToClient,
+  worksOnClient,
   listFor,
   unreadSummary,
   bumpConversation,

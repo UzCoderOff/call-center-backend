@@ -47,10 +47,22 @@ function financeSheets(data, cash) {
   sheets.push({
     name: "Toʻlovlar",
     rows: [
-      ["Sana", "Mijoz", "Nima uchun", "Usul", "Summa", "Advokat", "Masala", "Kiritdi", "Onlayn", "Izoh"],
-      ...data.payments.map((p) => [p.date, p.client.name, KIND[p.kind] || p.kind || "", METHOD[p.method || "none"], p.amount, p.lawyer || "", p.matter || "", p.recordedBy || "", p.format === "online" ? "ha" : "", p.note || ""]),
+      ["Sana", "Mijoz", "Nima uchun", "Usul", "Summa", "Advokat", "Masala", "Kiritdi", "Naqd pulni oldi", "Onlayn", "Izoh"],
+      ...data.payments.map((p) => [
+        p.date,
+        p.client.name,
+        KIND[p.kind] || p.kind || "",
+        METHOD[p.method || "none"],
+        p.amount,
+        p.lawyer || "",
+        p.matter || "",
+        p.recordedBy || "",
+        p.method === "cash" ? p.cashWith || p.recordedBy || "" : "",
+        p.format === "online" ? "ha" : "",
+        p.note || "",
+      ]),
     ],
-    widths: [12, 28, 14, 14, 14, 22, 26, 20, 8, 30],
+    widths: [12, 28, 14, 14, 14, 22, 26, 20, 20, 8, 30],
   });
 
   if (firm && data.sources.reports) {

@@ -93,8 +93,8 @@ router.get("/config", requireDevice, async (req, res, next) => {
     res.json({
       user: publicMe(req.user),
       // The one switch that decides whether this phone asks for call-log /
-      // storage permissions and runs background sync at all.
-      // Only the jobs whose calls matter (src/lib/calling.js).
+      // storage permissions and runs background sync at all — whatever their
+      // job (only some jobs' calls count: src/lib/calling.js).
       collectCalls: Boolean(employee?.active && collectsCalls(employee)),
       syncIntervalMinutes: SYNC_INTERVAL_MINUTES,
       calling: await callingFor(req.device, employee),

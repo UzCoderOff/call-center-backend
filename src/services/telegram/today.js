@@ -7,7 +7,7 @@ const m = require("../materials");
 const f = require("./format");
 const { isManagerUser, ownsCalendar, booksAppointments } = require("./prefs");
 const { canSeeFinance } = require("../../lib/finance");
-const { hasCalls } = require("../../lib/calling");
+const { hasCalls, countsCalls } = require("../../lib/calling");
 const { workScope, lawyerCaseWhere } = require("../../lib/clientAccess");
 const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 
@@ -17,7 +17,7 @@ const { isCallCenter, isCoordinator } = require("../../lib/jobs");
 // only what the portal already shows them.
 
 const canSeeClients = (user) =>
-  isManagerUser(user) || user.role === "LAWYER" || hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
+  isManagerUser(user) || user.role === "LAWYER" || countsCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
 
 // A day's appointments: in their own calendar (the lawyer), or the ones
 // they booked (staff).
@@ -128,12 +128,17 @@ async function caseDateLines(user, now) {
 const PERSONAL_WORDS = { court: "Sud", meeting: "Uchrashuv", work: "Ish", personal: "Shaxsiy", other: "" };
 async function personalLines(user, now) {
   if (user.role !== "LAWYER" && user.role !== "BOSS") return [];
-  const rows = await prisma.personalEvent.findMany({
-    where: { ownerId: user.id, date: now.date, deletedAt: null },
-    orderBy: [{ start: "asc" }, { id: "asc" }],
-    take: 20,
-    select: { kind: true, start: true, end: true, title: true, place: true },
-  });
+  const { rangeWhere, occurrences } = require("../repeats");
+  const rows = (
+    await prisma.personalEvent.findMany({
+      where: { ownerId: user.id, deletedAt: null, ...rangeWhere(now.date, now.date) },
+      orderBy: [{ start: "asc" }, { id: "asc" }],
+      take: 40,
+      select: { kind: true, start: true, end: true, title: true, place: true, date: true, repeat: true, repeatUntil: true, skipDates: true },
+    })
+  )
+    .filter((e) => occurrences(e, now.date, now.date).length > 0)
+    .slice(0, 20);
   if (rows.length === 0) return [];
   return [
     `🗓 <b>Kalendaringizda bugun (${rows.length})</b>`,

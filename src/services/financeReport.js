@@ -41,7 +41,7 @@ function tally(map, key, init) {
   return map.get(key);
 }
 
-// payments      the month's client payments: { id, date, amount, kind, method, note, client, case, recordedBy, appointment }
+// payments      the month's client payments: { id, date, amount, kind, method, note, client, case, recordedBy, cashWith, appointment }
 //               case: { id, matter, lawyer, lawyerId, contractDate } | null; appointment: { format, ownerId } | null
 // trendPayments six months of client payments: { date, amount, kind }
 // cases         every case with a contract: { id, contractAmount, contractDate, lawyer, lawyerId, matter, client, payments: [{ amount, date }] }
@@ -363,6 +363,7 @@ function buildFinance({ month, today, fee, payments, trendPayments, cases, appoi
       lawyer: p.case ? (p.case.lawyerId && names.get(p.case.lawyerId)) || p.case.lawyer : p.appointment?.ownerId ? names.get(p.appointment.ownerId) ?? null : null,
       format: p.appointment?.format ?? null,
       recordedBy: p.recordedBy,
+      cashWith: p.cashWith ?? null,
     })),
     reportEntries: entries
       .slice()

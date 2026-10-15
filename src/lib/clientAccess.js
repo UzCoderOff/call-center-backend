@@ -202,7 +202,30 @@ async function clientIndexFor(user, keys, db = prisma) {
   return index;
 }
 
+// One case and this person's role on it (caseRole) — for the things that
+// belong to a case: its tasks, its discussion. { kase, role }; role null:
+// not theirs to see. The people who work on it: any role but "result".
+const CASE_FOR_ROLE = {
+  id: true,
+  clientId: true,
+  matter: true,
+  status: true,
+  operatorId: true,
+  coordinatorId: true,
+  lawyerId: true,
+  extraLawyers: EXTRA_LAWYERS,
+  client: { select: { id: true, name: true, createdById: true, archivedAt: true, cases: { select: { operatorId: true } } } },
+};
+async function roleOnCase(user, caseId, db = prisma) {
+  const kase = await db.clientCase.findUnique({ where: { id: caseId }, select: CASE_FOR_ROLE });
+  return { kase, role: kase ? caseRole(user, kase, kase.client) : null };
+}
+const worksOnCase = (role) => Boolean(role && role !== "result");
+
 module.exports = {
+  CASE_FOR_ROLE,
+  roleOnCase,
+  worksOnCase,
   CONTRACT_STATUSES,
   lawyerCaseWhere,
   isCaseLawyer,

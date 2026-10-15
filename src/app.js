@@ -107,6 +107,7 @@ app.use("/api/report-templates", organization.templates);
 app.use("/api/calendars", calendarRoutes.calendars);
 app.use("/api/appointments", calendarRoutes.appointments);
 app.use("/api/personal-calendar", require("./routes/personalCalendar"));
+app.use("/api/covers", require("./routes/covers"));
 app.use("/api/clients", clientRoutes.clients);
 app.use("/api/client-cases", clientRoutes.cases);
 app.use("/api/client-cases", caseWork.caseItems);

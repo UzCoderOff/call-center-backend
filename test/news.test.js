@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const { NEWS, messageFor, parseDeployLog, deployMessage } = require("../src/services/news");
 
 test("what's new: the boss gets the summary, staff only what touches their work, the developer nothing", () => {
-  const news = NEWS[0];
+  const news = NEWS.find((n) => n.id === "2026-10-14-calendars");
   const boss = { role: "BOSS", employee: null, calendar: null };
   const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", extraJobs: "" }, calendar: null };
@@ -17,6 +17,27 @@ test("what's new: the boss gets the summary, staff only what touches their work,
   assert.match(messageFor(news, office), /yuborilmaydi/);
   assert.equal(messageFor(news, quiet), null);
   assert.equal(messageFor(news, developer), null);
+});
+
+test("what's new 2026-10-15: office calls back, who took the cash", () => {
+  const news = NEWS.find((n) => n.id === "2026-10-15-office-calls-cash");
+  assert.equal(NEWS[0], news);
+  const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", extraJobs: "" }, calendar: null };
+  const office = { role: "EMPLOYEE", employee: { job: "office", collectCalls: true, calendarAccess: "none", extraJobs: "" }, calendar: null };
+  const quiet = { role: "EMPLOYEE", employee: { job: "office", collectCalls: false, calendarAccess: "none", extraJobs: "" }, calendar: null };
+  const lawyer = { role: "LAWYER", employee: null, calendar: { active: true } };
+  assert.match(messageFor(news, office), /yana Ledger/);
+  assert.doesNotMatch(messageFor(news, office), /Naqd/);
+  assert.match(messageFor(news, operator), /Naqd pulni kim oldi/);
+  assert.doesNotMatch(messageFor(news, operator), /yana Ledger/);
+  assert.equal(messageFor(news, quiet), null);
+  assert.match(messageFor(news, lawyer), /Mijozni ochsangiz, ishi shu yerda/);
+  assert.doesNotMatch(messageFor(news, lawyer), /Naqd/);
+  const coordinator = { role: "EMPLOYEE", employee: { job: "coordinator", collectCalls: false, calendarAccess: "none", extraJobs: "" }, calendar: null };
+  assert.match(messageFor(news, coordinator), /Qarzlar/);
+  const boss = messageFor(news, { role: "BOSS", employee: null, calendar: null });
+  assert.match(boss, /Kassa/);
+  assert.match(boss, /Kim boʻsh/);
 });
 
 test("the deploy log: recent releases, each with what happened", () => {

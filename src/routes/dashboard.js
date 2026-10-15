@@ -2,11 +2,11 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth, isManager } = require("../middleware/auth");
 const { parseMs, parseId } = require("../utils/params");
-const { computeCallStats, computeDailySeries, blankStats } = require("../services/stats");
+const { computeCallStats, computeDailySeries, blankStats, whose } = require("../services/stats");
 const { getSyncHealth } = require("../services/syncHealth");
 const { diskSpace } = require("../services/diskSpace");
 const { JOBS, parseJobs, hasJob, isCallCenter, jobsOf } = require("../lib/jobs");
-const { CALL_JOBS, hasCalls, countedCallsWhere } = require("../lib/calling");
+const { CALL_JOBS, hasCalls, countsCalls } = require("../lib/calling");
 const { computeFunnel } = require("../services/funnel");
 const { strikeCounts } = require("../services/strikes");
 const { DEFAULT_FEE } = require("../services/consultationFee");
@@ -18,14 +18,14 @@ router.use(requireAuth);
 
 // The "call these people back" preview. Not tied to the selected date
 // range on purpose: it's a to-do list, and anything still unreached within
-// the follow-up window belongs on it.
+// the follow-up window belongs on it. employeeIds: whose phones (null: the
+// firm's phones whose calls count).
 async function needsCallbackPreview(employeeIds) {
   const where = {
     missed: true,
     followUp: { in: NEEDS_CALLBACK_STATUSES },
     callTimestampMs: { gte: BigInt(Date.now() - FOLLOW_UP_WINDOW_MS) },
-    ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
-    ...countedCallsWhere(),
+    ...whose(employeeIds),
   };
   const [count, items] = await Promise.all([
     prisma.callLog.count({ where }),
@@ -92,7 +92,9 @@ router.get("/", async (req, res, next) => {
         computeDailySeries({ employeeIds, from, to, tzOffsetMin }),
         needsCallbackPreview(employeeIds),
         getSyncHealth([self]),
-        computeFunnel({ employeeIds, from, to, fee: DEFAULT_FEE }),
+        // Calls to contracts: the call center's and coordinators' work, not
+        // an office worker's own calls (src/lib/calling.js).
+        countsCalls(self) ? computeFunnel({ employeeIds, from, to, fee: DEFAULT_FEE }) : null,
         strikeCounts(employeeIds, firmDate().slice(0, 7)),
         previousTotals(employeeIds, prevFrom, prevTo),
       ]);
@@ -108,9 +110,9 @@ router.get("/", async (req, res, next) => {
       orderBy: { name: "asc" },
     });
     // ?jobs=call_center,… — whose phones these numbers are about (the portal
-    // asks for the call center by default). Only jobs whose calls matter
-    // count (src/lib/calling.js); without it: all of those.
-    const jobs = (parseJobs(req.query.jobs) || CALL_JOBS).filter((j) => CALL_JOBS.includes(j));
+    // asks for the call center by default; office phones are a tap away).
+    // Without it: the jobs whose calls count (src/lib/calling.js).
+    const jobs = parseJobs(req.query.jobs) || CALL_JOBS;
     const employees = everyone.filter((e) => jobsOf(e).some((j) => jobs.includes(j)));
     const employeeIds = employees.map((e) => e.id);
     // How many people with calls (their phone, or Ledger's line) each job
@@ -156,7 +158,7 @@ router.get("/", async (req, res, next) => {
       needsCallback,
       funnel,
       employees: rows,
-      jobs: jobs || JOBS,
+      jobs,
       phonesByJob,
       strikeRules: strikes.rules.enabled ? { minutes: strikes.rules.minutes, limit: strikes.rules.limit, fine: strikes.rules.fine } : null,
       ...(disk ? { disk } : {}),

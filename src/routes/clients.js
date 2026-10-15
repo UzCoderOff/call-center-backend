@@ -12,12 +12,14 @@ const { lawyerAccounts, lawyerById, displayName, LAWYER_NAME } = require("../lib
 const { canSeeFinance, canSeeCaseMoney, financeForbidden, caseWithoutMoney, isConsultation, CONSULTATION } = require("../lib/finance");
 const { CONTRACT_STATUSES, clientScope, workScope, ownCaseWhere, caseRole, clientLevel, requireClientAccess, accessibleClientIds, clientIndexFor, lawyerCaseWhere, isCaseLawyer, EXTRA_LAWYERS } = require("../lib/clientAccess");
 const { isCoordinator, isCallCenter, hasJob, jobsOf } = require("../lib/jobs");
-const { hasCalls } = require("../lib/calling");
+const { countsCalls } = require("../lib/calling");
 const history = require("../services/caseHistory");
 const { syncNextCall, FOLLOW_UP_INCLUDE } = require("../services/clientFollowUps");
 const { events: bus } = require("../lib/events");
 const { linkConsultationFees } = require("../services/consultationFee");
 const { scheduleOf, normalizeSchedule } = require("../services/installments");
+const { cashHolderId } = require("../services/cash");
+const entries = require("../services/caseEntries");
 const env = require("../config/env");
 
 // The clients database (replaces the firm's Excel CRM).
@@ -53,7 +55,7 @@ const env = require("../config/env");
 // it (they check it before booking the client in).
 
 function canUseClients(user) {
-  return isManager(user) || isLawyer(user) || Boolean(hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee));
+  return isManager(user) || isLawyer(user) || Boolean(countsCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee));
 }
 function gate(req, res, next) {
   if (!canUseClients(req.user)) return res.status(403).json({ error: "forbidden" });
@@ -76,7 +78,7 @@ function managersOnly(req, res, next) {
 }
 
 const PAGE_SIZE = 30;
-const PERSON = { select: { id: true, username: true, employee: { select: { name: true } } } };
+const PERSON = { select: { id: true, username: true, name: true, employee: { select: { name: true } } } };
 const today = () => firmNow().date;
 
 function sendError(err, res, next) {
@@ -635,7 +637,7 @@ const CASE_INCLUDE = {
   operator: { select: { id: true, name: true } },
   extraLawyers: { orderBy: { id: "asc" }, select: { userId: true, user: { select: LAWYER_NAME } } },
   coordinator: { select: { id: true, name: true } },
-  payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
+  payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON, cashHolder: PERSON } },
   installments: true,
   stages: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
   dates: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { time: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
@@ -689,7 +691,7 @@ clients.get("/:id", async (req, res, next) => {
         phones: { orderBy: { id: "asc" } },
         createdBy: PERSON,
         cases: { orderBy: { createdAt: "desc" }, include: CASE_INCLUDE },
-        payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON } },
+        payments: { orderBy: [{ date: "desc" }, { id: "desc" }], include: { recordedBy: PERSON, cashHolder: PERSON } },
         events: { where: { deletedAt: null }, orderBy: { createdAt: "desc" }, take: 500, include: { author: PERSON } },
         linksFrom: { include: { to: { include: LINKED } } },
         linksTo: { include: { from: { include: LINKED } } },
@@ -1101,7 +1103,8 @@ cases.patch("/:id", async (req, res, next) => {
       // The main lawyer is never one of the others too.
       if (c.lawyerId) await tx.caseExtraLawyer.deleteMany({ where: { caseId: id, userId: c.lawyerId } });
       for (const l of added) {
-        await tx.caseExtraLawyer.upsert({ where: { caseId_userId: { caseId: id, userId: l.id } }, update: {}, create: { caseId: id, userId: l.id, addedById: req.user.id } });
+        // Already there for a cover: now on the case for good.
+        await tx.caseExtraLawyer.upsert({ where: { caseId_userId: { caseId: id, userId: l.id } }, update: { coverId: null }, create: { caseId: id, userId: l.id, addedById: req.user.id } });
         await log("assign", "", { role: "extra_lawyer", from: null, to: l.name });
       }
       for (const x of removed) {
@@ -1142,7 +1145,7 @@ cases.put("/:id/installments", async (req, res, next) => {
     await prisma.$transaction([
       prisma.caseInstallment.deleteMany({ where: { caseId: id } }),
       ...(items.length ? [prisma.caseInstallment.createMany({ data: items.map((i) => ({ ...i, caseId: id })) })] : []),
-      prisma.clientEvent.create({ data: { clientId: current.clientId, caseId: id, kind: "note", text: items.length ? `Toʻlov jadvali: ${items.length} ta toʻlov` : "Toʻlov jadvali olib tashlandi", authorId: req.user.id } }),
+      prisma.clientEvent.create({ data: { clientId: current.clientId, caseId: id, kind: "schedule", text: items.length ? `Toʻlov jadvali: ${items.length} ta toʻlov` : "Toʻlov jadvali olib tashlandi", data: { count: items.length }, authorId: req.user.id } }),
     ]);
     const k = await prisma.clientCase.findUnique({ where: { id }, include: { operator: { select: { id: true, name: true } }, payments: { orderBy: { date: "desc" } }, installments: true } });
     res.json(withMoney(k));
@@ -1189,7 +1192,9 @@ clients.post("/:id/payments", async (req, res, next) => {
       b.kind = CONSULTATION;
     }
     const data = cl.normalizePayment(b);
-    let payment = await prisma.payment.create({ data: { ...data, clientId, caseId, recordedById: req.user.id } });
+    // Cash: who took it (Kassa) — "me" when they did.
+    const holder = data.method === "cash" ? await cashHolderId(b.cashWith, req.user.id) : null;
+    let payment = await prisma.payment.create({ data: { ...data, cashHolderId: holder ?? null, clientId, caseId, recordedById: req.user.id } });
     await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
     // A consultation fee: tie it to the client's appointment, so the
     // calendar shows it as paid.
@@ -1205,7 +1210,8 @@ clients.post("/:id/payments", async (req, res, next) => {
 const payments = express.Router();
 payments.use(requireAuth, gate, noLawyers);
 
-// Correcting a payment ({ amount?, date?, method?, kind?, note?, caseId? }):
+// Correcting a payment ({ amount?, date?, method?, kind?, note?, caseId?,
+// cashWith? }):
 // managers any time (a contract payment only with Moliya); whoever recorded
 // it on the day they recorded it (firm time), while they may still record it
 // — a consultation fee: anyone working with the client; a contract payment:
@@ -1236,6 +1242,14 @@ payments.patch("/:id", async (req, res, next) => {
         if (!k || (!manager && (!roles.get(k.id) || roles.get(k.id) === "result"))) throw badRequest("case is not this client's");
         data.caseId = k.id;
       }
+    }
+    // Cash: who took it. Not cash any more: nobody.
+    const method = data.method !== undefined ? data.method : payment.method;
+    if (method !== "cash") {
+      if (payment.cashHolderId != null) data.cashHolderId = null;
+    } else {
+      const holder = await cashHolderId(b.cashWith, payment.recordedById);
+      if (holder !== undefined && holder !== payment.cashHolderId) data.cashHolderId = holder;
     }
     const after = { ...payment, ...data };
     // Becoming (or moving) a contract payment needs the right to record one there.
@@ -1277,20 +1291,24 @@ payments.delete("/:id", managersOnly, async (req, res, next) => {
 const NOTE_CHANNELS = ["telegram", "meeting", "phone", "sms"];
 
 // A note about the client, or about one of their cases (caseId) — a note
-// on a case is seen by the people on that case only.
+// on a case is seen by the people on that case only. With a `type`, it's a
+// history entry with its details (services/caseEntries.js): a hearing's
+// next date and a decision's deadline become key dates of the case too —
+// for the people who work on its road (managers, its lawyers, coordinator).
 clients.post("/:id/notes", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
     const { roles, level } = await requireClientAccess(req.user, clientId, { write: true });
-    const note = cl.text(req.body?.text, 4000);
-    if (!note) throw badRequest("text is required");
     let caseId = null;
     if (req.body?.caseId != null) {
       caseId = parseId(req.body.caseId, "caseId");
       const k = await prisma.clientCase.findFirst({ where: { id: caseId, clientId }, select: { id: true } });
       if (!k || (level !== "manager" && (!roles.get(caseId) || roles.get(caseId) === "result"))) throw badRequest("case is not this client's");
     }
+    if (req.body?.type !== undefined && req.body?.type !== null) return res.status(201).json(await typedEntry(req, clientId, caseId, roles, level));
+    const note = cl.text(req.body?.text, 4000);
+    if (!note) throw badRequest("text is required");
     // How the talk happened, when it wasn't in Ledger: a Telegram chat, a
     // meeting, a call from a personal phone, an SMS (null: just a note).
     const channel = NOTE_CHANNELS.includes(req.body?.channel) ? req.body.channel : null;
@@ -1304,6 +1322,41 @@ clients.post("/:id/notes", async (req, res, next) => {
     sendError(err, res, next);
   }
 });
+
+async function typedEntry(req, clientId, caseId, roles, level) {
+  let e;
+  try {
+    e = entries.normalizeEntry(req.body, today());
+  } catch (err) {
+    if (err instanceof entries.EntryError) throw badRequest(err.message);
+    throw err;
+  }
+  if (entries.CASE_TYPES.includes(e.type) && caseId == null) throw badRequest("case is required");
+  const role = level === "manager" ? "manager" : caseId != null ? roles.get(caseId) : null;
+  if ((e.next || e.deadline) && !["manager", "lawyer", "coordinator"].includes(role)) throw Object.assign(new Error("forbidden"), { status: 403 });
+  if (e.data.fileId) {
+    const file = await prisma.clientFile.findFirst({ where: { id: e.data.fileId, clientId, deletedAt: null }, select: { id: true, caseId: true } });
+    // The case's own files and the client's; not another case's.
+    if (!file || (file.caseId != null && file.caseId !== caseId)) throw badRequest("file is not this case's");
+  }
+  const kase = caseId != null ? { id: caseId, clientId } : null;
+  const event = await prisma.$transaction(async (tx) => {
+    if (e.next) {
+      const row = await entries.addKeyDate(tx, { kase, userId: req.user.id, kind: "hearing", ...e.next });
+      e.data.nextDateId = row.id;
+      e.data.next = { date: row.date, time: row.time, place: row.place };
+    }
+    if (e.deadline) {
+      const row = await entries.addKeyDate(tx, { kase, userId: req.user.id, kind: "deadline", ...e.deadline });
+      e.data.deadlineId = row.id;
+      e.data.deadline = { date: row.date, title: row.title };
+    }
+    const created = await tx.clientEvent.create({ data: { clientId, caseId, kind: "note", text: e.text, data: e.data, authorId: req.user.id }, include: { author: PERSON } });
+    await tx.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+    return created;
+  });
+  return event;
+}
 
 const notes = express.Router();
 notes.use(requireAuth, gate);
@@ -1569,6 +1622,8 @@ function auditSummary(r, money = true) {
     const shown = money || (d.before?.kind === CONSULTATION && d.after?.kind === CONSULTATION);
     return { amount: shown ? d.after?.amount ?? null : null };
   }
+  // Kassa: who has a cash payment's money (routes/cash.js) — Moliya only.
+  if (r.action === "payment.cashHolder") return { amount: money ? d.amount ?? null : null };
   if (r.action === "clients.bulk") return { clients: d.clients, cases: d.cases, kind: d.kind, name: d.name ?? null };
   if (r.entity === "material") return { title: d.title ?? null, file: d.name ?? null };
   return {};

@@ -65,14 +65,17 @@ function finalize(stats, delays) {
   return stats;
 }
 
-// employeeIds: array of Employee.id to include, or null for everyone. Only
-// the calls that count (src/lib/calling.js: the call center's and the
-// coordinators' phones) — anyone else's are left out.
+// These people's calls, or (null) the firm's calls that count.
+const whose = (employeeIds) => (employeeIds ? { employeeId: { in: employeeIds } } : countedCallsWhere());
+
+// employeeIds: array of Employee.id to include (whoever they are — an office
+// worker's own numbers, the phones a manager switched on), or null for the
+// firm: then only the calls that count (src/lib/calling.js: the call
+// center's and the coordinators' phones).
 // Returns { totals, byEmployee: Map<employeeId, stats> }.
 async function computeCallStats({ employeeIds = null, from, to }) {
   const where = {
-    ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
-    ...countedCallsWhere(),
+    ...whose(employeeIds),
     ...timeWhere(from, to),
   };
 
@@ -143,8 +146,7 @@ async function computeDailySeries({ employeeIds = null, from, to, tzOffsetMin = 
 
   const calls = await prisma.callLog.findMany({
     where: {
-      ...(employeeIds ? { employeeId: { in: employeeIds } } : {}),
-      ...countedCallsWhere(),
+      ...whose(employeeIds),
       ...timeWhere(start, end),
     },
     select: { callTimestampMs: true, missed: true },
@@ -166,4 +168,4 @@ async function computeDailySeries({ employeeIds = null, from, to, tzOffsetMin = 
   return [...days.values()];
 }
 
-module.exports = { computeCallStats, computeDailySeries, blankStats };
+module.exports = { computeCallStats, computeDailySeries, blankStats, whose };

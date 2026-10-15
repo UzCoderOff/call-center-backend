@@ -23,7 +23,8 @@ function normalizeFee(b = {}) {
 
 // Records the fee for `appointment` (which must belong to `clientId`) on the
 // client's current open case — the one the booking made or found.
-async function recordFee(tx, { appointment, clientId, user, amount, method }) {
+// cashHolderId: cash someone else took (services/cash.js).
+async function recordFee(tx, { appointment, clientId, user, amount, method, cashHolderId = null }) {
   const openCase = await tx.clientCase.findFirst({
     where: { clientId, status: { in: cl.OPEN_STATUSES } },
     orderBy: { updatedAt: "desc" },
@@ -39,6 +40,7 @@ async function recordFee(tx, { appointment, clientId, user, amount, method }) {
       kind: CONSULTATION,
       date: firmNow().date,
       recordedById: user.id,
+      cashHolderId: method === "cash" ? cashHolderId : null,
     },
     select: { id: true, amount: true, method: true, date: true },
   });

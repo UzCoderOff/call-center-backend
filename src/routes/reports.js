@@ -9,7 +9,7 @@ const { computeCallStats } = require("../services/stats");
 const { autoReportDays, addUp, checkRange, asksForm, MAX_DAYS } = require("../services/autoReport");
 const { canSeeFinance, consultationPaymentsOnly, allPayments } = require("../lib/finance");
 const { workingDates } = require("../services/workdays");
-const { hasCalls } = require("../lib/calling");
+const { countsCalls } = require("../lib/calling");
 
 // The payments line of automatic reports: all payments for people with
 // Moliya, the consultation fees only for everyone else (src/lib/finance.js).
@@ -50,7 +50,7 @@ const REPORT_INCLUDE = {
 };
 
 async function callStatsForDay(employee, date) {
-  if (!hasCalls(employee)) return null;
+  if (!countsCalls(employee)) return null;
   const { from, to } = firmDayRange(date);
   const { totals } = await computeCallStats({ employeeIds: [employee.id], from, to });
   return totals;

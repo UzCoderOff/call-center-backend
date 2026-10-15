@@ -2,7 +2,7 @@ const prisma = require("../../lib/prisma");
 const { phoneKey } = require("../../lib/phone");
 const { isManager, isLawyer } = require("../../middleware/auth");
 const { clientIndexFor, clientLevel } = require("../../lib/clientAccess");
-const { hasCalls } = require("../../lib/calling");
+const { countsCalls } = require("../../lib/calling");
 const { isCoordinator } = require("../../lib/jobs");
 const { isExtension } = require("./numbers");
 
@@ -63,7 +63,7 @@ const SERVICE = {
 
 const canBook = (user) => isManager(user) || user.employee?.calendarAccess === "book";
 const canAddClient = (user) =>
-  isManager(user) || isLawyer(user) || hasCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
+  isManager(user) || isLawyer(user) || countsCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
 
 async function callerCard(user, number) {
   const raw = String(number ?? "").trim();

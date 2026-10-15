@@ -22,7 +22,7 @@ const chat = require("../services/chat");
 //   POST   /api/chat/:id/read             { messageId } — read up to there
 //   PUT    /api/chat/:id/mute             { muted }
 //   GET    /api/chat/:id/messages         ?after=<id> (new ones) | ?before=<id> (older), up to 50; marks read
-//   POST   /api/chat/:id/messages         { text, event?: { title, at } }
+//   POST   /api/chat/:id/messages         { text, event?: { title, at }, mentions?: [userId] }
 //   POST   /api/chat/:id/actions/:mid     { decision: "confirm" | "cancel" } — Ledger AI's
 //                                         offer to do something (its owner)
 //   PATCH  /api/chat/:id/messages/:mid    { text } (its author)
@@ -39,8 +39,10 @@ function notFound() {
 }
 const forbidden = () => Object.assign(new Error("forbidden"), { status: 403 });
 
+const CONV_INCLUDE = { client: { select: { id: true, name: true } } };
+
 async function conversationFor(req, write = false) {
-  const conv = await prisma.conversation.findUnique({ where: { id: parseId(req.params.id) }, include: { client: { select: { id: true, name: true } } } });
+  const conv = await prisma.conversation.findUnique({ where: { id: parseId(req.params.id) }, include: CONV_INCLUDE });
   if (!conv) throw notFound();
   const can = await chat.access(req.user, conv);
   if (!can.read || (write && !can.write)) throw notFound();
@@ -71,8 +73,9 @@ async function memberIdsFrom(value, creatorId) {
 }
 
 // Who's in it, for everyone in it: a group's or private chat's members; the
-// Everyone chat: every active account. (A client chat: whoever may see the
-// client — not listed.)
+// Everyone chat: every active account; a client's chat: whoever may see the
+// client (for @mentions). The developer looks after every chat but isn't
+// one of the people in the shared ones — not listed there (2026-10-15).
 const MEMBER_PERSON = { select: { ...chat.PERSON.select, employee: { select: { name: true, active: true, position: { select: { name: true } } } } } };
 const memberLine = (u) => ({ id: u.id, name: chat.personName(u), role: u.role, position: u.employee?.position?.name ?? null });
 
@@ -84,7 +87,12 @@ async function membersOf(conv) {
   }
   if (conv.kind === "everyone") {
     const users = await prisma.user.findMany({ where: { active: true }, select: MEMBER_PERSON.select });
-    return users.filter(chat.activeUser).map(memberLine).sort((a, b) => a.name.localeCompare(b.name));
+    return users.filter((u) => chat.activeUser(u) && !chat.isDeveloper(u)).map(memberLine).sort((a, b) => a.name.localeCompare(b.name));
+  }
+  if (conv.kind === "client") {
+    const ids = (await chat.recipients(conv)).filter((r) => !chat.isDeveloper(r.user)).map((r) => r.user.id);
+    const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: MEMBER_PERSON.select });
+    return users.map(memberLine).sort((a, b) => a.name.localeCompare(b.name));
   }
   return null;
 }
@@ -187,6 +195,9 @@ router.get("/client/:clientId", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.clientId, "clientId");
     await requireClientAccess(req.user, clientId);
+    // Only the people working on the client (not an operator who only sees
+    // the result after the contract).
+    if (!(await chat.worksOnClient(req.user, clientId))) throw notFound();
     const conv =
       (await prisma.conversation.findUnique({ where: { clientId }, include: { client: { select: { id: true, name: true } } } })) ||
       (await prisma.conversation.create({ data: { kind: "client", clientId, createdById: req.user.id }, include: { client: { select: { id: true, name: true } } } }).catch(async (err) => {
@@ -329,8 +340,15 @@ router.post("/:id/messages", async (req, res, next) => {
     } else if (!text) {
       throw badRequest("text is required");
     }
+    // @mentions: people in this chat, told even when they muted it.
+    let data;
+    if (Array.isArray(b.mentions) && b.mentions.length && conv.kind !== "assistant") {
+      const wanted = new Set(b.mentions.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0 && v !== req.user.id));
+      const ids = (await chat.recipients(conv)).map((r) => r.user.id).filter((id) => wanted.has(id));
+      if (ids.length) data = { mentions: ids };
+    }
     const message = await prisma.message.create({
-      data: { conversationId: conv.id, authorId: req.user.id, text, eventTitle, eventAt },
+      data: { conversationId: conv.id, authorId: req.user.id, text, eventTitle, eventAt, ...(data ? { data } : {}) },
       include: { author: chat.PERSON },
     });
     await prisma.conversation.update({ where: { id: conv.id }, data: { lastMessageAt: message.createdAt } });

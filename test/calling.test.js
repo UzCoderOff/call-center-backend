@@ -1,22 +1,29 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { hasCalls, collectsCalls, callsMatter, countedCallsWhere, CALL_JOBS } = require("../src/lib/calling");
+const { hasCalls, collectsCalls, countsCalls, callsMatter, countedCallsWhere, CALL_JOBS } = require("../src/lib/calling");
 
-// Only the call center's and the coordinators' calls matter (2026-10-14).
-test("calls count for the call center and coordinators only", () => {
+// Everyone's calls are seen (2026-10-15); only the call center's and the
+// coordinators' count (2026-10-14).
+test("calls are seen for everyone, counted for the call center and coordinators only", () => {
   const phone = { collectCalls: true, pbxCalling: false, extraJobs: "" };
-  assert.equal(hasCalls({ ...phone, job: "call_center" }), true);
-  assert.equal(hasCalls({ ...phone, job: "coordinator" }), true);
-  assert.equal(hasCalls({ ...phone, job: "office" }), false);
-  assert.equal(hasCalls({ ...phone, job: "other" }), false);
+  for (const job of ["call_center", "coordinator", "office", "other"]) {
+    assert.equal(hasCalls({ ...phone, job }), true, job);
+    assert.equal(collectsCalls({ ...phone, job }), true, job);
+  }
+  assert.equal(countsCalls({ ...phone, job: "call_center" }), true);
+  assert.equal(countsCalls({ ...phone, job: "coordinator" }), true);
+  assert.equal(countsCalls({ ...phone, job: "office" }), false);
+  assert.equal(countsCalls({ ...phone, job: "other" }), false);
   // An office worker who also coordinates: their calls count.
-  assert.equal(hasCalls({ ...phone, job: "office", extraJobs: "coordinator" }), true);
+  assert.equal(countsCalls({ ...phone, job: "office", extraJobs: "coordinator" }), true);
   // The switch still matters.
   assert.equal(hasCalls({ ...phone, collectCalls: false, job: "call_center" }), false);
-  assert.equal(hasCalls({ collectCalls: false, pbxCalling: true, job: "call_center" }), true);
+  assert.equal(countsCalls({ ...phone, collectCalls: false, job: "call_center" }), false);
+  assert.equal(hasCalls({ collectCalls: false, pbxCalling: true, job: "office" }), true);
+  assert.equal(countsCalls({ collectCalls: false, pbxCalling: true, job: "call_center" }), true);
   assert.equal(collectsCalls({ collectCalls: false, pbxCalling: true, job: "call_center" }), false);
-  assert.equal(collectsCalls({ ...phone, job: "office" }), false);
   assert.equal(callsMatter(null), false);
+  assert.equal(hasCalls(null), false);
 });
 
 test("the call log where: the phones of people with those jobs", () => {

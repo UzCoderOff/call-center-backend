@@ -6,7 +6,7 @@ const { generateUniqueEmployeeId } = require("../utils/employeeId");
 const { generateTempPassword } = require("../lib/tempPassword");
 const { parseId, badRequest } = require("../utils/params");
 const { getSyncHealth } = require("../services/syncHealth");
-const { hasCalls, collectsCalls } = require("../lib/calling");
+const { hasCalls, collectsCalls, countsCalls } = require("../lib/calling");
 const pbxProvision = require("../services/pbx/provision");
 
 const router = express.Router();
@@ -56,6 +56,7 @@ function publicEmployee(employee, viewerRole, sync) {
     collectCalls: employee.collectCalls,
     pbxCalling: employee.pbxCalling,
     hasCalls: hasCalls(employee),
+    countsCalls: countsCalls(employee),
     phoneLine: phoneLine(employee.pbx),
     autoReport: employee.autoReport,
     alsoForm: employee.alsoForm,

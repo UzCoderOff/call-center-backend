@@ -29,11 +29,11 @@ const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 const pct = (part, whole) => (whole > 0 ? Math.round((part / whole) * 100) : null);
 const connected = (c) => !c.missed && c.durationSeconds > 0;
 
-// employeeIds: whose phones (null: everyone's). from/to: epoch ms.
+// employeeIds: whose phones (null: the firm's phones whose calls count —
+// src/lib/calling.js). from/to: epoch ms.
 async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now(), db = prisma }) {
   const range = { ...(from != null ? { gte: BigInt(from) } : {}), ...(to != null ? { lte: BigInt(to) } : {}) };
-  // The phones whose calls count (src/lib/calling.js).
-  const own = { ...(employeeIds ? { employeeId: { in: employeeIds } } : {}), ...countedCallsWhere() };
+  const own = employeeIds ? { employeeId: { in: employeeIds } } : countedCallsWhere();
   const calls = await db.callLog.findMany({
     where: { ...own, phoneKey: { not: null }, callTimestampMs: range },
     select: { phoneKey: true, callType: true, missed: true, durationSeconds: true, callTimestampMs: true },

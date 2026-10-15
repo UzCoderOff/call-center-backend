@@ -3,7 +3,7 @@ const env = require("../config/env");
 const { canSeeFinance } = require("./finance");
 const { asksForm } = require("../services/autoReport");
 const { jobsOf } = require("./jobs");
-const { hasCalls } = require("./calling");
+const { hasCalls, countsCalls } = require("./calling");
 
 // The portal login cookie. Shared by the web login (routes/auth.js) and the
 // Android app, which gets a session cookie for its in-app portal view from
@@ -44,6 +44,8 @@ function publicMe(user) {
           collectCalls: e.collectCalls,
           // Calls at all: synced from their phone, or through Ledger's line.
           hasCalls: hasCalls(e),
+          // ...and they count (call center, coordinators): client lists.
+          countsCalls: countsCalls(e),
           // Ledger's phone line: whether it's on for them, and their phone ID.
           pbxCalling: e.pbxCalling,
           ext: e.pbx?.ext ?? null,

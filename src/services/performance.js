@@ -7,7 +7,7 @@ const { workingDates } = require("./workdays");
 const { BUILTIN, MONEY, FINANCE_ONLY, parseKey, formMeasures, reportValues, targetsFor } = require("./performanceMetrics");
 const { scheduleOf } = require("./installments");
 const { jobOf, jobsOf, hasJob } = require("../lib/jobs");
-const { hasCalls } = require("../lib/calling");
+const { countsCalls } = require("../lib/calling");
 const { strikeCounts } = require("./strikes");
 
 // Each person's month at work, for the performance page ("Natijalar"):
@@ -158,7 +158,7 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
 
     // ------------------------------------------------------------ calls
     let calls = null;
-    if (hasCalls(e)) {
+    if (countsCalls(e)) {
       const s = callStats.byEmployee.get(e.id);
       const sum = (key) => myDays.reduce((t, d) => t + (d.calls?.[key] || 0), 0);
       const total = s?.totalCalls || 0;
@@ -365,7 +365,7 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
       // With the rule on (or any given): this month's count against the limit.
       strikes: strikeRule.enabled || strikeMap.get(e.id)?.count ? { ...strikeMap.get(e.id), minutes: strikeRule.minutes } : null,
       metrics,
-      employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, hasCalls: hasCalls(e), workDays: e.workDays, holidaysOff: e.holidaysOff },
+      employee: { id: e.id, name: e.name, active: e.active, position: e.position?.name ?? null, office: e.office?.name ?? null, collectCalls: e.collectCalls, hasCalls: countsCalls(e), workDays: e.workDays, holidaysOff: e.holidaysOff },
       workDays: { total: workMine.length, soFar: workMineSoFar.length, away: mineCal.off.filter((o) => o.kind !== "weekly" && o.date >= joined).map((o) => ({ date: o.date, kind: o.kind, name: o.name ?? null })) },
       calls,
       clientsAdded: myDays.reduce((t, d) => t + d.newClients, 0),

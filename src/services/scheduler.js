@@ -12,6 +12,8 @@ const { firmNow } = require("../lib/firmTime");
 //                    (services/consultSummary.js)
 //   every hour       consultations gone quiet to the archive (services/clientArchive.js);
 //                    planned case stages whose day has come (services/caseHistory.js)
+//   every 10 minutes covers for lawyers who are away begin and end on their
+//                    days (services/covers.js)
 // Each run waits for the previous one; an error is logged, never thrown.
 
 const STRIKES_EVERY_MS = 5 * 60 * 1000;
@@ -88,7 +90,19 @@ async function newsTick() {
   }
 }
 
+// Covers for lawyers who are away (services/covers.js).
+const COVERS_EVERY_MS = 10 * 60 * 1000;
+async function coversTick() {
+  try {
+    await require("./covers").syncCovers();
+  } catch (err) {
+    console.error("[covers] failed:", err.message);
+  }
+}
+
 function start() {
+  setTimeout(coversTick, 40 * 1000).unref();
+  setInterval(coversTick, COVERS_EVERY_MS).unref();
   setTimeout(newsTick, 45 * 1000).unref();
   setInterval(newsTick, NEWS_EVERY_MS).unref();
   setTimeout(aiTick, 90 * 1000).unref();
@@ -99,4 +113,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick, newsTick };
+module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick };

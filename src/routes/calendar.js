@@ -9,6 +9,10 @@ const { clientForBooking } = require("../lib/clientsDb");
 const { accessibleClientIds, requireClientAccess } = require("../lib/clientAccess");
 const { events } = require("../lib/events");
 const fee = require("../services/consultationFee");
+const { cashHolderId } = require("../services/cash");
+
+// A consultation fee as shown on the appointment: and, for cash, who took it.
+const FEE_SELECT = { id: true, amount: true, method: true, date: true, cashHolder: { select: { id: true, name: true, username: true, employee: { select: { name: true } } } } };
 
 // The lawyer's calendar.
 //
@@ -40,7 +44,7 @@ const APPOINTMENT_INCLUDE = {
   calendar: { select: { id: true, name: true, ownerId: true } },
   // The consultation fee paid for it, if any (visible to everyone who sees
   // the appointment — src/lib/finance.js).
-  payments: { where: { kind: "consultation" }, select: { id: true, amount: true, method: true, date: true } },
+  payments: { where: { kind: "consultation" }, select: FEE_SELECT },
 };
 
 function parseWeekStart(value) {
@@ -392,6 +396,9 @@ calendars.post("/:id/appointments", async (req, res, next) => {
       if (isLawyer(req.user)) return res.status(403).json({ error: "forbidden" });
       if (!phoneKey(clientPhone) && b.clientId == null) return res.status(400).json({ error: "phone_required_for_fee" });
       feeTaken = fee.normalizeFee(b);
+      // Cash: who took it — the client often pays the lawyer or the boss in
+      // the office, not the person booking (Kassa).
+      if (feeTaken.method === "cash") feeTaken.cashHolderId = (await cashHolderId(b.feeCashWith, req.user.id)) ?? null;
     }
 
     // Booked from the client's page: that client (one the booker may see).
@@ -457,7 +464,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
         // A fee already recorded on the client's page now belongs to this
         // appointment (the calendar shows it as paid).
         await fee.linkConsultationFees(tx, bookedFor);
-        appointment.payments = await tx.payment.findMany({ where: { appointmentId: appointment.id, kind: "consultation" }, select: { id: true, amount: true, method: true, date: true } });
+        appointment.payments = await tx.payment.findMany({ where: { appointmentId: appointment.id, kind: "consultation" }, select: FEE_SELECT });
       }
       // A client booked again has clearly been told about the cancelled
       // appointment — take it off the "tell the client" list.
@@ -609,7 +616,7 @@ appointments.patch("/:id", async (req, res, next) => {
 });
 
 // The consultation fee, when it's paid after booking (at the appointment,
-// say): { feeAmount?, feeMethod? }. Whoever may book, or a manager; not
+// say): { feeAmount?, feeMethod?, feeCashWith? }. Whoever may book, or a manager; not
 // lawyers; once per appointment.
 appointments.post("/:id/fee", async (req, res, next) => {
   try {
@@ -622,6 +629,7 @@ appointments.post("/:id/fee", async (req, res, next) => {
     if (appointment.status === "cancelled") return res.status(409).json({ error: "cancelled" });
     if (appointment.payments.length > 0) return res.status(409).json({ error: "fee_already_recorded" });
     const taken = fee.normalizeFee(req.body || {});
+    if (taken.method === "cash") taken.cashHolderId = (await cashHolderId((req.body || {}).feeCashWith, req.user.id)) ?? null;
     const updated = await prisma.$transaction(async (tx) => {
       // Booked without a phone number: no client yet — find or add one now.
       let clientId = appointment.clientId;

@@ -6,6 +6,7 @@ const { firmNow, isValidDate, shiftDate } = require("../lib/firmTime");
 const { LAWYER_ROLES, LAWYER_NAME, displayName } = require("../lib/lawyers");
 const { lawyerCaseWhere, caseRole, isCaseLawyer, EXTRA_LAWYERS } = require("../lib/clientAccess");
 const { events: bus } = require("../lib/events");
+const repeats = require("../services/repeats");
 
 // A lawyer's own calendar (2026-10-14) — their day: court, meetings, work,
 // personal time. Separate from the consultation calendar (routes/calendar.js),
@@ -16,9 +17,13 @@ const { events: bus } = require("../lib/events");
 //   GET    /api/personal-calendar/people           whose calendars you can see
 //   GET    /api/personal-calendar?from=&to=&userId= one person's days (userId
 //                                                  "all": everyone's — managers)
-//   POST   /api/personal-calendar/events           add { ownerId?, date, start?, end?, kind, title, place?, note?, caseId? }
-//   PATCH  /api/personal-calendar/events/:id       change it (move it: date/start/end)
-//   DELETE /api/personal-calendar/events/:id       remove it (kept, hidden)
+//   GET    /api/personal-calendar/free?date=       who's busy when that day — every lawyer
+//                                                  (lawyers and managers; others' details only for managers)
+//   POST   /api/personal-calendar/events           add { ownerId?, date, start?, end?, kind, title, place?, note?, caseId?,
+//                                                  repeat?: "daily"|"workdays"|"weekly", repeatUntil? }
+//   PATCH  /api/personal-calendar/events/:id       change it (move it: date/start/end) — a series: all of it
+//   DELETE /api/personal-calendar/events/:id       remove it (kept, hidden); a series: ?date= takes
+//                                                  out that day only, without it the whole series
 //
 // Who: a lawyer sees and changes their own; the managers (boss, developer)
 // see everyone's and may add to anyone's — the owner is told (Telegram/app).
@@ -101,6 +106,7 @@ function eventFields(b, current = null) {
   let e = data.end !== undefined ? data.end : current?.end ?? null;
   if (s == null && e != null) data.end = e = null;
   if (s != null && e != null && e <= s) throw badRequest("end must be after start");
+  Object.assign(data, repeats.repeatFields(b, data.date ?? current?.date ?? null));
   return data;
 }
 
@@ -126,12 +132,16 @@ async function caseFor(user, caseId, ownerId) {
 const CASE_SELECT = { id: true, matter: true, number: true, client: { select: { id: true, name: true } } };
 const caseOut = (k) => (k ? { id: k.id, matter: k.matter, number: k.number, clientId: k.client.id, clientName: k.client.name } : null);
 
-function eventOut(e, user) {
+// `on`: the day shown (a repeating event's occurrence; its first day otherwise).
+function eventOut(e, user, on = e.date) {
   return {
     type: "event",
     id: e.id,
     ownerId: e.ownerId,
-    date: e.date,
+    date: on,
+    seriesDate: e.date,
+    repeat: e.repeat ?? null,
+    repeatUntil: e.repeatUntil ?? null,
     start: e.start,
     end: e.end,
     kind: e.kind,
@@ -182,7 +192,7 @@ router.get("/", async (req, res, next) => {
 
     const [own, caseDates, consultations] = await Promise.all([
       prisma.personalEvent.findMany({
-        where: { ownerId: { in: ids }, date: range, deletedAt: null },
+        where: { ownerId: { in: ids }, deletedAt: null, ...repeats.rangeWhere(from, to) },
         orderBy: [{ date: "asc" }, { start: "asc" }, { id: "asc" }],
         include: { case: { select: CASE_SELECT }, createdBy: { select: LAWYER_NAME } },
       }),
@@ -201,7 +211,7 @@ router.get("/", async (req, res, next) => {
     ]);
 
     const items = [
-      ...own.map((e) => eventOut(e, req.user)),
+      ...own.flatMap((e) => repeats.occurrences(e, from, to).map((day) => eventOut(e, req.user, day))),
       ...caseDates.flatMap((d) =>
         ids
           .filter((id) => d.case.lawyerId === id || d.case.extraLawyers.some((x) => x.userId === id))
@@ -242,6 +252,65 @@ router.get("/", async (req, res, next) => {
       nowMinutes: now.minutes,
       people: wanted.map((p) => ({ id: p.id, name: displayName(p), canEdit: mayEdit(req.user, p.id), consult: p.calendar ? { id: p.calendar.id, active: p.calendar.active } : null })),
       items,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Who's free that day (Kalendar → "Kim boʻsh?"): every lawyer account's busy
+// times — their own events, their cases' dates (a timed one counts as an
+// hour), the consultations booked with them — to find a time for two of
+// them. A lawyer sees what each of the others has (court, meeting…) but not
+// the details; managers see everything, as on the calendar.
+const CASE_DATE_MINUTES = 60;
+router.get("/free", async (req, res, next) => {
+  try {
+    if (!isLawyer(req.user) && !isManager(req.user)) throw forbidden();
+    const now = firmNow();
+    const date = req.query.date ?? now.date;
+    if (!isValidDate(date)) throw badRequest("invalid date");
+    const lawyers = await prisma.user.findMany({
+      where: { active: true, role: { in: LAWYER_ROLES } },
+      select: { ...LAWYER_NAME, role: true },
+    });
+    const ids = lawyers.map((u) => u.id);
+    const [own, caseDates, consultations] = await Promise.all([
+      prisma.personalEvent.findMany({ where: { ownerId: { in: ids }, deletedAt: null, ...repeats.rangeWhere(date, date) }, include: { case: { select: CASE_SELECT } } }),
+      prisma.caseDate.findMany({
+        where: { deletedAt: null, date, case: { OR: ids.map((id) => lawyerCaseWhere(id)), client: { archivedAt: null } } },
+        select: { id: true, kind: true, time: true, title: true, place: true, case: { select: { ...CASE_SELECT, lawyerId: true, extraLawyers: { select: { userId: true } } } } },
+      }),
+      prisma.appointment.findMany({
+        where: { date, status: { in: ["booked", "attended", "no_show"] }, calendar: { ownerId: { in: ids } } },
+        select: { id: true, start: true, end: true, clientName: true, calendar: { select: { ownerId: true } } },
+      }),
+    ]);
+    const full = (ownerId) => isManager(req.user) || ownerId === req.user.id;
+    const blocks = new Map(ids.map((id) => [id, []]));
+    for (const e of own) {
+      if (!repeats.occurrences(e, date, date).length) continue;
+      blocks.get(e.ownerId).push({ type: "event", kind: e.kind, start: e.start, end: e.start == null ? null : e.end ?? e.start + 60, title: full(e.ownerId) ? e.title : null });
+    }
+    for (const d of caseDates) {
+      for (const id of ids.filter((id) => d.case.lawyerId === id || d.case.extraLawyers.some((x) => x.userId === id))) {
+        blocks.get(id).push({ type: "caseDate", kind: d.kind, start: d.time, end: d.time == null ? null : d.time + CASE_DATE_MINUTES, title: full(id) ? d.title || d.case.client.name : null });
+      }
+    }
+    for (const a of consultations) {
+      blocks.get(a.calendar.ownerId).push({ type: "consultation", kind: "consultation", start: a.start, end: a.end, title: full(a.calendar.ownerId) ? a.clientName : null });
+    }
+    res.json({
+      date,
+      today: now.date,
+      people: lawyers
+        .map((u) => ({
+          id: u.id,
+          name: displayName(u),
+          isMe: u.id === req.user.id,
+          busy: blocks.get(u.id).sort((x, y) => (x.start ?? -1) - (y.start ?? -1)),
+        }))
+        .sort((a, b) => (a.isMe ? -1 : b.isMe ? 1 : a.name.localeCompare(b.name))),
     });
   } catch (err) {
     next(err);
@@ -301,6 +370,14 @@ router.patch("/events/:id", async (req, res, next) => {
 router.delete("/events/:id", async (req, res, next) => {
   try {
     const event = await loadEvent(req);
+    // One day of a series: taken out of it.
+    if (event.repeat && req.query.date) {
+      const day = String(req.query.date);
+      if (!isValidDate(day) || !repeats.occurrences(event, day, day).length) throw badRequest("not a day of this series");
+      const skip = [...new Set([...(Array.isArray(event.skipDates) ? event.skipDates : []), day])].sort();
+      await prisma.personalEvent.update({ where: { id: event.id }, data: { skipDates: skip } });
+      return res.json({ ok: true, skipped: day });
+    }
     await prisma.personalEvent.update({ where: { id: event.id }, data: { deletedAt: new Date() } });
     res.json({ ok: true });
   } catch (err) {

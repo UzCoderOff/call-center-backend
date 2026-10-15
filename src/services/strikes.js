@@ -1,5 +1,6 @@
 const prisma = require("../lib/prisma");
 const { jobWhere } = require("../lib/jobs");
+const { countedCallsWhere } = require("../lib/calling");
 const { firmNow, firmDayRange, shiftDate } = require("../lib/firmTime");
 const { phoneKey } = require("../lib/phone");
 const { getSetting } = require("../lib/settings");
@@ -159,8 +160,10 @@ async function evaluateStrikes({ now = Date.now(), db = prisma } = {}) {
     (await db.employee.findMany({ where: { phoneNumber: { not: null } }, select: { phoneNumber: true } })).map((e) => phoneKey(e.phoneNumber)).filter(Boolean)
   );
   const keys = [...new Set(missed.map((c) => c.phoneKey))];
+  // Their calls on the phones that count (src/lib/calling.js): an office
+  // phone's calls with the same number neither hide nor answer a missed one.
   const calls = await db.callLog.findMany({
-    where: { phoneKey: { in: keys }, callTimestampMs: { gte: BigInt(since - SAME_NUMBER_MS) } },
+    where: { phoneKey: { in: keys }, callTimestampMs: { gte: BigInt(since - SAME_NUMBER_MS) }, ...countedCallsWhere() },
     select: { id: true, phoneKey: true, callType: true, missed: true, durationSeconds: true, callTimestampMs: true },
   });
   const byKey = new Map();

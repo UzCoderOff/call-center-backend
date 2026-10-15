@@ -61,6 +61,7 @@ model User {
   bookedAppointments Appointment[]  @relation("AppointmentBookedBy")
   clientsCreated     Client[]       @relation("ClientCreatedBy")
   paymentsRecorded   Payment[]      @relation("PaymentRecordedBy")
+  cashHeld           Payment[]      @relation("PaymentCashHolder")
   employeeCostsSet   EmployeeCost[] @relation("EmployeeCostSetBy")
   holidaysConfirmed  Holiday[]      @relation("HolidayConfirmedBy")
   absencesRequested  Absence[]      @relation("AbsenceRequestedBy")
@@ -93,34 +94,38 @@ model User {
   materialReads    MaterialRead[]     @relation("MaterialReads")
   telegram         TelegramLink?
 
-  tasksAssigned Task[] @relation("TaskAssignee")
-  tasksCreated  Task[] @relation("TaskCreatedBy")
-  tasksDone     Task[] @relation("TaskDoneBy")
-  caseStagesAdded CaseStage[] @relation("CaseStageBy")
-  caseDatesAdded  CaseDate[]  @relation("CaseDateBy")
-  contactsAdded       ClientContact[]  @relation("ClientContactBy")
-  followUpsAssigned   ClientFollowUp[] @relation("FollowUpAssignee")
-  followUpsCreated    ClientFollowUp[] @relation("FollowUpBy")
-  followUpsDone       ClientFollowUp[] @relation("FollowUpDoneBy")
-  clientFilesAdded    ClientFile[]     @relation("ClientFileBy")
-  strikesCancelled    Strike[]         @relation("StrikeCancelledBy")
-  settingsChanged     Setting[]        @relation("SettingBy")
+  tasksAssigned     Task[]           @relation("TaskAssignee")
+  tasksCreated      Task[]           @relation("TaskCreatedBy")
+  tasksDone         Task[]           @relation("TaskDoneBy")
+  caseStagesAdded   CaseStage[]      @relation("CaseStageBy")
+  caseDatesAdded    CaseDate[]       @relation("CaseDateBy")
+  contactsAdded     ClientContact[]  @relation("ClientContactBy")
+  followUpsAssigned ClientFollowUp[] @relation("FollowUpAssignee")
+  followUpsCreated  ClientFollowUp[] @relation("FollowUpBy")
+  followUpsDone     ClientFollowUp[] @relation("FollowUpDoneBy")
+  clientFilesAdded  ClientFile[]     @relation("ClientFileBy")
+  strikesCancelled  Strike[]         @relation("StrikeCancelledBy")
+  settingsChanged   Setting[]        @relation("SettingBy")
 
-  notices          Notice[]
-  webPush          WebPushSubscription[]
-  remindersFor     Reminder[]           @relation("ReminderFor")
-  remindersSet     Reminder[]           @relation("ReminderBy")
-  conversationsBy  Conversation[]       @relation("ConversationBy")
-  chatMemberships  ConversationMember[]
-  messages         Message[]            @relation("MessageAuthor")
-  summariesWritten Appointment[]        @relation("AppointmentSummaryBy")
-  summaryStrikes   SummaryStrike[]      @relation("SummaryStrikeUser")
-  summaryStrikesCancelled SummaryStrike[] @relation("SummaryStrikeCancelledBy")
-  aiSuggestions    AiSuggestion[]       @relation("AiSuggestionFor")
-  casesHelping     CaseExtraLawyer[]    @relation("CaseExtraLawyerUser")
-  casesHelpAdded   CaseExtraLawyer[]    @relation("CaseExtraLawyerBy")
-  personalEvents   PersonalEvent[]      @relation("PersonalEventOwner")
-  personalAdded    PersonalEvent[]      @relation("PersonalEventBy")
+  notices                 Notice[]
+  webPush                 WebPushSubscription[]
+  remindersFor            Reminder[]            @relation("ReminderFor")
+  remindersSet            Reminder[]            @relation("ReminderBy")
+  conversationsBy         Conversation[]        @relation("ConversationBy")
+  chatMemberships         ConversationMember[]
+  messages                Message[]             @relation("MessageAuthor")
+  summariesWritten        Appointment[]         @relation("AppointmentSummaryBy")
+  summaryStrikes          SummaryStrike[]       @relation("SummaryStrikeUser")
+  summaryStrikesCancelled SummaryStrike[]       @relation("SummaryStrikeCancelledBy")
+  aiSuggestions           AiSuggestion[]        @relation("AiSuggestionFor")
+  casesHelping            CaseExtraLawyer[]     @relation("CaseExtraLawyerUser")
+  casesHelpAdded          CaseExtraLawyer[]     @relation("CaseExtraLawyerBy")
+  personalEvents          PersonalEvent[]       @relation("PersonalEventOwner")
+  personalAdded           PersonalEvent[]       @relation("PersonalEventBy")
+  coversAway              LawyerCover[]         @relation("CoverLawyer")
+  coversTaken             LawyerCover[]         @relation("CoverBy")
+  coversSet               LawyerCover[]         @relation("CoverSetBy")
+  caseOutcomesWritten     CaseDate[]            @relation("CaseDateOutcomeBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -161,7 +166,7 @@ model Employee {
   // What Natijalar measures them on: "auto" (guessed from their settings
   // and work) | "client" (calls, bookings, consultations, contracts) |
   // "office" (their report form's numbers; calls still shown, not the goal).
-  workKind String @default("auto")
+  workKind  String @default("auto")
   // What this person does at the firm — decides which tools and numbers
   // apply to them (2026-10-02; replaces the guessing workKind did):
   //   "call_center"  sales calls: answers and makes calls, books
@@ -175,18 +180,18 @@ model Employee {
   //   "other"
   // Set by the developer (Team → person → Work settings). The migration
   // filled it in from each person's settings.
-  job String @default("other")
+  job       String @default("other")
   // Their other jobs when they do more than one (2026-10-03), comma-separated
   // ("coordinator,office"); `job` stays the main one. Read both through
   // src/lib/jobs.js (jobsOf / hasJob / jobWhere), never `job` alone.
   extraJobs String @default("")
 
-  calls   CallLog[]
-  reports Report[]
-  cases   ClientCase[] @relation("CaseOperator")
+  calls            CallLog[]
+  reports          Report[]
+  cases            ClientCase[]   @relation("CaseOperator")
   // Cases they look after as coordinator (after the contract).
-  coordinatedCases ClientCase[] @relation("CaseCoordinator")
-  costs   EmployeeCost[]
+  coordinatedCases ClientCase[]   @relation("CaseCoordinator")
+  costs            EmployeeCost[]
 
   // Flexible metadata escape hatch — see schema-level note above.
   customFields Json?
@@ -226,12 +231,12 @@ model Employee {
 // needs to let their phone in. One row per person who ever had calling on;
 // the number is never reused.
 model PbxExtension {
-  id         Int      @id @default(autoincrement())
-  employeeId Int      @unique
-  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  id             Int       @id @default(autoincrement())
+  employeeId     Int       @unique
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   // "201", "202"… three digits from 201 up — never 101–104 or 112, which are
   // emergency numbers in Uzbekistan.
-  ext        String   @unique
+  ext            String    @unique
   // md5("<ext>:<realm>:<secret>") — what Asterisk checks the password
   // against — encrypted with PBX_SECRET_KEY (src/services/pbx/secrets.js).
   // The secret itself is shown once: to the phone that signs in, or to the
@@ -566,12 +571,12 @@ model CalendarWeek {
 }
 
 model Appointment {
-  id             Int       @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   calendarId     Int
-  calendar       Calendar  @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  calendar       Calendar       @relation(fields: [calendarId], references: [id], onDelete: Cascade)
   // Linked (or created) by phone number when booked — see routes/calendar.js.
   clientId       Int?
-  client         Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client         Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull)
   date           String // "YYYY-MM-DD", firm timezone
   start          Int // minutes from midnight
   end            Int
@@ -584,24 +589,24 @@ model Appointment {
   notes          String?
   // Where the consultation happens: "office" (the client comes in) or
   // "online" (a video/phone call).
-  format         String    @default("office")
-  status         String    @default("booked") // "booked" | "attended" | "no_show" | "cancelled"
+  format         String         @default("office")
+  status         String         @default("booked") // "booked" | "attended" | "no_show" | "cancelled"
   bookedById     Int
-  bookedBy       User      @relation("AppointmentBookedBy", fields: [bookedById], references: [id])
+  bookedBy       User           @relation("AppointmentBookedBy", fields: [bookedById], references: [id])
   // Set when booked from a call's page.
   callLogId      Int?
-  callLog        CallLog?  @relation(fields: [callLogId], references: [id], onDelete: SetNull)
+  callLog        CallLog?       @relation(fields: [callLogId], references: [id], onDelete: SetNull)
   cancelReason   String?
   cancelledAt    DateTime?
   cancelledById  Int?
   // When someone other than the booker cancels (the lawyer, or an away
   // period), the booker is asked to let the client know, then ticks this.
-  clientInformed Boolean   @default(false)
+  clientInformed Boolean        @default(false)
   // The consultation fee paid for it (see Payment.appointmentId).
   payments       Payment[]
   // The case this consultation was about (set when its summary is written).
   caseId         Int?
-  case           ClientCase? @relation("AppointmentCase", fields: [caseId], references: [id], onDelete: SetNull)
+  case           ClientCase?    @relation("AppointmentCase", fields: [caseId], references: [id], onDelete: SetNull)
   // "Suhbat yakuni": what the specialist who held the consultation (the
   // calendar's owner) wrote afterwards — services/consultSummary.js:
   // { topic, advice, conclusion, prospect: "potential" | "not_potential",
@@ -609,10 +614,10 @@ model Appointment {
   summary        Json?
   summaryAt      DateTime?
   summaryById    Int?
-  summaryBy      User?     @relation("AppointmentSummaryBy", fields: [summaryById], references: [id], onDelete: SetNull)
+  summaryBy      User?          @relation("AppointmentSummaryBy", fields: [summaryById], references: [id], onDelete: SetNull)
   summaryStrike  SummaryStrike?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   @@index([calendarId, date])
   @@index([phoneKey])
@@ -624,46 +629,46 @@ model Appointment {
 // to a client through its phone numbers (the same last-9-digit key as calls,
 // src/lib/phone.js). Rules and value lists: src/services/clients.js.
 model Client {
-  id           Int           @id @default(autoincrement())
-  name         String
-  city         String?
-  email        String?
+  id            Int              @id @default(autoincrement())
+  name          String
+  city          String?
+  email         String?
   // Where they came from: "call" | "telegram" | "instagram" | "referral" |
   // "walk_in" | "other"
-  source       String?
-  notes        String?
+  source        String?
+  notes         String?
   // When someone should call them next — shown on the operator's home that day.
-  nextCallAt   DateTime?
-  nextCallNote String?
+  nextCallAt    DateTime?
+  nextCallNote  String?
   // Name, city, phone digits and case numbers in lowercase Latin (Cyrillic
   // transliterated), so a search in either script finds the client.
-  searchText   String        @default("")
+  searchText    String           @default("")
   // Archived clients are hidden from lists but kept, with everything about
   // them, and can be restored — nothing is deleted by accident.
-  archivedAt   DateTime?
+  archivedAt    DateTime?
   // Kept out of the automatic archive until then (src/services/clientArchive.js):
   // "we may still work with them".
-  keepUntil    DateTime?
+  keepUntil     DateTime?
   // Room for fields added later without a migration (like Employee.customFields).
-  extra        Json?
-  createdById  Int?
-  createdBy    User?         @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  phones       ClientPhone[]
-  cases        ClientCase[]
-  payments     Payment[]
-  events       ClientEvent[]
-  linksFrom    ClientLink[]  @relation("ClientLinkFrom")
-  linksTo      ClientLink[]  @relation("ClientLinkTo")
-  appointments Appointment[]
-  tasks        Task[]
-  reminders    Reminder[]
-  conversation Conversation?
-  contacts     ClientContact[]
-  followUps    ClientFollowUp[]
-  files        ClientFile[]
+  extra         Json?
+  createdById   Int?
+  createdBy     User?            @relation("ClientCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  phones        ClientPhone[]
+  cases         ClientCase[]
+  payments      Payment[]
+  events        ClientEvent[]
+  linksFrom     ClientLink[]     @relation("ClientLinkFrom")
+  linksTo       ClientLink[]     @relation("ClientLinkTo")
+  appointments  Appointment[]
+  tasks         Task[]
+  reminders     Reminder[]
+  conversation  Conversation?
+  contacts      ClientContact[]
+  followUps     ClientFollowUp[]
+  files         ClientFile[]
   aiSuggestions AiSuggestion[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
 
   @@index([nextCallAt])
   @@index([name])
@@ -738,12 +743,14 @@ model ClientCase {
 
   // The lawyer account the case is assigned to. A LAWYER account sees
   // exactly the clients with a case assigned to them.
-  lawyerId      Int?
-  lawyerAccount User? @relation("CaseLawyer", fields: [lawyerId], references: [id], onDelete: SetNull)
+  lawyerId       Int?
+  lawyerAccount  User?             @relation("CaseLawyer", fields: [lawyerId], references: [id], onDelete: SetNull)
   // More lawyers working on it besides the main one (2026-10-14). Each sees
   // the case as its lawyer does (src/lib/clientAccess.js).
-  extraLawyers  CaseExtraLawyer[]
+  extraLawyers   CaseExtraLawyer[]
   personalEvents PersonalEvent[]
+  // The work on it, given to people with a due time (routes/tasks.js).
+  tasks          Task[]
 
   @@index([clientId])
   @@index([operatorId, consultationDate])
@@ -765,6 +772,11 @@ model Payment {
   note          String?
   recordedById  Int?
   recordedBy    User?        @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  // Cash: who took the money, when it isn't whoever recorded it (an operator
+  // records the fee; the client pays the boss or the lawyer in the office).
+  // Kassa counts the cash with them (services/cash.js).
+  cashHolderId  Int?
+  cashHolder    User?        @relation("PaymentCashHolder", fields: [cashHolderId], references: [id], onDelete: SetNull)
   // A consultation fee taken when booking (or at the appointment): which
   // appointment it paid for.
   appointmentId Int?
@@ -776,6 +788,7 @@ model Payment {
   @@index([clientId])
   @@index([caseId])
   @@index([appointmentId])
+  @@index([cashHolderId])
 }
 
 // A client's timeline: notes people write, and what the system records
@@ -966,25 +979,29 @@ model TelegramNotice {
 // (an hour before, and when it's due), and ticks it done — in the portal or
 // right in Telegram. Rules: src/routes/tasks.js.
 model Task {
-  id          Int       @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   title       String
   notes       String?
   assigneeId  Int
-  assignee    User      @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  assignee    User        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
   createdById Int?
-  createdBy   User?     @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy   User?       @relation("TaskCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   // Optional: the client it's about.
   clientId    Int?
-  client      Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  client      Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // Optional: the case it's part of (the case's tasks, 2026-10-15).
+  caseId      Int?
+  case        ClientCase? @relation(fields: [caseId], references: [id], onDelete: SetNull)
   dueAt       DateTime
   doneAt      DateTime?
   doneById    Int?
-  doneBy      User?     @relation("TaskDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  doneBy      User?       @relation("TaskDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   @@index([assigneeId, doneAt, dueAt])
   @@index([dueAt])
+  @@index([caseId])
 }
 
 // What a person costs the firm per month — salary, bonuses, taxes, as one
@@ -1140,8 +1157,12 @@ model CaseDate {
   title       String?
   place       String?
   note        String?
-  // Written afterwards: what happened.
+  // Written afterwards: what happened — by whom and when (a hearing that's
+  // passed without one is asked about: services/outcomes.js).
   outcome     String?
+  outcomeAt   DateTime?
+  outcomeById Int?
+  outcomeBy   User?      @relation("CaseDateOutcomeBy", fields: [outcomeById], references: [id], onDelete: SetNull)
   createdById Int?
   createdBy   User?      @relation("CaseDateBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime   @default(now())
@@ -1343,9 +1364,9 @@ model AiSuggestion {
 // id; the app fetches the text here, so nothing about clients goes through
 // Google (src/services/notify.js). Kept 45 days.
 model Notice {
-  id        Int       @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   userId    Int
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   // What it's about: a Telegram kind (services/telegram/prefs.js),
   // "reminder", "chat"…
   kind      String?
@@ -1358,7 +1379,7 @@ model Notice {
   // Notifications with the same tag replace each other on the phone (one
   // per chat).
   tag       String?
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId, createdAt])
   @@index([createdAt])
@@ -1394,20 +1415,20 @@ model Reminder {
 // developer makes, a chat on each client, and private chats the boss or
 // developer start (staff use Telegram for the rest).
 model Conversation {
-  id            Int       @id @default(autoincrement())
+  id            Int                  @id @default(autoincrement())
   // "everyone" | "group" | "client" | "direct"
   kind          String
   // Groups only; the others are named after the client or the person.
   title         String?
   // kind "client": who can see the client can read and write here
   // (src/lib/clientAccess.js) — no fixed members.
-  clientId      Int?      @unique
-  client        Client?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  clientId      Int?                 @unique
+  client        Client?              @relation(fields: [clientId], references: [id], onDelete: Cascade)
   createdById   Int?
-  createdBy     User?     @relation("ConversationBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy     User?                @relation("ConversationBy", fields: [createdById], references: [id], onDelete: SetNull)
   lastMessageAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
   members       ConversationMember[]
   messages      Message[]
 
@@ -1478,17 +1499,46 @@ model WebPushSubscription {
 // A lawyer working on a case besides its main one (ClientCase.lawyerId) —
 // they see and work on it the same way. Managers add and remove them.
 model CaseExtraLawyer {
-  id        Int        @id @default(autoincrement())
+  id        Int          @id @default(autoincrement())
   caseId    Int
-  case      ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  case      ClientCase   @relation(fields: [caseId], references: [id], onDelete: Cascade)
   userId    Int
-  user      User       @relation("CaseExtraLawyerUser", fields: [userId], references: [id], onDelete: Cascade)
+  user      User         @relation("CaseExtraLawyerUser", fields: [userId], references: [id], onDelete: Cascade)
   addedById Int?
-  addedBy   User?      @relation("CaseExtraLawyerBy", fields: [addedById], references: [id], onDelete: SetNull)
-  createdAt DateTime   @default(now())
+  addedBy   User?        @relation("CaseExtraLawyerBy", fields: [addedById], references: [id], onDelete: SetNull)
+  // On the case only while covering for its lawyer (LawyerCover): removed
+  // when the cover ends.
+  coverId   Int?
+  cover     LawyerCover? @relation(fields: [coverId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
 
   @@unique([caseId, userId])
   @@index([userId])
+  @@index([coverId])
+}
+
+// A lawyer away (leave, sick, a long trial elsewhere) and the colleague who
+// looks after their cases meanwhile (2026-10-15): from `from` to `to`
+// (inclusive), the colleague is on each of their open cases as an extra
+// lawyer — sees and works on them, and their dates show on the colleague's
+// calendar (services/covers.js). Ended early: endedAt.
+model LawyerCover {
+  id          Int               @id @default(autoincrement())
+  lawyerId    Int
+  lawyer      User              @relation("CoverLawyer", fields: [lawyerId], references: [id], onDelete: Cascade)
+  coverId     Int
+  cover       User              @relation("CoverBy", fields: [coverId], references: [id], onDelete: Cascade)
+  from        String // "YYYY-MM-DD"
+  to          String // inclusive
+  note        String?
+  createdById Int?
+  createdBy   User?             @relation("CoverSetBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime          @default(now())
+  endedAt     DateTime?
+  cases       CaseExtraLawyer[]
+
+  @@index([lawyerId, to])
+  @@index([coverId, to])
 }
 
 // A lawyer's own calendar (2026-10-14): court, meetings, work, personal
@@ -1508,6 +1558,12 @@ model PersonalEvent {
   note        String?
   caseId      Int?
   case        ClientCase? @relation(fields: [caseId], references: [id], onDelete: SetNull)
+  // Repeating (2026-10-15): "daily" | "workdays" (Mon–Sat) | "weekly", from
+  // `date` until `repeatUntil` (null: no end). `skipDates`: days taken out of
+  // the series (["YYYY-MM-DD"]).
+  repeat      String?
+  repeatUntil String?
+  skipDates   Json?
   createdById Int?
   createdBy   User?       @relation("PersonalEventBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime    @default(now())

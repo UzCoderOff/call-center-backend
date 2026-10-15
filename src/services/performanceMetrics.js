@@ -1,6 +1,6 @@
 const prisma = require("../lib/prisma");
 const { isCallCenter, isCoordinator } = require("../lib/jobs");
-const { hasCalls } = require("../lib/calling");
+const { countsCalls } = require("../lib/calling");
 
 // What a person can be measured on (Natijalar), and their targets.
 //
@@ -147,7 +147,7 @@ async function catalogFor(employee, { finance = false } = {}, db = prisma) {
   // for people who have calls (their phone's, or Ledger's line).
   const keys = [
     ...new Set([
-      ...(isCallCenter(employee) ? CLIENT_KEYS.filter((k) => k !== "calls_answered" || hasCalls(employee)) : []),
+      ...(isCallCenter(employee) ? CLIENT_KEYS.filter((k) => k !== "calls_answered" || countsCalls(employee)) : []),
       ...(isCoordinator(employee) ? COORDINATOR_KEYS : []),
     ]),
   ];

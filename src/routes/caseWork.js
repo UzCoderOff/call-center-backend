@@ -5,12 +5,15 @@ const { requireAuth, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
 const { firmNow, shiftDate } = require("../lib/firmTime");
 const { caseRole, CONTRACT_STATUSES, lawyerCaseWhere, EXTRA_LAWYERS } = require("../lib/clientAccess");
-const { canSeeCaseMoney } = require("../lib/finance");
+const { canSeeCaseMoney, canSeeFinance } = require("../lib/finance");
+const { getSetting, setSetting } = require("../lib/settings");
 const { isCoordinator } = require("../lib/jobs");
 const cl = require("../services/clients");
 const history = require("../services/caseHistory");
 const { scheduleOf } = require("../services/installments");
 const { canUseClients } = require("./clients");
+const entries = require("../services/caseEntries");
+const outcomes = require("../services/outcomes");
 
 // A case's history and the work on it after the contract.
 //
@@ -26,6 +29,14 @@ const { canUseClients } = require("./clients");
 //   DELETE /api/client-stages/:id             remove it (kept, hidden)
 //   POST   /api/client-cases/:id/dates        { kind, date, time?, title?, place?, note? }
 //   PATCH  /api/client-dates/:id              change it, or write what happened (outcome)
+//   POST   /api/client-dates/:id/outcome      { text, result?, next?: { date, time?, place? }, fileId? } —
+//                                             how a hearing went, once it's passed: the outcome, a
+//                                             history entry, the next date; the team is told
+//   GET    /api/client-cases/outcomes-due     hearings that took place with no outcome yet (mine)
+//   GET    /api/client-cases/debts?days=14    who owes on my cases: overdue, due soon, later,
+//                                             no schedule (coordinators; Moliya: all / a lawyer's own)
+//   GET    /api/client-cases/deadline-days    the firm's days from a decision to its deadline, by stage
+//   PUT    /api/client-cases/deadline-days    { stage, days } — remember one (lawyers, managers)
 //   DELETE /api/client-dates/:id              remove it (kept, hidden)
 //
 // Who: the people on the case — managers, its lawyer, its coordinator. An
@@ -56,7 +67,7 @@ function sendError(err, res, next) {
 async function caseForHistory(user, caseId) {
   const kase = await prisma.clientCase.findUnique({
     where: { id: caseId },
-    select: { id: true, clientId: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS, client: { select: { createdById: true, archivedAt: true, cases: { select: { operatorId: true } } } } },
+    select: { id: true, clientId: true, matter: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS, client: { select: { createdById: true, archivedAt: true, cases: { select: { operatorId: true } } } } },
   });
   if (!kase) throw fail(404, "not_found");
   const role = caseRole(user, kase, kase.client);
@@ -81,6 +92,115 @@ function mineWhere(user) {
   if (isCoordinator(user.employee)) return { coordinatorId: user.employee.id };
   return { coordinatorId: user.employee?.id ?? -1 };
 }
+
+// ------------------------------------------------------------- debts
+// Who owes on the cases someone looks after, for a call and a word: overdue
+// first (biggest), then due within `days`, then later, then debts with no
+// schedule. Coordinators: theirs; Moliya: every case (a lawyer: theirs).
+function debtScope(user) {
+  if (canSeeFinance(user)) return isLawyer(user) ? lawyerCaseWhere(user.id) : {};
+  if (isCoordinator(user.employee)) return { coordinatorId: user.employee.id };
+  return null;
+}
+
+caseItems.get("/debts", async (req, res, next) => {
+  try {
+    const scope = debtScope(req.user);
+    if (!scope) return res.status(403).json({ error: "forbidden" });
+    const days = Math.min(60, Math.max(1, Number(req.query.days) || 14));
+    const now = today();
+    const soon = shiftDate(now, days);
+    const rows = await prisma.clientCase.findMany({
+      where: { ...scope, status: { in: CONTRACT_STATUSES }, contractAmount: { gt: 0 }, client: { archivedAt: null } },
+      select: {
+        id: true,
+        matter: true,
+        contractAmount: true,
+        coordinator: { select: { id: true, name: true } },
+        client: { select: { id: true, name: true, phones: { select: { phone: true }, orderBy: { id: "asc" }, take: 1 } } },
+        payments: { select: { amount: true, kind: true, date: true } },
+        installments: { select: { id: true, dueDate: true, amount: true } },
+      },
+    });
+    const items = [];
+    for (const k of rows) {
+      const summary = cl.paymentSummary(k.contractAmount, k.payments);
+      if (summary.remaining <= 0) continue;
+      const schedule = k.installments.length ? scheduleOf(k.installments, k.payments, now) : null;
+      const lastPaid = k.payments.filter((p) => p.kind !== "consultation").map((p) => p.date).sort().at(-1) ?? null;
+      const group = !schedule || (!schedule.next && schedule.overdue === 0) ? "unscheduled" : schedule.overdue > 0 ? "overdue" : schedule.next && schedule.next.dueDate <= soon ? "soon" : "later";
+      items.push({
+        caseId: k.id,
+        matter: k.matter,
+        client: { id: k.client.id, name: k.client.name, phone: k.client.phones[0]?.phone ?? null },
+        coordinator: k.coordinator,
+        contractAmount: k.contractAmount,
+        paid: summary.paid,
+        remaining: summary.remaining,
+        overdue: schedule?.overdue ?? 0,
+        overdueSince: schedule?.overdueSince ?? null,
+        next: schedule?.next ?? null,
+        lastPaid,
+        group,
+      });
+    }
+    const order = { overdue: 0, soon: 1, later: 2, unscheduled: 3 };
+    items.sort((a, b) => order[a.group] - order[b.group] || b.overdue - a.overdue || (a.next?.dueDate || "9").localeCompare(b.next?.dueDate || "9") || b.remaining - a.remaining);
+    res.json({ today: now, days, items });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// ---------------------------------------------------- decision deadlines
+// Days from a decision to the deadline it starts (an appeal…), by the stage
+// the case is at — the firm's own numbers (Setting "deadlineDays"; nothing
+// is assumed). The history form suggests the date (services/caseEntries.js).
+const DEADLINE_KEY = "deadlineDays";
+
+caseItems.get("/deadline-days", async (req, res, next) => {
+  try {
+    res.json(await getSetting(DEADLINE_KEY, {}));
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+caseItems.put("/deadline-days", async (req, res, next) => {
+  try {
+    if (!isManager(req.user) && !isLawyer(req.user)) return res.status(403).json({ error: "forbidden" });
+    const stage = req.body?.stage == null || req.body.stage === "" ? "_" : String(req.body.stage);
+    if (stage !== "_" && !cl.LEGAL_STAGES.includes(stage)) throw badRequest("invalid stage");
+    const days = req.body?.days === null || req.body?.days === "" ? null : Number(req.body?.days);
+    if (days !== null && (!Number.isInteger(days) || days <= 0 || days > 3650)) throw badRequest("invalid days");
+    const current = { ...(await getSetting(DEADLINE_KEY, {})) };
+    if (days === null) delete current[stage];
+    else current[stage] = days;
+    await setSetting(DEADLINE_KEY, current, req.user.id);
+    res.json(current);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+caseItems.get("/outcomes-due", async (req, res, next) => {
+  try {
+    const rows = await outcomes.listDue(req.user);
+    res.json({
+      items: rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        date: r.date,
+        time: r.time,
+        title: r.title,
+        place: r.place,
+        case: { id: r.case.id, matter: r.case.matter, number: r.case.number, clientId: r.case.clientId, clientName: r.case.client.name },
+      })),
+    });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
 
 caseItems.get("/", async (req, res, next) => {
   try {
@@ -289,6 +409,57 @@ dates.patch("/:id", async (req, res, next) => {
       return u;
     });
     res.json(updated);
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+dates.post("/:id/outcome", async (req, res, next) => {
+  try {
+    const { row, kase } = await dateRow(req);
+    if (!outcomes.OUTCOME_KINDS.includes(row.kind)) throw badRequest("not a hearing");
+    if (row.outcome) throw fail(409, "outcome_exists");
+    if (!outcomes.hasPassed(row, firmNow()) && row.date > today()) throw badRequest("not yet");
+    const b = req.body || {};
+    let e;
+    try {
+      e = entries.normalizeEntry({ type: "hearing", text: b.text, result: b.result, on: row.date, next: b.next, fileId: b.fileId }, today());
+    } catch (err) {
+      if (err instanceof entries.EntryError) throw badRequest(err.message);
+      throw err;
+    }
+    if (e.data.fileId) {
+      const file = await prisma.clientFile.findFirst({ where: { id: e.data.fileId, clientId: kase.clientId, deletedAt: null, OR: [{ caseId: null }, { caseId: kase.id }] }, select: { id: true } });
+      if (!file) throw badRequest("file is not this case's");
+    }
+    const result = await prisma.$transaction(async (tx) => {
+      const outcomeText = [outcomes.RESULT_WORDS[e.data.result], e.text].filter(Boolean).join(". ");
+      // Two people answering at once: the first one counts.
+      const claimed = await tx.caseDate.updateMany({ where: { id: row.id, outcome: null }, data: { outcome: outcomeText, outcomeAt: new Date(), outcomeById: req.user.id } });
+      if (claimed.count === 0) throw fail(409, "outcome_exists");
+      const updated = await tx.caseDate.findUnique({ where: { id: row.id } });
+      let nextRow = null;
+      if (e.next) {
+        // The next one of the same kind (an interrogation continues as one).
+        nextRow = await entries.addKeyDate(tx, { kase, userId: req.user.id, kind: row.kind, ...e.next });
+        e.data.nextDateId = nextRow.id;
+        e.data.next = { date: nextRow.date, time: nextRow.time, place: nextRow.place };
+      }
+      e.data.dateId = row.id;
+      e.data.dateKind = row.kind;
+      if (row.time != null) e.data.time = row.time;
+      if (row.place && !e.data.place) e.data.place = row.place;
+      const entry = await tx.clientEvent.create({ data: { clientId: kase.clientId, caseId: kase.id, kind: "note", text: e.text, data: e.data, authorId: req.user.id } });
+      await touch(tx, kase.clientId);
+      return { date: updated, next: nextRow, entry };
+    });
+    // The team hears it in the client's chat (which case, when they have several).
+    const several = kase.client.cases.length > 1;
+    const line = outcomes.outcomeLine(row, { result: e.data.result, text: e.text, next: result.next });
+    require("../services/chat")
+      .postToClient(kase.clientId, req.user, several && kase.matter ? `${kase.matter}\n${line}` : line)
+      .catch((err) => console.error("[outcome] team post failed:", err.message));
+    res.status(201).json(result);
   } catch (err) {
     sendError(err, res, next);
   }

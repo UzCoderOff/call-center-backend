@@ -68,6 +68,7 @@ async function financeData(user, monthParam) {
         client: { select: { id: true, name: true, source: true } },
         case: { select: { id: true, matter: true, lawyer: true, lawyerId: true, contractDate: true } },
         recordedBy: { select: { username: true, name: true, employee: { select: { name: true } } } },
+        cashHolder: { select: { username: true, name: true, employee: { select: { name: true } } } },
         appointment: { select: { format: true, calendar: { select: { ownerId: true } } } },
       },
     }),
@@ -153,6 +154,8 @@ async function financeData(user, monthParam) {
       client: p.client,
       case: p.case,
       recordedBy: p.recordedBy ? p.recordedBy.employee?.name || p.recordedBy.name || p.recordedBy.username : null,
+      // Cash someone else took (the boss, the lawyer — Kassa).
+      cashWith: p.cashHolder ? p.cashHolder.employee?.name || p.cashHolder.name || p.cashHolder.username : null,
       appointment: p.appointment ? { format: p.appointment.format, ownerId: p.appointment.calendar?.ownerId ?? null } : null,
     })),
     trendPayments,

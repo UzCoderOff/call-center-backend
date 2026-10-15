@@ -298,8 +298,11 @@ async function cleanup(now) {
 const reminders = () => require("../reminders").sendDue();
 // Event cards in chats (services/chat.js): an hour before and at the start.
 const chatEvents = () => require("../chat").eventReminders();
+// Hearings and other case dates (services/outcomes.js): the evening before,
+// the morning of, and "how did it go?" when nobody has written it.
+const hearings = (now) => require("../outcomes").hearingReminders(now);
 
-const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, summaryReminders, reminders, chatEvents, recordingAlerts, diskAlerts, cleanup };
+const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, summaryReminders, reminders, chatEvents, hearings, recordingAlerts, diskAlerts, cleanup };
 
 let running = false;
 async function tick() {

@@ -24,6 +24,37 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-15-office-calls-cash",
+    date: "2026-10-15",
+    boss: [
+      "<b>Ofis xodimlarining qoʻngʻiroqlari</b> yana koʻrinadi: oʻzlariga — «Qoʻngʻiroqlar» va Asosiy sahifada; sizga — «Ofis xodimlari» tugmasi bilan (odatda oʻchiq). Ular rejaga, Natijalarga va jarimalarga hisoblanmaydi.",
+      "<b>Kassa</b>: naqd toʻlov yozilganda «Naqd pulni kim oldi?» deb soʻraladi — xodimning oʻzi, siz yoki advokat. Notoʻgʻri yozilganlarini Moliya → Kassa → «Kimda?» dan toʻgʻrilang. Advokat olgan naqd Kassada advokatda turadi, undan qabul qilguningizcha.",
+      "<b>Pul kiritish</b> osonroq: mijoz sahifasining tepasida «Toʻlov» va «Shartnoma summasi»; Moliya sahifasida «Toʻlov qoʻshish» — mijozni ismi yoki raqami bilan topasiz.",
+      "<b>Mijoz sahifasi — ish loyihasi kabi</b>: ish shu yerning oʻzida ochiq — jamoa (advokatlar va koordinator), keyingi sana, qarz, ochiq vazifalar, ishning yoʻli, Hujjatlar, Pul va Tarix, hammasi bir sahifada. Jamoa mijozning chatida gaplashadi (@ bilan hamkasbni eslatish).",
+      "<b>Tarix</b> endi turli yozuvlar bilan: sud majlisi (natija va keyingi sana), hujjat topshirildi, qaror (muddati bilan), uchrashuv. Majlis oʻtgach Ledger advokatdan «Qanday oʻtdi?» deb soʻraydi — javob ish tarixiga, kalendarga va jamoaga boradi.",
+      "<b>Kalendar</b>: «Kim boʻsh?» — advokatlar birga boʻsh vaqtni topadi; takrorlanadigan yozuvlar; majlisdan bir kun oldin va ertalab eslatma. Advokat yoʻq boʻlsa — «Oʻrinbosar» uning ishlariga qaraydi.",
+      "Sozlamalarda: <b>ish andozalari</b> (tayyor vazifalar roʻyxati) va <b>qarordan keyingi muddatlar</b> — kunlarni advokatlaringiz kiritadi.",
+    ],
+    staff: [
+      {
+        to: (u) => u.employee?.collectCalls && !callsMatter(u.employee),
+        text: "Qoʻngʻiroqlaringiz yana Ledger'da: «Qoʻngʻiroqlar» boʻlimida va Asosiy sahifada. Ledger ilovasini bir marta oching — telefon ularni yana yuboradi.",
+      },
+      {
+        to: isLawyerUser,
+        text: "Mijozni ochsangiz, ishi shu yerda: vazifalar, hujjatlar, pul va tarix bir sahifada; jamoa mijozning chatida gaplashadi (@ bilan eslatish). Majlis oʻtgach «Qanday oʻtdi?» — natija va keyingi sana bitta joyda yoziladi. Kalendarda «Kim boʻsh?» va «Oʻrinbosar».",
+      },
+      {
+        to: (u) => isCoordinator(u.employee),
+        text: "Yangi «Qarzlar» boʻlimi: kim kechikkan, kim bu hafta toʻlashi kerak — qoʻngʻiroq tugmasi va izoh bilan. Mijoz sahifasida ish endi toʻliq ochiq: vazifalar, pul va tarix bir joyda.",
+      },
+      {
+        to: (u) => !isLawyerUser(u) && (books(u) || isCoordinator(u.employee)),
+        text: "Naqd toʻlov yozganda endi «Naqd pulni kim oldi?» soʻraladi: pulni oʻzingiz olgan boʻlsangiz — «Men oldim»; mijoz ofisda rahbarga yoki advokatga bergan boʻlsa — oʻshani tanlang.",
+      },
+    ],
+  },
+  {
     id: "2026-10-14-calendars",
     date: "2026-10-14",
     boss: [
