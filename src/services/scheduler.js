@@ -100,7 +100,24 @@ async function coversTick() {
   }
 }
 
+// The AI review of the firm's Telegram chats (beta, services/tgReview.js).
+const TG_REVIEW_EVERY_MS = 10 * 60 * 1000;
+let tgReviewing = false;
+async function tgReviewTick() {
+  if (tgReviewing) return;
+  tgReviewing = true;
+  try {
+    await require("./tgReview").tick();
+  } catch (err) {
+    console.error("[tg-review] failed:", err.message);
+  } finally {
+    tgReviewing = false;
+  }
+}
+
 function start() {
+  setTimeout(tgReviewTick, 2 * 60 * 1000).unref();
+  setInterval(tgReviewTick, TG_REVIEW_EVERY_MS).unref();
   setTimeout(coversTick, 40 * 1000).unref();
   setInterval(coversTick, COVERS_EVERY_MS).unref();
   setTimeout(newsTick, 45 * 1000).unref();
@@ -113,4 +130,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick };
+module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick };

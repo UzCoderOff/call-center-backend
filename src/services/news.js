@@ -1,7 +1,7 @@
 const fs = require("fs");
 const prisma = require("../lib/prisma");
 const { firmNow, shiftDate } = require("../lib/firmTime");
-const { isCoordinator } = require("../lib/jobs");
+const { isCoordinator, isCallCenter } = require("../lib/jobs");
 const { callsMatter } = require("../lib/calling");
 const { notifyUser, linkedUsers, once } = require("./telegram/notify");
 
@@ -23,6 +23,25 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // Newest first. `boss`: the summary (lines); `staff`: [{ to(user), text }] —
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
+  {
+    id: "2026-10-15-telegram-inbox",
+    date: "2026-10-15",
+    boss: [
+      "<b>Mijozlar Telegrami</b> (menyuda alohida boʻlim): firma Telegram akkauntiga yozganlarning xabarlari Ledger'da. Yangi odamlar va shartnomasiz mijozlar — operatorlarda; ishdagi mijozlar — koordinatorida (mijozi yozsa, unga xabar keladi). Mijoz sahifasida uning Telegrami koʻrinadi. Javob hozircha Telegram ilovasidan yoziladi.",
+      "<b>AI tahlili (beta)</b>: yozishma tinchigach AI uni oʻqiydi — firma ishiga tegishlimi (spam yashiriladi), mijoz yozildimi yoki yoʻqotildimi, operator qanday ishladi va keyingi safar nima qilish kerak. Natijalar sahifasida. Beta — xato qilishi mumkin, toʻliq ishonmang. AI mijozga hech narsa yozmaydi.",
+      "Firma Telegramini ulash va operatorlar qoidalarini yozish: Sozlamalar → «Mijozlar Telegrami».",
+    ],
+    staff: [
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCallCenter(u.employee),
+        text: "Firma Telegramiga yozganlar endi Ledger'da ham: menyuda «Mijozlar Telegrami». Kim kutayotgani, yozishma qaysi mijozniki — bir joyda; yangi odamni mijoz qilib qoʻshish yoki mavjud mijozga bogʻlash mumkin. Ishdagi mijozga bogʻlansa, yozishma koordinatorga oʻtadi. Javobni hozircha odatdagidek Telegram ilovasidan yozasiz.",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCoordinator(u.employee),
+        text: "Mijozingiz firma Telegramiga yozsa — sizga xabar keladi, yozishma esa menyudagi «Mijozlar Telegrami»da va mijoz sahifasida koʻrinadi.",
+      },
+    ],
+  },
   {
     id: "2026-10-15-office-calls-cash",
     date: "2026-10-15",

@@ -186,8 +186,16 @@ async function onCallback(query) {
 async function handleUpdate(update) {
   if (update.message) return onMessage(update.message);
   if (update.callback_query) return onCallback(update.callback_query);
+  // The firm's Telegram account, through Telegram Business (services/tgInbox.js).
+  if (update.business_message) return inbox().onMessage(update.business_message);
+  if (update.edited_business_message) return inbox().onMessage(update.edited_business_message, { edited: true });
+  if (update.deleted_business_messages) return inbox().onDeleted(update.deleted_business_messages);
+  if (update.business_connection) return inbox().onConnection(update.business_connection);
   return null;
 }
+
+const inbox = () => require("../tgInbox");
+const UPDATES = ["message", "callback_query", "business_connection", "business_message", "edited_business_message", "deleted_business_messages"];
 
 // ------------------------------------------------------------------ polling
 
@@ -198,7 +206,7 @@ async function poll() {
   let backoff = 2000;
   while (!stopped) {
     try {
-      const updates = await api.call("getUpdates", { offset, timeout: 50, allowed_updates: ["message", "callback_query"] }, { timeoutMs: 65000 });
+      const updates = await api.call("getUpdates", { offset, timeout: 50, allowed_updates: UPDATES }, { timeoutMs: 65000 });
       state.status = "running";
       state.error = null;
       backoff = 2000;

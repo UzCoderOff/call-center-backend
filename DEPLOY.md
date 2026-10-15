@@ -107,6 +107,35 @@ The startup log should say `database: journal mode wal`, `listening on port
   record payments, lawyers, coordinators (`services/news.js`).
 - No `.env` change, no app update.
 
+### This release (2026-10-15, second): the clients' Telegram + AI review (beta)
+
+- **Clients' Telegram** (migration `20261015200000_telegram_inbox`: new
+  tables `TgChat`, `TgMessage`, `TgReview` only): the firm's Telegram account
+  (Premium) connects the Ledger bot as its chatbot (Telegram Business); the
+  bot now also receives `business_*` updates (`services/telegram/bot.js` →
+  `services/tgInbox.js`). Chat → «Mijozlar Telegrami» (managers and the call
+  center), the client's page (whoever sees the client), files through the bot
+  (`/api/tg-inbox/files`). Read-only: replies stay in the Telegram app.
+- **AI review (beta)** (`services/tgReview.js`, Claude feature `tgReview`, on
+  by default, Claude Haiku): a chat quiet for an hour is reviewed — about the
+  firm's work or not (a new person's spam is hidden, "by the AI"), the outcome,
+  the operator's mark and advice, by the firm's rules (Sozlamalar → «Mijozlar
+  Telegrami»). Shown on the chat and in Natijalar, marked Beta. Every 10
+  minutes, up to 8 chats; within Claude's monthly cap. No replies to clients.
+- What's-new: the boss and the call center (`services/news.js`,
+  "2026-10-15-telegram-inbox").
+- No `.env` change, no app update.
+
+**Right after deploying (the clients' Telegram):**
+1. @BotFather → /mybots → the Ledger bot → Bot Settings → Business Mode → on.
+2. On the firm's Telegram account (Premium): Settings → Telegram Business →
+   Chatbots → add the Ledger bot; "All 1:1 chats" (exclude staff/personal
+   chats if wanted). Reading is enough — no need to let it reply.
+3. Sozlamalar → «Mijozlar Telegrami»: it says "Ulangan"; pick who answers,
+   write the firm's rules for operators.
+4. Write to the firm from another phone: the message shows in Chat →
+   «Mijozlar Telegrami».
+
 ### Follow-up (2026-10-14, third): calendar views, deleting unused consultation calendars
 
 - Lawyers' own calendar: Kun / Hafta / Oy. On a computer the week is seven

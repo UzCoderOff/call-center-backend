@@ -113,6 +113,8 @@ model User {
   remindersSet            Reminder[]            @relation("ReminderBy")
   conversationsBy         Conversation[]        @relation("ConversationBy")
   chatMemberships         ConversationMember[]
+  tgAnswered              TgMessage[]           @relation("TgAnsweredBy")
+  tgReviews               TgReview[]            @relation("TgReviewOperator")
   messages                Message[]             @relation("MessageAuthor")
   summariesWritten        Appointment[]         @relation("AppointmentSummaryBy")
   summaryStrikes          SummaryStrike[]       @relation("SummaryStrikeUser")
@@ -663,6 +665,7 @@ model Client {
   tasks         Task[]
   reminders     Reminder[]
   conversation  Conversation?
+  tgChats       TgChat[]
   contacts      ClientContact[]
   followUps     ClientFollowUp[]
   files         ClientFile[]
@@ -1571,4 +1574,109 @@ model PersonalEvent {
   deletedAt   DateTime?
 
   @@index([ownerId, date])
+}
+
+// Someone writing to the firm's Telegram account (Telegram Business, the
+// Ledger bot connected to it as its chatbot — services/tgInbox.js): one row
+// per person, linked to their client once known. Seen in Chat → Telegram and
+// on the client's page; the replies are typed in the Telegram app for now.
+model TgChat {
+  id            Int         @id @default(autoincrement())
+  // Their Telegram user id (the chat's id), as text — it can pass 2^53.
+  tgUserId      String      @unique
+  firstName     String?
+  lastName      String?
+  username      String?
+  // From a contact they shared, or a number they typed (the first one).
+  phone         String?
+  phoneKey      String?
+  clientId      Int?
+  client        Client?     @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  // Linked by their number on its own (false once a person has linked or
+  // unlinked it — then it stays as they left it).
+  autoLink      Boolean     @default(true)
+  connectionId  String?
+  // Not a client (staff, a personal chat on the firm's account): out of the list.
+  hidden        Boolean     @default(false)
+  // Hidden by the AI review (not about the firm's work) — not by a person.
+  aiHidden      Boolean     @default(false)
+  // The legal matter, as the AI review named it ("Oila — ajrashish").
+  topic         String?
+  // The AI review last looked at it (services/tgReview.js).
+  reviewedAt    DateTime?
+  lastMessageAt DateTime?
+  lastInAt      DateTime?
+  lastOutAt     DateTime?
+  // Their first message nobody has answered yet (null: answered).
+  waitingSince  DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  messages      TgMessage[]
+  reviews       TgReview[]
+
+  @@index([clientId])
+  @@index([lastMessageAt])
+  @@index([phoneKey])
+}
+
+model TgMessage {
+  id           Int       @id @default(autoincrement())
+  chatId       Int
+  chat         TgChat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  tgMessageId  Int
+  // Sent by the firm's account (an operator in the Telegram app).
+  out          Boolean   @default(false)
+  // Telegram's own away / greeting message (Telegram Business), not a person.
+  auto         Boolean   @default(false)
+  // "text" | "photo" | "voice" | "video" | "video_note" | "audio" |
+  // "document" | "sticker" | "contact" | "location" | "other"
+  kind         String    @default("text")
+  text         String?
+  fileId       String?
+  fileName     String?
+  duration     Int?
+  sentAt       DateTime
+  editedAt     DateTime?
+  deletedAt    DateTime?
+  // The firm's replies: who was answering the firm's Telegram then (the one
+  // responsible operator, when there is just one).
+  answeredById Int?
+  answeredBy   User?     @relation("TgAnsweredBy", fields: [answeredById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@unique([chatId, tgMessageId])
+  @@index([chatId, sentAt])
+}
+
+// The AI review (beta) of a Telegram chat with the firm (services/tgReview.js):
+// is it about the firm's work, what happened, how the operator did, what to
+// do next time. One per look; the latest is shown.
+model TgReview {
+  id            Int      @id @default(autoincrement())
+  chatId        Int
+  chat          TgChat   @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  // Who was answering for the firm (whose work it judges).
+  operatorId    Int?
+  operator      User?    @relation("TgReviewOperator", fields: [operatorId], references: [id], onDelete: SetNull)
+  // The last message it read.
+  upToMessageId Int
+  relevant      Boolean
+  topic         String?
+  // "booked" | "lost_by_us" | "lost_not_serious" | "lost_other" | "open" | "not_client"
+  outcome       String
+  // "high" | "medium" | "low" | "none"
+  potential     String?
+  // The operator's handling 1-5 (0: nothing to judge).
+  score         Int
+  summary       String?
+  lossReason    String?
+  good          Json?
+  improve       Json?
+  betterReply   String?
+  model         String
+  costUsd       Float    @default(0)
+  createdAt     DateTime @default(now())
+
+  @@index([chatId, createdAt])
+  @@index([operatorId, createdAt])
 }

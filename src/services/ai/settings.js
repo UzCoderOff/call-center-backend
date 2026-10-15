@@ -13,8 +13,12 @@ const { getSetting, setSetting } = require("../../lib/settings");
 // a copy of the database alone, like the off-site backup, can't read it).
 // It's never sent back: the portal only sees its last four characters.
 
-// What Claude powers (services/ai/reports.js, fileReader.js, consultSummary).
-const CLAUDE_FEATURES = ["weeklyReport", "lostAnalysis", "suggestions", "fileReader", "summaryDraft"];
+// What Claude powers (services/ai/reports.js, fileReader.js, consultSummary,
+// services/tgReview.js).
+const CLAUDE_FEATURES = ["weeklyReport", "lostAnalysis", "suggestions", "fileReader", "summaryDraft", "tgReview"];
+// On unless switched off: the Telegram chat review (beta) — the firm asked
+// for it to work as soon as it's released (2026-10-15).
+const ON_BY_DEFAULT = new Set(["tgReview"]);
 
 const AI_DEFAULTS = {
   enabled: true,
@@ -29,7 +33,7 @@ const AI_DEFAULTS = {
   claudeKeyLast4: null,
   claudeKeySetAt: null,
   claudeModel: "claude-opus-5-5",
-  claudeFeatures: Object.fromEntries(CLAUDE_FEATURES.map((f) => [f, false])),
+  claudeFeatures: Object.fromEntries(CLAUDE_FEATURES.map((f) => [f, ON_BY_DEFAULT.has(f)])),
   // The reports' script: "latin" | "cyrillic".
   reportScript: "latin",
   // Ledger stops calling Claude for the month past this (USD); 0: no cap.
