@@ -17,7 +17,7 @@ const { isExtension } = require("./numbers");
 // (Uzbek, like the app).
 
 const STATUS = {
-  consultation: "Murojaat",
+  consultation: "Konsultatsiya",
   call_again: "Qayta qoʻngʻiroq",
   contract: "Shartnoma tuzildi",
   done: "Ish tugallandi",

@@ -78,7 +78,8 @@ async function autoReportDays(employee, from, to) {
           select: { callTimestampMs: true, callType: true, missed: true, durationSeconds: true, followUp: true, phoneKey: true },
         })
       : [],
-    prisma.client.findMany({ where: { createdById: userId, createdAt: created }, select: { createdAt: true } }),
+    // Only new clients — not ones the firm already had, written in now.
+    prisma.client.findMany({ where: { createdById: userId, createdAt: created, isNew: true }, select: { createdAt: true } }),
     prisma.appointment.findMany({ where: { bookedById: userId, date: { gte: from, lte: to }, status: { not: "cancelled" } }, select: { date: true, status: true } }),
     prisma.clientCase.findMany({ where: { operatorId: employee.id, contractDate: { gte: from, lte: to } }, select: { contractDate: true } }),
     prisma.payment.findMany({ where: { recordedById: userId, date: { gte: from, lte: to } }, select: { date: true, amount: true, kind: true } }),

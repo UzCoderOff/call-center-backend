@@ -7,6 +7,7 @@ const { resolvePlayableRecording } = require("../utils/audioTranscode");
 const { badRequest, parseMs, parseId } = require("../utils/params");
 const { clientIndexFor } = require("../lib/clientAccess");
 const { parseJobs, isCoordinator, jobWhere } = require("../lib/jobs");
+const { INCOMING_TYPES } = require("../services/stats");
 const {
   FOLLOW_UP_WINDOW_MS,
   NEEDS_CALLBACK_STATUSES,
@@ -53,7 +54,9 @@ function filterWhere(req) {
   // (src/lib/calling.js). Staff always see all of their own.
   if (isManager(req.user) && !q.employeeId) where.employee = jobWhere(parseJobs(q.jobs) || CALL_JOBS);
   if (q.missed !== undefined) where.missed = q.missed === "true";
-  if (q.callType) where.callType = String(q.callType);
+  // "Incoming": every call that came in, answered or missed (the home
+  // page's tile opens these).
+  if (q.callType) where.callType = q.callType === "incoming" ? { in: INCOMING_TYPES } : String(q.callType);
   // Lets the portal filter down to "calls with no recording attached" —
   // e.g. so someone reviewing calls doesn't have to open each one just to
   // find out whether a file exists.

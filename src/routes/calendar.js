@@ -575,16 +575,21 @@ appointments.patch("/:id", async (req, res, next) => {
 
     if (b.status !== undefined) {
       if (!["booked", "attended", "no_show", "cancelled"].includes(b.status)) throw badRequest("invalid status");
+      // Cancelled — before its time or after it (it didn't take place,
+      // 2026-10-17): whoever booked it, or a manager, until its summary is
+      // written (then it happened).
       const mayCancel =
-        b.status === "cancelled" &&
-        ((appointment.status === "booked" && !hasStarted(appointment, firmNow()) && (isBooker || isManager(req.user))) || ownWalkIn);
+        b.status === "cancelled" && appointment.status !== "cancelled" && !appointment.summaryAt && (isBooker || isManager(req.user) || ownWalkIn);
       if (!manage && !mayCancel) return res.status(403).json({ error: "forbidden" });
+      // Its summary is written: it took place — not for anyone to cancel.
+      if (b.status === "cancelled" && appointment.summaryAt) return res.status(403).json({ error: "has_summary" });
       data.status = b.status;
       if (b.status === "cancelled") {
         data.cancelReason = typeof b.cancelReason === "string" && b.cancelReason.trim() ? b.cancelReason.trim().slice(0, 300) : null;
         data.cancelledById = req.user.id;
         data.cancelledAt = new Date();
-        data.clientInformed = false;
+        // Already past: nobody needs to tell the client it's off.
+        data.clientInformed = hasStarted(appointment, firmNow());
       } else {
         Object.assign(data, { cancelReason: null, cancelledById: null, cancelledAt: null });
       }

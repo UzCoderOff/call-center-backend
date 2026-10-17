@@ -78,6 +78,8 @@ async function importOne(tx, raw, { user, today, operators, lawyers }) {
         name: name || phones[0].phone,
         ...fields,
         nextCallAt,
+        // An imported list is the firm's own clients, not new ones.
+        isNew: false,
         createdById: user.id,
         phones: { create: phones },
       },

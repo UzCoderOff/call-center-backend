@@ -24,12 +24,32 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-17-cancel-new-client",
+    date: "2026-10-17",
+    boss: [
+      "<b>Nomlar avvalgidek</b>: «Konsultatsiya» va «Konsultatsiyalar». Konsultatsiya, kalendarga yozish va uchrashuv — bitta narsa: kalendardagi bekor qilinmagan yozuv.",
+      "<b>Konsultatsiyani bekor qilish</b>: sababi tanlanadi (mijoz bekor qildi, boshqa kunga koʻchdi, advokat qabul qila olmadi, xato yozilgan), nima boʻlganini yozsa boʻladi va «Yangi konsultatsiyaga yozasizmi?» soʻraladi — «Ha» boʻlsa kalendar darhol ochiladi. Vaqti oʻtib, boʻlmay qolgan konsultatsiyani ham «Bekor boʻldi» deb belgilasa boʻladi — hisobga kirmaydi.",
+      "<b>Yangi mijoz qoʻshishda</b> ikki savol: «Bu yangi mijozmi?» — faqat «Yangi mijoz» (firmaga birinchi marta murojaat qilgan) yangi mijoz boʻlib hisoblanadi; «Avvaldan mijozimiz» hisoblanmaydi. Keyin «Konsultatsiyaga ham yozasizmi?» — «Ha» boʻlsa saqlangach kalendar ochiladi. Xato tanlangan boʻlsa, mijoz sahifasida «Tahrirlash» orqali tuzatasiz.",
+      "<b>Asosiy sahifa</b>: qoʻngʻiroqlar «Kiruvchi» (javobsizlari bilan) va «Chiquvchi» (nechtasi ulangani) boʻyicha ham koʻrinadi.",
+    ],
+    staff: [
+      {
+        to: (u) => u.role === "EMPLOYEE" || isLawyerUser(u),
+        text: "Yangi mijoz qoʻshayotganda Ledger soʻraydi: «Bu yangi mijozmi?» — firmaga birinchi marta murojaat qilgan boʻlsa «Yangi mijoz», avval firma bilan ishlagan boʻlsa «Avvaldan mijozimiz» (bunisi yangi mijoz boʻlib hisoblanmaydi).",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE" && (books(u) || isCallCenter(u.employee)),
+        text: "Mijoz qoʻshganda «Konsultatsiyaga ham yozasizmi?» soʻraladi — «Ha» boʻlsa kalendar ochiladi. Konsultatsiyani bekor qilganda sababini tanlang va yangi vaqtga yozasizmi — ayting. Asosiy sahifada kiruvchi va chiquvchi qoʻngʻiroqlar alohida koʻrinadi.",
+      },
+    ],
+  },
+  {
     // The release date goes here when it's pushed (notes go out within
     // SEND_DAYS of it).
     id: "2026-10-17-consultations-answers",
     date: "2026-10-17",
     boss: [
-      "<b>Konsultatsiya = kalendarga yozilgan uchrashuv.</b> Endi bitta raqam: operator yozgan konsultatsiyalar (bekor qilinganidan tashqari) oʻz kunida hisoblanadi — «Keldi» belgilanmagan boʻlsa ham. Alohida «Kalendarga yozgan» olib tashlandi; oylik reja shu raqamga. Mijoz ishining «Konsultatsiya» holati endi «Murojaat» deb ataladi, Mijozlardagi boʻlim — «Murojaatlar».",
+      "<b>Konsultatsiya = kalendarga yozilgan uchrashuv.</b> Endi bitta raqam: operator yozgan konsultatsiyalar (bekor qilinganidan tashqari) oʻz kunida hisoblanadi — «Keldi» belgilanmagan boʻlsa ham. Alohida «Kalendarga yozgan» olib tashlandi; oylik reja shu raqamga.",
       "<b>Yozilmasdan kelgan mijoz</b>: Kalendarda bugungi kun ostida «Yozilmasdan kelgan mijozni yozish» — konsultatsiya «Keldi» deb saqlanadi va hisoblanadi.",
       "<b>Vazifaga javob</b>: vazifa berayotganda «Javob yozsin» ni yoqing — xodim javobini yozmaguncha vazifani bajarildi deb belgilay olmaydi. Javob sizga Telegramda va Vazifalarda keladi.",
       "<b>Yangi raqamlar: nima boʻldi?</b> Operator gaplashgan, lekin konsultatsiyaga yozilmagan har bir yangi raqamga bitta sabab belgilaydi: narx, faqat savol, boshqa joyga ketdi… Sabablar Asosiy sahifadagi voronkada; «Har bir operator» — operatorlar yonma-yon.",

@@ -17,12 +17,21 @@ const FOLLOW_UP_FIELD = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_SERIES_DAYS = 92;
 
+// Calls that came in — answered or not (CallLog.callType); the rest of a
+// phone's calls are outgoing (or, rarely, "unknown").
+const INCOMING_TYPES = ["incoming", "missed", "rejected", "voicemail"];
+
 function blankStats() {
   return {
     totalCalls: 0,
     answeredCalls: 0,
     missedCalls: 0,
     talkSeconds: 0,
+    // Which way (2026-10-17): calls that came in, and the ones we made —
+    // with how many of those got through (talked at all).
+    incomingCalls: 0,
+    outgoingCalls: 0,
+    outgoingConnected: 0,
     followUp: {
       calledBack: 0,
       clientCalledAgain: 0,
@@ -79,12 +88,17 @@ async function computeCallStats({ employeeIds = null, from, to }) {
     ...timeWhere(from, to),
   };
 
-  const [volume, followUps, delays] = await Promise.all([
+  const [volume, connected, followUps, delays] = await Promise.all([
     prisma.callLog.groupBy({
-      by: ["employeeId", "missed"],
+      by: ["employeeId", "missed", "callType"],
       where,
       _count: { _all: true },
       _sum: { durationSeconds: true },
+    }),
+    prisma.callLog.groupBy({
+      by: ["employeeId"],
+      where: { ...where, callType: "outgoing", durationSeconds: { gt: 0 } },
+      _count: { _all: true },
     }),
     prisma.callLog.groupBy({
       by: ["employeeId", "followUp"],
@@ -107,8 +121,11 @@ async function computeCallStats({ employeeIds = null, from, to }) {
     const s = statsFor(row.employeeId);
     s.totalCalls += row._count._all;
     if (row.missed) s.missedCalls += row._count._all;
+    if (INCOMING_TYPES.includes(row.callType)) s.incomingCalls += row._count._all;
+    if (row.callType === "outgoing") s.outgoingCalls += row._count._all;
     s.talkSeconds += row._sum.durationSeconds || 0;
   }
+  for (const row of connected) statsFor(row.employeeId).outgoingConnected += row._count._all;
   for (const row of followUps) {
     // A missed call with no status yet is, by definition, still waiting.
     const field = FOLLOW_UP_FIELD[row.followUp ?? "pending"];
@@ -127,6 +144,7 @@ async function computeCallStats({ employeeIds = null, from, to }) {
     totals.totalCalls += s.totalCalls;
     totals.missedCalls += s.missedCalls;
     totals.talkSeconds += s.talkSeconds;
+    for (const key of ["incomingCalls", "outgoingCalls", "outgoingConnected"]) totals[key] += s[key];
     for (const field of Object.values(FOLLOW_UP_FIELD)) totals.followUp[field] += s.followUp[field];
   }
   finalize(
@@ -168,4 +186,4 @@ async function computeDailySeries({ employeeIds = null, from, to, tzOffsetMin = 
   return [...days.values()];
 }
 
-module.exports = { computeCallStats, computeDailySeries, blankStats, whose };
+module.exports = { computeCallStats, computeDailySeries, blankStats, whose, INCOMING_TYPES };

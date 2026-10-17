@@ -465,7 +465,7 @@ async function clientIdsWithDebt(caseWhere = {}) {
 
 // The current list (same filters) as an Excel file — one row per case; the
 // column titles are ones the importer recognises, so it can be imported back.
-const EXPORT_STATUS = { consultation: "Murojaat", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Davom etmadi" };
+const EXPORT_STATUS = { consultation: "Konsultatsiya", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Davom etmadi" };
 const EXPORT_STAGE = {
   inquiry: "Surishtiruv",
   investigation: "Tergov harakatlari",
@@ -602,6 +602,9 @@ clients.post("/", async (req, res, next) => {
     const b = req.body || {};
     const data = clientFields(b);
     if (!data.name) throw badRequest("name is required");
+    // "Is this a new client, or one we already had?" — asked in the form;
+    // only new ones count as new clients (older portals don't ask: new).
+    if (b.isNew !== undefined) data.isNew = b.isNew !== false;
     const phones = cl.normalizePhones(b.phones || []);
     if (b.force !== true) {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey));
@@ -836,6 +839,11 @@ clients.patch("/:id", async (req, res, next) => {
     await requireClientAccess(req.user, id, { write: true });
     const b = req.body || {};
     const data = clientFields(b);
+    // New or one the firm already had: a manager can correct it.
+    if (b.isNew !== undefined) {
+      if (!isManager(req.user)) throw Object.assign(new Error("forbidden"), { status: 403 });
+      data.isNew = b.isNew !== false;
+    }
     const phones = cl.normalizePhones(b.phones);
     if (phones && b.force !== true) {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey), { exceptId: id });

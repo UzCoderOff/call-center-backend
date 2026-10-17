@@ -120,7 +120,7 @@ async function financeData(user, monthParam) {
     ? [[], []]
     : await Promise.all([
         prisma.client.findMany({
-          where: { createdAt: { gte: new Date(firmDayRange(`${month}-01`).from), lte: new Date(firmDayRange(lastDayOf(month)).to) } },
+          where: { isNew: true, createdAt: { gte: new Date(firmDayRange(`${month}-01`).from), lte: new Date(firmDayRange(lastDayOf(month)).to) } },
           select: { source: true },
         }),
         // A consultation: an entry in the calendar that isn't cancelled

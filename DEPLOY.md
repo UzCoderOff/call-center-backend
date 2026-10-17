@@ -43,6 +43,28 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### Follow-up (2026-10-17, evening): cancelling, new or existing client, calls by direction
+
+- The old names are back: «Konsultatsiya» / «Konsultatsiyalar» (one thing:
+  a calendar entry that isn't cancelled).
+- Cancelling a consultation asks why (a reason + an optional note, saved
+  together in `Appointment.cancelReason`) and whether to book a new one (yes:
+  the calendar opens with the client filled in). Whoever booked it, or a
+  manager, can also mark it cancelled after its time, until its summary is
+  written; nobody can cancel one with a summary (403 `has_summary`). A past
+  one is saved with `clientInformed = true` and its booker isn't told.
+- Adding a client asks «Bu yangi mijozmi?» (`Client.isNew`) and, for people
+  who book, «Konsultatsiyaga ham yozasizmi?». Only new clients count as new
+  clients (Natijalar «yangi mijoz qoʻshdi», Moliya's sources). Excel imports
+  are saved as not new. A manager can correct it in the client's edit form.
+  Older portals don't send it: new, as before.
+- Call totals (`computeCallStats`) have `incomingCalls`, `outgoingCalls`,
+  `outgoingConnected`; the home page shows them. `GET /calls?callType=incoming`
+  now means every call that came in (incoming, missed, rejected, voicemail).
+- Migration `20261017140000_client_is_new`: one column (default true, so
+  everyone added before keeps counting).
+- What's new: "2026-10-17-cancel-new-client" (boss + staff).
+
 ### Follow-up (2026-10-17, later): the Telegram AI review learns from the firm
 
 - Three kinds of chat (`TgReview.kind`): new lead (judged by the sales

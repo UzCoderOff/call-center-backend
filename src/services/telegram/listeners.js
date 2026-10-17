@@ -56,7 +56,8 @@ async function onCancelled({ appointmentIds, byUserId }) {
   const forBooker = new Map();
   const forOwner = new Map();
   for (const a of rows) {
-    if (a.bookedById !== byUserId) forBooker.set(a.bookedById, [...(forBooker.get(a.bookedById) || []), a]);
+    // Cancelled after its time (it didn't take place): nobody to tell.
+    if (a.bookedById !== byUserId && !a.clientInformed) forBooker.set(a.bookedById, [...(forBooker.get(a.bookedById) || []), a]);
     if (a.calendar.ownerId !== byUserId && a.calendar.ownerId !== a.bookedById) {
       forOwner.set(a.calendar.ownerId, [...(forOwner.get(a.calendar.ownerId) || []), a]);
     }
@@ -80,7 +81,7 @@ async function onCancelled({ appointmentIds, byUserId }) {
 
   for (const [userId, list] of forOwner) {
     const items = list.map((a) => `• ${when(a, today)} — ${f.escapeHtml(a.clientName)}`);
-    await notifyUser(userId, "appointments", [`❌ <b>Uchrashuv bekor qilindi</b>`, ...items, `Bekor qildi: ${byName}`].join("\n"));
+    await notifyUser(userId, "appointments", [`❌ <b>Konsultatsiya bekor qilindi</b>`, ...items, `Bekor qildi: ${byName}`].join("\n"));
   }
 }
 

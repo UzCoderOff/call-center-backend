@@ -659,6 +659,10 @@ model Client {
   // Kept out of the automatic archive until then (src/services/clientArchive.js):
   // "we may still work with them".
   keepUntil     DateTime?
+  // Asked when the client is added (2026-10-17): a new client — the first time
+  // they came to the firm — or one the firm already had, only now written into
+  // Ledger. Only new ones count as "new clients" (Natijalar, sources).
+  isNew         Boolean          @default(true)
   // Room for fields added later without a migration (like Employee.customFields).
   extra         Json?
   createdById   Int?

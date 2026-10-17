@@ -49,7 +49,8 @@ function systemPrompt(user, { now = nowLine() } = {}) {
 // 2026-10-15).
 const TERMS = [
   "- Konsultatsiya, kalendarga yozish (bron) va uchrashuv — bitta narsa: konsultatsiya kalendaridagi bekor qilinmagan yozuv, oʻz sanasi bilan sanaladi va uni yozgan xodimga hisoblanadi. «Keldi / kelmadi» — shu konsultatsiyalarning natijasi. Ularni alohida-alohida raqam deb koʻrsatmang.",
-  "- Mijoz ishining «consultation» holati — «Murojaat» (shartnomagacha boʻlgan bosqich), u konsultatsiya boʻlib oʻtgani degani emas.",
+  "- Mijoz ishining «consultation» holati — shartnoma tuzilmagan mijoz bosqichi; konsultatsiyalar soni esa doim kalendardan sanaladi.",
+  "- «Yangi mijoz» — firmaga birinchi marta murojaat qilgan odam (mijoz qoʻshilganda soʻraladi). Firma bilan avval ishlagan, Ledgerga faqat endi kiritilgan mijozlar (va Excel’dan yuklanganlar) yangi mijoz sanalmaydi.",
   "- Voronkadagi «lost» — hech kim gaplasha olmagan raqamlar (javobsiz qoldi va qayta qoʻngʻiroqda ham ulanmadi), sababi yozilgan degani emas. Yangi raqam nega yozilmagani — outcomes (operator belgilagan sabab); konsultatsiyadan keyin nega davom etmagani — lostReasons.",
 ];
 
