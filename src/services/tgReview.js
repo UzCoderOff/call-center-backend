@@ -19,14 +19,21 @@ const inbox = require("./tgInbox");
 //
 // AI replies to clients are NOT built (the firm's call, 2026-10-15): later.
 
+// The firm's sales script for chats (Materiallar → «Kiruvchi qoʻngʻiroq
+// boʻyicha ssenariy», 2026-10-17), in short — what a good operator does.
 const DEFAULT_RULES = [
-  "Konsultatsiya: 450 000 soʻm, advokat bilan.",
-  "Tartib: avval mijozning muammosini bilib oling — salomlashing, nima boʻlganini soʻrang, tinglang. Muammo tushunarli boʻlgach, konsultatsiyani taklif qiling: «Sizni hozir advokatimiz konsultatsiyasiga yozib qoʻyaymi?». Muammoni bilmay turib darrov yozishga shoshilmang.",
-  "Narxni soʻrashsa — aniq ayting va masalasi nima ekanini soʻrang.",
-  "Yozishda aniq vaqt taklif qiling (masalan, «ertaga 11:00 yoki 15:00»), ism va raqamni oling.",
-  "Ish vaqtida tez javob bering — 15 daqiqa ichida.",
-  "Operator yuridik xulosa bermaydi — bu advokatning ishi; operator konsultatsiyani taklif qiladi.",
+  "Konsultatsiya: 450 000 soʻm, advokat bilan — ofisda yoki videoaloqa orqali. Maqsad: mijozning muammosini tushunish va uni oldindan toʻlov bilan pullik konsultatsiyaga yozish. Operator yuridik masalani oʻzi hal qilmaydi.",
+  "1. Salomlashish: «Assalomu alaykum!», hol-ahvol soʻrash (masalan, «Yaxshimisiz, kuningiz yaxshi oʻtyaptimi?»), oʻzini tanishtirish («Ismim …, men firma advokatlarining yordamchisiman») va mijozning ismini soʻrash — keyin uni ismi bilan atash.",
+  "2. Tartib: avval mijozning muammosini bilib oling — «Nima boʻldi?» deb soʻrang va toʻliq aytib olishiga qoʻying, boʻlmang. Keyin qisqa savollar: bu qachon boshlandi? qoʻlida hujjatlar bormi (rasmini yuborishi mumkin)? biror chora koʻrdimi, boshqa yuristga murojaat qildimi? qaror qabul qilishda yana kim ishtirok etadi?",
+  "3. Imkon boʻlsa, qoʻngʻiroqqa oʻtkazing: «Telefonda bu 5 daqiqa oladi — hozir qoʻngʻiroq qilsam qulaymi?». Mijoz yozishmani xohlasa — shu yerda davom eting.",
+  "4. Muammo tushunarli boʻlgach, konsultatsiyani taklif qiling: mijozning vaziyati → advokat nima qiladi (hujjatlarni oʻrganadi, yoʻllar va xavflarni tushuntiradi, bosqichma-bosqich reja beradi) → mijoz nima oladi. Muammoni bilmay turib darrov yozishga shoshilmang.",
+  "5. Narxni ishonch bilan, uzr soʻramasdan ayting va darrov ikki aniq vaqt taklif qiling (masalan, «ertaga 11:00 yoki payshanba 16:00») — «qachon qulay?» deb soʻramang.",
+  "6. Yozilgach: toʻlov (havola yoki ofisda), qaysi hujjatlarni olib kelishni ayting, bir kun oldin eslatma boʻlishini ayting.",
+  "Yozishma: ish vaqtida 5 daqiqa ichida javob bering; bitta xabar — bitta fikr, 3–4 qatordan oshmasin; har bir xabar savol bilan tugasin.",
+  "Eʼtirozlar (qimmat, oʻylab koʻraman, oilam bilan maslahatlashaman, vaqtim yoʻq…): rozi boʻling → asl sababni aniqlang («Ochigʻini ayting, sizni nima toʻxtatyapti — narxmi, vaqtmi?») → dalil keltiring → yozilishga olib boradigan savol bering. Bitta eʼtirozga ikki martadan ortiq urinmang, bosim oʻtkazmang.",
+  "Hech qachon: yuridik maslahat yoki xulosa bermang («Aynan shu masalani advokat konsultatsiyada koʻrib chiqadi»); natijani kafolatlamang va foizda imkoniyat aytmang; oʻylab topilgan muddat yoki chegirma ishlatmang; oʻzingizni advokat deb tanishtirmang.",
   "Mijoz qaysi tilda yozsa (oʻzbek yoki rus), oʻsha tilda javob bering.",
+  "Muloqot doim aniq qadam bilan tugaydi: toʻlangan yozilish, keyingi aloqa sanasi boʻyicha kelishuv yoki sababi aniq rad javobi.",
 ].join("\n");
 
 // Claude Haiku: the model the firm tried (voice-lab/review). It takes the
