@@ -1,8 +1,8 @@
 const prisma = require("../lib/prisma");
 const { phoneKey } = require("../lib/phone");
 const { getSetting, setSetting } = require("../lib/settings");
-const { isManager, MANAGER_ROLES } = require("../middleware/auth");
-const { hasJob, jobWhere } = require("../lib/jobs");
+const { isManager, isLawyer, MANAGER_ROLES } = require("../middleware/auth");
+const { jobWhere } = require("../lib/jobs");
 const { workScope, CONTRACT_STATUSES } = require("../lib/clientAccess");
 
 // Clients writing to the firm's Telegram account (2026-10-15, step 1).
@@ -16,14 +16,15 @@ const { workScope, CONTRACT_STATUSES } = require("../lib/clientAccess");
 // client's. Nothing is sent from here yet — the operator answers in the
 // Telegram app; Ledger sees both sides.
 //
-// Who sees which chat (the firm's rule, 2026-10-15: clients in work are the
-// coordinators', not the operators'):
+// Who sees which chat (the firm's rules, 2026-10-15 and 2026-10-17):
 //   - managers: all
-//   - the call center: new people (no client yet) and clients without a
-//     contract — turning them into consultations is their work
-//   - a client with a contract: their coordinator, and the people working on
-//     them (their lawyers — on the client's page); not the operators. An
-//     operator linking a chat to such a client hands it over.
+//   - the people who answer the firm's Telegram (Sozlamalar → «Mijozlar
+//     Telegrami» → who answers): the section, new people (no client yet) and
+//     clients without a contract — and the AI's feedback on every chat they
+//     see: they share one account, so they share the feedback
+//   - a client with a contract: their coordinator and their lawyers, on the
+//     client's page only (no section); nobody else. An answerer linking a
+//     chat to such a client hands it over.
 // The coordinator is told when their client writes.
 //
 // Settings (Setting "tgInbox"): operatorIds — who answers the firm's Telegram
@@ -37,19 +38,34 @@ const SETTINGS_KEY = "tgInbox";
 const DEFAULTS = { operatorIds: [] };
 const CONNECTION_KEY = "tgBusiness";
 
-const isCallCenterUser = (user) => user?.role === "EMPLOYEE" && hasJob(user.employee, "call_center");
-const isCoordinatorUser = (user) => user?.role === "EMPLOYEE" && hasJob(user.employee, "coordinator");
-// The section (Mijozlar Telegrami): managers, the call center, coordinators.
-const seesInbox = (user) => isManager(user) || isCallCenterUser(user) || isCoordinatorUser(user);
-// New people and clients before a contract — linking, new clients, hiding.
-const handlesNew = (user) => isManager(user) || isCallCenterUser(user);
+// The people a manager picked to answer the firm's Telegram.
+async function answererIds() {
+  const { operatorIds } = await getSetting(SETTINGS_KEY, DEFAULTS);
+  return Array.isArray(operatorIds) ? operatorIds : [];
+}
+const isAnswerer = async (user) => Boolean(user?.id) && (await answererIds()).includes(user.id);
+
+// The checks below read `user.tgAnswerer`, set first by the routes
+// (routes/tgInbox.js, auth) from isAnswerer.
+// The section (Mijozlar Telegrami) and new people — linking, new clients,
+// hiding: managers and the people who answer.
+const seesInbox = (user) => isManager(user) || Boolean(user?.tgAnswerer);
+const handlesNew = seesInbox;
+
+// A client in work someone looks after: their coordinator, their lawyer.
+function inWorkScope(user) {
+  if (isLawyer(user)) return workScope(user);
+  const me = user?.employee?.id;
+  return me ? { cases: { some: { coordinatorId: me } } } : { id: -1 };
+}
 
 // The chats someone may see, as a `where` on TgChat.
 function chatScope(user) {
   if (isManager(user)) return {};
-  const or = [{ client: { is: workScope(user) } }];
-  if (isCallCenterUser(user)) or.push({ clientId: null }, { client: { is: { cases: { none: { status: { in: CONTRACT_STATUSES } } } } } });
-  return { OR: or };
+  if (user?.tgAnswerer) {
+    return { OR: [{ client: { is: workScope(user) } }, { clientId: null }, { client: { is: { cases: { none: { status: { in: CONTRACT_STATUSES } } } } } }] };
+  }
+  return { client: { is: inWorkScope(user) } };
 }
 
 async function canSeeChat(user, chatId) {
@@ -57,10 +73,14 @@ async function canSeeChat(user, chatId) {
   return (await prisma.tgChat.count({ where: { AND: [{ id: chatId }, chatScope(user)] } })) > 0;
 }
 
-// The people who see the section (for live updates).
+// The people who see chats (for live updates): managers, the answerers,
+// coordinators (their clients' page).
 async function inboxUserIds() {
   const users = await prisma.user.findMany({
-    where: { active: true, OR: [{ role: { in: MANAGER_ROLES } }, { role: "EMPLOYEE", employee: { active: true, ...jobWhere(["call_center", "coordinator"]) } }] },
+    where: {
+      active: true,
+      OR: [{ role: { in: MANAGER_ROLES } }, { id: { in: await answererIds() } }, { role: "EMPLOYEE", employee: { active: true, ...jobWhere(["coordinator"]) } }],
+    },
     select: { id: true },
   });
   return users.map((u) => u.id);
@@ -252,7 +272,8 @@ async function tellCoordinators(chat, parsed) {
   const name = cases[0].client?.name || displayName(chat);
   const title = `Mijozingiz Telegramga yozdi · ${name}`;
   const body = (parsed.text || "").slice(0, 160) || "Yangi xabar";
-  const link = `/telegram/${chat.id}`;
+  // Their client's page: coordinators have no section of their own.
+  const link = `/clients/${chat.clientId}`;
   for (const userId of userIds) {
     if (await app.notifyPush(userId, { kind: "chat", title, body, link, tag: `tg:${chat.id}` })) continue;
     await notifyUser(userId, "chat", [`✉️ <b>${f.escapeHtml(title)}</b>`, f.escapeHtml(body), f.portalLink(link, "Yozishmani ochish")].join("\n"), undefined, { app: false });
@@ -356,6 +377,8 @@ module.exports = {
   DEFAULTS,
   CONNECTION_KEY,
   seesInbox,
+  isAnswerer,
+  answererIds,
   handlesNew,
   chatScope,
   canSeeChat,

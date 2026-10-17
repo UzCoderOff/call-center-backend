@@ -12,6 +12,13 @@ const MIN_PASSWORD_LENGTH = 8;
 
 const router = express.Router();
 
+// The signed-in person, with whether they answer the firm's Telegram (its
+// section and AI feedback are theirs — services/tgInbox.js).
+async function withTelegram(user) {
+  const { isAnswerer } = require("../services/tgInbox");
+  return { ...publicMe(user), tgInbox: await isAnswerer(user) };
+}
+
 // Shared with the Android app's sign-in (routes/device.js). Same generic
 // error whether the username doesn't exist or the password is wrong — don't
 // help an attacker enumerate valid usernames.
@@ -47,7 +54,7 @@ router.post("/login", async (req, res, next) => {
     if (result.error) return res.status(result.status).json({ error: result.error });
 
     startSession(res, result.user);
-    res.json(publicMe(result.user));
+    res.json(await withTelegram(result.user));
   } catch (err) {
     next(err);
   }
@@ -58,8 +65,12 @@ router.post("/logout", (req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/me", requireAuth, (req, res) => {
-  res.json(publicMe(req.user));
+router.get("/me", requireAuth, async (req, res, next) => {
+  try {
+    res.json(await withTelegram(req.user));
+  } catch (err) {
+    next(err);
+  }
 });
 
 // Every role — DEVELOPER, BOSS, EMPLOYEE — can change their own password

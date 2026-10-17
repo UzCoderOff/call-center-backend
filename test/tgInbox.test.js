@@ -41,18 +41,23 @@ test("their own number: a contact of themselves, else a number they typed", () =
 });
 
 test("who has the Telegram section, and who handles new people", () => {
+  // Managers, and the people picked to answer the firm's Telegram (2026-10-17).
   assert.equal(seesInbox({ role: "BOSS" }), true);
   assert.equal(seesInbox({ role: "DEVELOPER" }), true);
-  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "call_center" } }), true);
-  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "office", extraJobs: "call_center" } }), true);
-  // Coordinators: their clients in work.
-  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "coordinator" } }), true);
-  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "office" } }), false);
+  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "call_center" }, tgAnswerer: true }), true);
+  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "call_center" }, tgAnswerer: false }), false);
+  // Coordinators and lawyers: their clients in work, on the client's page only.
+  assert.equal(seesInbox({ role: "EMPLOYEE", employee: { job: "coordinator" } }), false);
   assert.equal(seesInbox({ role: "LAWYER" }), false);
-  // New people and linking: managers and the call center only.
-  assert.equal(handlesNew({ role: "EMPLOYEE", employee: { job: "call_center" } }), true);
-  assert.equal(handlesNew({ role: "EMPLOYEE", employee: { job: "coordinator" } }), false);
+  assert.equal(handlesNew({ role: "EMPLOYEE", employee: { job: "call_center" }, tgAnswerer: true }), true);
+  assert.equal(handlesNew({ role: "EMPLOYEE", employee: { job: "call_center" } }), false);
   assert.equal(handlesNew({ role: "BOSS" }), true);
+  // What they may see: answerers new people and clients before a contract;
+  // a coordinator only the clients they look after.
+  const { chatScope } = require("../src/services/tgInbox");
+  assert.deepEqual(chatScope({ role: "BOSS" }), {});
+  assert.ok(JSON.stringify(chatScope({ role: "EMPLOYEE", employee: { id: 4 }, tgAnswerer: true })).includes('"clientId":null'));
+  assert.deepEqual(chatScope({ role: "EMPLOYEE", employee: { id: 4 } }), { client: { is: { cases: { some: { coordinatorId: 4 } } } } });
 });
 
 test("a chat's name: their name, else @username", () => {

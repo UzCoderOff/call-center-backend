@@ -43,6 +43,19 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### Follow-up (2026-10-17): «Mijozlar Telegrami» only for the people who answer
+
+- The section, new people's chats and the AI's feedback on each chat:
+  managers and the people picked in Sozlamalar → «Mijozlar Telegrami» →
+  who answers (Setting `tgInbox.operatorIds`) — no longer the whole call
+  center. Coordinators and lawyers see their own clients-in-work chats on
+  the client's page only; the coordinator's "your client wrote" opens it.
+  `/api/auth/me` and login carry `tgInbox` for the portal's menu.
+- **After deploying:** pick who answers (nobody is picked yet, so only
+  managers see the section).
+- The default AI review rules follow the firm's sales script (Materiallar).
+- No migration, no `.env` change.
+
 ### This release (2026-10-17): one consultation count, answers on tasks, new callers' outcomes, walk-ins, Ledger AI fixes
 
 - **A consultation = a booking = an appointment** (the firm's call): every

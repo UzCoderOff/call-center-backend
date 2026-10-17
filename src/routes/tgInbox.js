@@ -31,6 +31,15 @@ const { firmDayRange, firmNow } = require("../lib/firmTime");
 
 const router = express.Router();
 router.use(requireAuth);
+// Whether they answer the firm's Telegram (services/tgInbox.js reads it).
+router.use(async (req, res, next) => {
+  try {
+    req.user.tgAnswerer = await inbox.isAnswerer(req.user);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 const notFound = () => Object.assign(new Error("not_found"), { status: 404 });
 const forbidden = () => Object.assign(new Error("forbidden"), { status: 403 });
@@ -238,7 +247,9 @@ router.get("/:id", async (req, res, next) => {
     const hasOlder = rows.length > MESSAGES;
     const latest = await prisma.tgReview.findFirst({ where: { chatId: chat.id }, orderBy: { id: "desc" }, include: { operator: ANSWERED_BY } });
     // A judgement of someone's work: for managers, and for the one it's about.
-    const review = latest && (isManager(req.user) || latest.operatorId === req.user.id) ? latest : null;
+    // The AI's feedback: managers, and everyone who answers the firm's
+    // Telegram — one shared account, one shared lesson (2026-10-17).
+    const review = latest && (isManager(req.user) || req.user.tgAnswerer || latest.operatorId === req.user.id) ? latest : null;
     res.json({
       chat: { ...inbox.chatLine(chat), canManage: inbox.handlesNew(req.user), canReview: isManager(req.user) },
       messages: rows.slice(0, MESSAGES).reverse().map(inbox.messageLine),
