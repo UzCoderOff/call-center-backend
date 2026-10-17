@@ -19,9 +19,23 @@ test("what's new: the boss gets the summary, staff only what touches their work,
   assert.equal(messageFor(news, developer), null);
 });
 
+test("what's new 2026-10-17: one consultation count, task answers, new callers, walk-ins", () => {
+  const news = NEWS.find((n) => n.id === "2026-10-17-consultations-answers");
+  assert.equal(NEWS[0], news);
+  const operator = { role: "EMPLOYEE", employee: { job: "call_center" } };
+  const office = { role: "EMPLOYEE", employee: { job: "office" } };
+  const lawyer = { role: "LAWYER" };
+  assert.match(messageFor(news, { role: "BOSS" }), /Murojaat/);
+  assert.match(messageFor(news, operator), /Yangi raqamlar/);
+  assert.match(messageFor(news, operator), /javob/i);
+  assert.match(messageFor(news, office), /Vazifaga javob/);
+  assert.doesNotMatch(messageFor(news, office), /Yangi raqamlar/);
+  assert.match(messageFor(news, lawyer), /Yozilmasdan kelgan/);
+});
+
 test("what's new 2026-10-15: the clients' Telegram — the boss and the call center", () => {
   const news = NEWS.find((n) => n.id === "2026-10-15-telegram-inbox");
-  assert.equal(NEWS[0], news);
+  assert.equal(NEWS[1], news);
   const boss = { role: "BOSS" };
   const operator = { role: "EMPLOYEE", employee: { job: "call_center" } };
   const lawyer = { role: "LAWYER" };
@@ -35,7 +49,7 @@ test("what's new 2026-10-15: the clients' Telegram — the boss and the call cen
 
 test("what's new 2026-10-15: office calls back, who took the cash", () => {
   const news = NEWS.find((n) => n.id === "2026-10-15-office-calls-cash");
-  assert.equal(NEWS[1], news);
+  assert.equal(NEWS[2], news);
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", extraJobs: "" }, calendar: null };
   const office = { role: "EMPLOYEE", employee: { job: "office", collectCalls: true, calendarAccess: "none", extraJobs: "" }, calendar: null };
   const quiet = { role: "EMPLOYEE", employee: { job: "office", collectCalls: false, calendarAccess: "none", extraJobs: "" }, calendar: null };

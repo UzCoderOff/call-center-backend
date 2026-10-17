@@ -18,11 +18,19 @@ const { BUILTIN, BUILTIN_NAMES, FINANCE_ONLY } = require("../performanceMetrics"
 // data.action = { tool, args, summary, status, result?, error? }.
 //
 //   create_reminder  a reminder for themselves or anyone
-//   create_task      a task for someone (with a due time)
+//   create_task      a task for someone (with a due time; it may ask them to
+//                    write an answer)
+//   edit_task        an open task's title, notes, due time, person, or
+//                    whether it asks for an answer (2026-10-17)
 //   add_next_step    a client's next step (call, waiting for a decision…),
 //                    for the client's operator unless someone else is named
 //   set_target       a person's monthly target on one measure
 //   add_client_note  a note on a client's timeline
+//
+// What it creates shows "Ledger AI" as its author (viaAi; the person who
+// confirmed it stays in createdById / authorId) — the firm may later let it
+// work on its own. It never deletes anything, touches money or contract
+// amounts, or manages accounts.
 
 const nameOf = (u) => u?.employee?.name || u?.name || u?.username || null;
 
@@ -112,14 +120,15 @@ const ACTIONS = {
     async execute(args, user) {
       const { planOne, REMINDER_INCLUDE } = require("../reminders");
       if (args.userId !== user.id && !isManager(user)) throw bad("forbidden");
-      const row = await prisma.reminder.create({ data: { title: args.title, notes: args.notes, dueAt: new Date(args.dueAt), userId: args.userId, clientId: args.clientId, createdById: user.id }, include: REMINDER_INCLUDE });
+      const row = await prisma.reminder.create({ data: { title: args.title, notes: args.notes, dueAt: new Date(args.dueAt), userId: args.userId, clientId: args.clientId, createdById: user.id, viaAi: true }, include: REMINDER_INCLUDE });
       planOne(row);
       return { reminderId: row.id };
     },
   },
 
   create_task: {
-    description: "Prepare a task for a staff member, with a due time (shown to the user to confirm first).",
+    description:
+      "Prepare a task for a staff member, with a due time (shown to the user to confirm first). The person sees Ledger AI as who gave it. Set needs_answer when the task asks them to explain or report something — they then write their answer in Ledger before ticking it done.",
     parameters: {
       type: "object",
       properties: {
@@ -128,6 +137,7 @@ const ACTIONS = {
         due: { type: "string", description: "YYYY-MM-DD HH:MM, Tashkent time" },
         client_id: { type: "integer", description: "optional" },
         notes: { type: "string" },
+        needs_answer: { type: "boolean", description: "they must write an answer (explain, report back)" },
       },
       required: ["title", "for_person", "due"],
     },
@@ -137,13 +147,82 @@ const ACTIONS = {
       const who = await onePerson(a.for_person);
       const dueAt = moment(a.due);
       const client = a.client_id ? await oneClient(user, a.client_id) : null;
-      const args = { title, notes: text(a.notes, 2000), assigneeId: who.id, dueAt: dueAt.toISOString(), clientId: client?.id ?? null };
-      return { args, summary: `✅ Vazifa — ${nameOf(who)}: «${title}» — muddat ${when(dueAt)}${client ? ` · mijoz: ${client.name}` : ""}` };
+      const args = { title, notes: text(a.notes, 2000), assigneeId: who.id, dueAt: dueAt.toISOString(), clientId: client?.id ?? null, needsAnswer: a.needs_answer === true };
+      return {
+        args,
+        summary: `✅ Vazifa — ${nameOf(who)}: «${title}» — muddat ${when(dueAt)}${client ? ` · mijoz: ${client.name}` : ""}${args.needsAnswer ? " · javob yozadi" : ""} · beruvchi: Ledger AI`,
+      };
     },
     async execute(args, user) {
       if (!isManager(user)) throw bad("forbidden");
-      const task = await prisma.task.create({ data: { ...args, dueAt: new Date(args.dueAt), createdById: user.id } });
+      const task = await prisma.task.create({ data: { ...args, dueAt: new Date(args.dueAt), createdById: user.id, viaAi: true } });
       events.emit("task.created", { taskId: task.id });
+      return { taskId: task.id };
+    },
+  },
+
+  edit_task: {
+    description:
+      "Prepare a change to an open task (its id from the tasks lookup): a new title, notes, due time, person, or whether they must write an answer. Only what's given changes. Shown to the user to confirm first. Tasks can't be deleted or ticked done from here.",
+    parameters: {
+      type: "object",
+      properties: {
+        task_id: { type: "integer" },
+        title: { type: "string" },
+        notes: { type: "string" },
+        due: { type: "string", description: "YYYY-MM-DD HH:MM, Tashkent time" },
+        for_person: { type: "string", description: "part of the new person's name" },
+        needs_answer: { type: "boolean" },
+      },
+      required: ["task_id"],
+    },
+    async prepare(raw, user) {
+      // Models send "" for fields they didn't mean to change.
+      const a = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== "" && v !== null));
+      const task = await prisma.task.findUnique({ where: { id: Number(a.task_id) }, include: { assignee: { select: { id: true, username: true, name: true, employee: { select: { name: true } } } } } });
+      if (!task) throw bad("no such task (use the tasks lookup for its id)");
+      if (task.doneAt) throw bad("this task is already done — it can't be changed");
+      const changes = {};
+      const said = [];
+      if (a.title !== undefined) {
+        const title = text(a.title, 200);
+        if (!title) throw bad("title can't be empty");
+        if (title !== task.title) (changes.title = title), said.push(`nomi: «${title}»`);
+      }
+      if (a.notes !== undefined) {
+        const notes = text(a.notes, 2000);
+        if (notes !== task.notes) (changes.notes = notes), said.push(notes ? "izoh yangilanadi" : "izoh olib tashlanadi");
+      }
+      if (a.due !== undefined) {
+        const dueAt = moment(a.due);
+        if (dueAt.getTime() !== task.dueAt.getTime()) (changes.dueAt = dueAt.toISOString()), said.push(`muddat: ${when(task.dueAt)} → ${when(dueAt)}`);
+      }
+      if (a.for_person !== undefined) {
+        // A case's task stays with the people on that case (routes/tasks.js).
+        if (task.caseId) throw bad("a case's task can be given to someone else only on the case page");
+        const who = await onePerson(a.for_person);
+        if (who.id !== task.assigneeId) (changes.assigneeId = who.id), said.push(`kimga: ${nameOf(task.assignee)} → ${nameOf(who)}`);
+      }
+      if (typeof a.needs_answer === "boolean" && a.needs_answer !== task.needsAnswer) (changes.needsAnswer = a.needs_answer), said.push(a.needs_answer ? "javob yozadi" : "javob shart emas");
+      if (said.length === 0) throw bad("nothing would change");
+      return { args: { taskId: task.id, changes }, summary: `✏️ Vazifa oʻzgaradi — ${nameOf(task.assignee)}: «${task.title}» · ${said.join(" · ")}` };
+    },
+    async execute(args, user) {
+      if (!isManager(user)) throw bad("forbidden");
+      const task = await prisma.task.findUnique({ where: { id: args.taskId } });
+      if (!task) throw bad("the task is gone");
+      if (task.doneAt) throw bad("the task was done meanwhile");
+      const { changes } = args;
+      const data = { ...changes, ...(changes.dueAt ? { dueAt: new Date(changes.dueAt) } : {}) };
+      // Someone else's now: the answer was the last person's.
+      if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) Object.assign(data, { answer: null, answeredAt: null });
+      await prisma.task.update({ where: { id: task.id }, data });
+      // As the tasks page does: a new person hears about it; a new time or
+      // person gets its reminders again.
+      if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) events.emit("task.created", { taskId: task.id });
+      if (data.dueAt !== undefined || data.assigneeId !== undefined) {
+        await prisma.telegramNotice.deleteMany({ where: { key: { in: [`task-soon:${task.id}`, `task-due:${task.id}`] } } });
+      }
       return { taskId: task.id };
     },
   },
@@ -175,8 +254,8 @@ const ACTIONS = {
     },
     async execute(args, user) {
       const row = await prisma.$transaction(async (tx) => {
-        const r = await tx.clientFollowUp.create({ data: { ...args, dueAt: new Date(args.dueAt), createdById: user.id } });
-        await tx.clientEvent.create({ data: { clientId: args.clientId, caseId: args.caseId, kind: "follow_up", text: "", data: { action: "add", kind: r.kind, dueAt: r.dueAt, note: r.note }, authorId: user.id } });
+        const r = await tx.clientFollowUp.create({ data: { ...args, dueAt: new Date(args.dueAt), createdById: user.id, viaAi: true } });
+        await tx.clientEvent.create({ data: { clientId: args.clientId, caseId: args.caseId, kind: "follow_up", text: "", data: { action: "add", kind: r.kind, dueAt: r.dueAt, note: r.note, viaAi: true }, authorId: user.id } });
         await fu.syncNextCall(tx, args.clientId);
         return r;
       });
@@ -187,7 +266,7 @@ const ACTIONS = {
 
   set_target: {
     description:
-      "Prepare a staff member's monthly target on one measure (from a month on, until changed; 0 = no target). Measures: consultations, contracts, bookings, calls_answered, fees (consultation fees, soʻm), collected, cases, income (all income — finance only). Shown to the user to confirm first.",
+      "Prepare a staff member's monthly target on one measure (from a month on, until changed; 0 = no target). Measures: consultations (the consultations they book in the calendar — bookings are consultations), contracts, calls_answered, fees (consultation fees, soʻm), collected, cases, income (all income — finance only). Shown to the user to confirm first.",
     parameters: {
       type: "object",
       properties: {
@@ -236,7 +315,7 @@ const ACTIONS = {
       return { args: { clientId: client.id, text: note }, summary: `📝 Izoh — ${client.name}: «${note.length > 160 ? `${note.slice(0, 157)}…` : note}»` };
     },
     async execute(args, user) {
-      await prisma.clientEvent.create({ data: { clientId: args.clientId, kind: "note", text: args.text, authorId: user.id } });
+      await prisma.clientEvent.create({ data: { clientId: args.clientId, kind: "note", text: args.text, data: { viaAi: true }, authorId: user.id } });
       await prisma.client.update({ where: { id: args.clientId }, data: { updatedAt: new Date() } });
       return { ok: true };
     },

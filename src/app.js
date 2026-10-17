@@ -132,6 +132,7 @@ app.use("/api/telegram", telegramRoutes);
 app.use("/api/tg-inbox", require("./routes/tgInbox"));
 app.use("/api/finance", financeRoutes);
 app.use("/api/tasks", taskRoutes);
+app.use("/api/call-outcomes", require("./routes/callOutcomes"));
 app.use("/api/reminders", require("./routes/reminders"));
 app.use("/api/chat", require("./routes/chat"));
 app.use("/api/push", require("./routes/push"));

@@ -56,7 +56,7 @@ async function clientIndex(db, keys) {
 // The consultation phase: a booking joins a case in it, else starts one.
 const CONSULTING = ["consultation", "call_again"];
 
-async function clientForBooking(db, { name, phone, matter, date, user, lawyerId = null, clientId = null }) {
+async function clientForBooking(db, { name, phone, matter, date, user, lawyerId = null, clientId = null, source = "call" }) {
   const key = phoneKey(phone);
   if (!clientId && !key) return null;
   const operatorId = user.employee?.id ?? null;
@@ -112,7 +112,8 @@ async function clientForBooking(db, { name, phone, matter, date, user, lawyerId 
   const client = await db.client.create({
     data: {
       name: cl.text(name, 160) || phone,
-      source: "call",
+      // Booked from a call — or a walk-in written down after they came.
+      source,
       createdById: user.id,
       phones: { create: [{ phone: String(phone).trim().slice(0, 40), phoneKey: key }] },
       cases: { create: [{ matter: cl.text(matter, 500), operatorId, startDate: date, consultationDate: date, ...assigned }] },

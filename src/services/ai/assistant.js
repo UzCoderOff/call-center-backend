@@ -18,13 +18,21 @@ const MAX_ROUNDS = 6;
 const HISTORY = 16;
 const MAX_TOOL_RESULT = 14000; // characters of one tool's answer sent back
 
-function systemPrompt(user) {
+// "Bugun: 2026-10-17, soat 11:30 (Toshkent vaqti)." — read once per answer.
+function nowLine() {
   const now = firmNow();
+  return `Bugun: ${now.date}, soat ${String(Math.floor(now.minutes / 60)).padStart(2, "0")}:${String(now.minutes % 60).padStart(2, "0")} (Toshkent vaqti).`;
+}
+
+// `now`: the date and time line, or false to leave it out (Claude gets it
+// as a separate system message after the question, so this prompt stays the
+// same from one answer to the next).
+function systemPrompt(user, { now = nowLine() } = {}) {
   const name = user.employee?.name || user.name || user.username;
   return [
     "Siz «Ledger AI» — yuridik firmaning ichki tizimi Ledgerdagi yordamchisiz.",
     `Siz bilan ${name} (${user.role === "BOSS" ? "firma rahbari" : "tizim dasturchisi"}) gaplashmoqda.`,
-    `Bugun: ${now.date}, soat ${String(Math.floor(now.minutes / 60)).padStart(2, "0")}:${String(now.minutes % 60).padStart(2, "0")} (Toshkent vaqti).`,
+    ...(now ? [now] : []),
     "Qoidalar:",
     "- Foydalanuvchi qaysi tilda yozsa (oʻzbekcha lotin yoki ruscha), oʻsha tilda javob bering. Oʻzbekchada tabiiy, sodda, xushmuomala yozing.",
     "- Raqamlar, ismlar va faktlarni FAQAT vositalar (tools) natijasidan oling. Hech qachon taxmin qilmang va oʻylab topmang.",
@@ -32,13 +40,23 @@ function systemPrompt(user) {
     "- Davr aytilmagan boʻlsa, «bu oy» deb oling va javobda qaysi davr ekanini yozing.",
     "- Javob qisqa va aniq boʻlsin: avval asosiy raqam yoki xulosa, keyin kerak boʻlsa qisqa roʻyxat (har biri alohida qatorda). Markdown jadval ishlatmang.",
     "- Pulni soʻmda, minglik boʻsh joy bilan yozing (masalan, 12 500 000 soʻm).",
+    ...TERMS,
     ...ACTION_RULES,
   ].join("\n");
 }
 
+// What the firm's words mean in the numbers (the model mixed them up,
+// 2026-10-15).
+const TERMS = [
+  "- Konsultatsiya, kalendarga yozish (bron) va uchrashuv — bitta narsa: konsultatsiya kalendaridagi bekor qilinmagan yozuv, oʻz sanasi bilan sanaladi va uni yozgan xodimga hisoblanadi. «Keldi / kelmadi» — shu konsultatsiyalarning natijasi. Ularni alohida-alohida raqam deb koʻrsatmang.",
+  "- Mijoz ishining «consultation» holati — «Murojaat» (shartnomagacha boʻlgan bosqich), u konsultatsiya boʻlib oʻtgani degani emas.",
+  "- Voronkadagi «lost» — hech kim gaplasha olmagan raqamlar (javobsiz qoldi va qayta qoʻngʻiroqda ham ulanmadi), sababi yozilgan degani emas. Yangi raqam nega yozilmagani — outcomes (operator belgilagan sabab); konsultatsiyadan keyin nega davom etmagani — lostReasons.",
+];
+
 // What the model is told about doing things.
 const ACTION_RULES = [
-  "- Siz baʼzi ishlarni bajara olasiz: eslatma qoʻyish, xodimga vazifa berish, mijozga keyingi qadam qoʻyish, oylik reja (target) qoʻyish, mijozga izoh yozish. Boshqa narsani oʻzgartira olmaysiz — soʻrashsa, Ledgerning qaysi sahifasida qilinishini ayting.",
+  "- Siz baʼzi ishlarni bajara olasiz: eslatma qoʻyish, xodimga vazifa berish, ochiq vazifani oʻzgartirish (nomi, izohi, muddati, kimga, javob kerakmi), mijozga keyingi qadam qoʻyish, oylik reja (target) qoʻyish, mijozga izoh yozish. Boshqa narsani oʻzgartira olmaysiz (oʻchirish, pul, shartnoma summasi, xodimlar va ruxsatlar — hech qachon) — soʻrashsa, Ledgerning qaysi sahifasida qilinishini ayting.",
+  "- Siz tayyorlagan vazifa, eslatma, keyingi qadam va izohlarda muallif «Ledger AI» deb koʻrinadi (kim tasdiqlagani Ledgerda saqlanadi). Xodimdan biror narsani tushuntirish yoki hisobot soʻralsa, vazifani needs_answer bilan bering — xodim javobini Ledgerda yozadi, javoblarni tasks vositasida koʻrasiz.",
   "- Har bir ish avval tayyorlanadi (vosita chaqiriladi) va foydalanuvchiga «Tasdiqlash / Bekor qilish» kartochkasi chiqadi. Hech qachon «bajarildi» demang — faqat confirm_action natijasi «done» boʻlsa ayting.",
   "- confirm_action ni faqat foydalanuvchi aniq «ha / tasdiqlayman / mayli» degandan keyin chaqiring. Ikkilansa yoki oʻzgartirsa — cancel_action va yangisini tayyorlang.",
   "- Vaqtni doim Toshkent vaqti bilan «YYYY-MM-DD HH:MM» koʻrinishida bering. «Ertaga», «juma kuni» kabi soʻzlarni bugungi sanadan hisoblang. Vaqt aytilmasa 10:00 deb oling va buni ayting.",
@@ -115,13 +133,18 @@ async function replyWithClaude(conv, user, settings) {
   const past = (await history(conv)).filter((m) => m.content && m.content.trim());
   while (past.length && past[0].role !== "user") past.shift();
   const messages = past.map((m) => ({ role: m.role, content: m.content }));
+  // Within one answer every request repeats the earlier ones exactly: Claude
+  // checks its own reasoning against them (a prompt rebuilt as the clock
+  // turned 20:05 was refused, 2026-10-15). So the prompt, the tools and the
+  // time are fixed here, once — the time on the question itself (every model
+  // takes that), which also keeps the prompt cacheable between answers.
+  const system = systemPrompt(user, { now: false });
+  const last = messages[messages.length - 1];
+  if (last?.role === "user") last.content = `${last.content}\n\n(${nowLine()})`;
   const toolDefs = definitions(user).map((d) => ({ name: d.name, description: d.description, input_schema: d.parameters }));
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const response = await claude.create(
-        { system: systemPrompt(user), tools: toolDefs, messages, output_config: { effort: "medium" } },
-        { feature: "chat" }
-      );
+      const response = await claude.create({ system, tools: toolDefs, messages, output_config: { effort: "medium" } }, { feature: "chat" });
       if (response.stop_reason === "refusal") {
         await post(conv, user, "Bu savolga javob bera olmayman.");
         return;
@@ -202,4 +225,4 @@ async function reply(conv, user) {
   }
 }
 
-module.exports = { reply, systemPrompt, definitions, runTool, ACTION_RULES };
+module.exports = { reply, systemPrompt, definitions, runTool, ACTION_RULES, TERMS };

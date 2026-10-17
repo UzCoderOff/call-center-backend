@@ -165,7 +165,7 @@ const TOOLS = [
   {
     name: "staff_performance",
     description:
-      "Natijalar for a month, per employee: calls, bookings made/attended/no-show, consultations and contracts vs. their targets, conversion, reports sent/missing, tasks open/overdue, late call-back strikes, clients added" +
+      "Natijalar for a month, per employee: calls; consultations (= the consultations they booked in the calendar, not cancelled, counted on their own day so far — a booking and a consultation are the same thing) vs. their target, with came / noShow / unmarked / today / upcoming (later this month, not counted yet) / cancelled; contracts vs. target; conversion (clients with a consultation this month who signed since); reports sent/missing, tasks open/overdue, late call-back strikes, clients added" +
       " (and money brought in, when the asker may see finance). Default: this month.",
     parameters: {
       type: "object",
@@ -179,8 +179,8 @@ const TOOLS = [
         where: {
           OR: [
             { active: true },
-            { cases: { some: { OR: [{ consultationDate: range }, { contractDate: range }] } } },
-            { user: { bookedAppointments: { some: { date: range } } } },
+            { cases: { some: { contractDate: range } } },
+            { user: { bookedAppointments: { some: { date: range, status: { not: "cancelled" } } } } },
           ],
         },
         select: EMPLOYEE_SELECT,
@@ -200,7 +200,6 @@ const TOOLS = [
           position: r.employee.position?.name || r.employee.position || null,
           jobs: r.work?.jobs,
           calls: r.calls && { total: r.calls.total, answered: r.calls.answered, missed: r.calls.missed, needsCallback: r.calls.needsCallback, answerRate: r.calls.answerRate },
-          bookings: r.bookings && { made: r.bookings.made, attended: r.bookings.attended, noShow: r.bookings.noShow, upcoming: r.bookings.upcoming, cancelled: r.bookings.cancelled },
           consultations: r.consultations,
           contracts: r.contracts,
           conversionRate: r.conversion?.rate ?? null,
@@ -216,14 +215,25 @@ const TOOLS = [
   },
   {
     name: "call_funnel",
-    description: "From calls to contracts for the call center in a period: different numbers, new vs returning, reached, lost, booked a consultation, came, signed — with rates and the main reasons people were lost.",
-    parameters: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } } },
+    description:
+      "From calls to consultations to contracts, counted by phone numbers (not calls), in a period — for the whole call center, or one operator (employee; then the numbers their phone talked to). numbers, new vs returning, reached (someone talked to them within a week), lost (NOBODY talked to them: missed and never reached — not a recorded reason), booked a consultation, came, signed; outcomes = why new numbers they talked to didn't book (the reason the operator tapped), outcomeMissing = such numbers with no reason yet; lostReasons = why consultations didn't continue (cases closed as declined).",
+    parameters: {
+      type: "object",
+      properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, employee: { type: "string", description: "part of an operator's name, for only them" } },
+    },
     async run(args) {
       const p = period(args);
-      const staff = await prisma.employee.findMany({ select: { id: true, job: true, extraJobs: true } });
-      const ids = staff.filter((e) => isCallCenter(e)).map((e) => e.id);
+      const staff = await prisma.employee.findMany({ select: { id: true, name: true, job: true, extraJobs: true } });
+      let ids = staff.filter((e) => isCallCenter(e)).map((e) => e.id);
+      let who = null;
+      if (args.employee) {
+        const found = staff.filter((e) => matches(e.name, args.employee));
+        if (found.length !== 1) return { error: found.length ? `several match: ${found.map((e) => e.name).join(", ")}` : `no employee is called "${args.employee}"` };
+        ids = [found[0].id];
+        who = found[0].name;
+      }
       const f = await computeFunnel({ employeeIds: ids.length ? ids : null, from: p.fromMs, to: p.toMs, fee: DEFAULT_FEE });
-      return cap({ period: { from: p.from, to: p.to }, ...f, now: undefined }, 10);
+      return cap({ period: { from: p.from, to: p.to }, employee: who, ...f, now: undefined }, 10);
     },
   },
   {
@@ -368,7 +378,7 @@ const TOOLS = [
   },
   {
     name: "appointments",
-    description: "Consultation bookings in a date range (default: today): date, time, lawyer, client, matter, office/online, status (booked, attended, no_show, cancelled), who booked it — plus counts by status.",
+    description: "Consultations (= bookings in the consultation calendar) in a date range (default: today): date, time, lawyer, client, matter, office/online, status (booked = not marked yet, attended, no_show, cancelled), who booked it — plus counts by status. consultations = the ones that count (all but cancelled).",
     parameters: {
       type: "object",
       properties: {
@@ -395,6 +405,7 @@ const TOOLS = [
         from,
         to,
         total: rows.length,
+        consultations: rows.filter((a) => a.status !== "cancelled").length,
         byStatus,
         list: rows.slice(0, 40).map((a) => ({
           date: a.date,
@@ -411,7 +422,8 @@ const TOOLS = [
   },
   {
     name: "tasks",
-    description: "Tasks given to staff: open ones (or only overdue), or those done in the last 7 days — title, who it's for, due, client, who gave it.",
+    description:
+      "Tasks given to staff: open ones (or only overdue), or those done in the last 7 days — id, title, notes, who it's for, due, client, who gave it (Ledger AI for the ones you prepared), and the person's written answer (needsAnswer: they were asked to write one).",
     parameters: {
       type: "object",
       properties: {
@@ -436,13 +448,18 @@ const TOOLS = [
         state,
         total,
         tasks: rows.map((t) => ({
+          id: t.id,
           title: t.title,
+          notes: t.notes ? t.notes.slice(0, 600) : null,
           for: nameOf(t.assignee),
           due: when(t.dueAt),
           overdue: !t.doneAt && t.dueAt.getTime() < now,
           done: when(t.doneAt),
           client: t.client?.name || null,
-          givenBy: nameOf(t.createdBy),
+          givenBy: t.viaAi ? `Ledger AI (${nameOf(t.createdBy)} tasdiqlagan)` : nameOf(t.createdBy),
+          needsAnswer: t.needsAnswer,
+          answer: t.answer ? t.answer.slice(0, 1500) : null,
+          answered: when(t.answeredAt),
         })),
       };
     },
@@ -473,7 +490,7 @@ const TOOLS = [
   {
     name: "trends",
     description:
-      "Week by week (Monday-Sunday) for the last N weeks: calls, answered, missed, missed not called back, new matters, consultations, contracts, lost ones, bookings, no-shows, consultation fees (and other income with Moliya) — plus each operator's consultations and contracts per week. Use it for trajectories: what is rising or falling, who is improving or slipping.",
+      "Week by week (Monday-Sunday) for the last N weeks: calls, answered, missed, missed not called back, new matters, consultations (calendar entries, not cancelled — the same thing as bookings), came, no-shows, contracts, lost ones, consultation fees (and other income with Moliya) — plus each person's consultations (the ones they booked) and contracts per week. Use it for trajectories: what is rising or falling, who is improving or slipping.",
     parameters: {
       type: "object",
       properties: { weeks: { type: "integer", description: "2-26, default 8" }, employee: { type: "string", description: "part of an employee's name, to see only them" } },

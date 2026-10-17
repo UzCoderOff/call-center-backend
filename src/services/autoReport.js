@@ -4,8 +4,10 @@ const { firmDate, firmDayRange, isValidDate, shiftDate } = require("../lib/firmT
 
 // Automatic daily reports. For people with Employee.autoReport on (call-center
 // staff), the day's report isn't a form they fill in: it's worked out from
-// what they did — their calls, the appointments they booked, the clients
-// they added, their consultations and contracts, the payments they recorded.
+// what they did — their calls, the consultations they booked (on each
+// consultation's own day — a consultation and a booking are one thing,
+// 2026-10-17), the clients they added, their contracts, the payments they
+// recorded.
 // Worked out when asked for, never stored, so calls that sync late still
 // count and nothing goes stale.
 
@@ -19,13 +21,15 @@ function blankDay(date) {
     date,
     // numbers: different people (phone numbers) that day, however many calls.
     calls: { total: 0, numbers: 0, incoming: 0, outgoing: 0, answered: 0, missed: 0, reached: 0, needsCallback: 0, talkSeconds: 0 },
-    booked: 0,
     // Follow-ups they finished, and late call-back strikes for that day's
     // missed calls (cancelled ones don't count).
     followUpsDone: 0,
     strikes: 0,
     newClients: 0,
+    // The consultations they booked that fall on this day (not cancelled),
+    // and how many of them the client came to.
     consultations: 0,
+    came: 0,
     contracts: 0,
     payments: { count: 0, amount: 0 },
     // The consultation fees among them — all that people without Moliya
@@ -67,16 +71,15 @@ async function autoReportDays(employee, from, to) {
     return bounds.find((b) => ms >= b.from && ms <= b.to)?.day;
   };
 
-  const [calls, booked, clients, consultations, contracts, payments, followUpsDone, strikes] = await Promise.all([
+  const [calls, clients, consultations, contracts, payments, followUpsDone, strikes] = await Promise.all([
     countsCalls(employee)
       ? prisma.callLog.findMany({
           where: { employeeId: employee.id, callTimestampMs: { gte: BigInt(start), lte: BigInt(end) } },
           select: { callTimestampMs: true, callType: true, missed: true, durationSeconds: true, followUp: true, phoneKey: true },
         })
       : [],
-    prisma.appointment.findMany({ where: { bookedById: userId, createdAt: created }, select: { createdAt: true } }),
     prisma.client.findMany({ where: { createdById: userId, createdAt: created }, select: { createdAt: true } }),
-    prisma.clientCase.findMany({ where: { operatorId: employee.id, consultationDate: { gte: from, lte: to } }, select: { consultationDate: true } }),
+    prisma.appointment.findMany({ where: { bookedById: userId, date: { gte: from, lte: to }, status: { not: "cancelled" } }, select: { date: true, status: true } }),
     prisma.clientCase.findMany({ where: { operatorId: employee.id, contractDate: { gte: from, lte: to } }, select: { contractDate: true } }),
     prisma.payment.findMany({ where: { recordedById: userId, date: { gte: from, lte: to } }, select: { date: true, amount: true, kind: true } }),
     prisma.clientFollowUp.findMany({ where: { doneById: userId, status: "done", doneAt: created }, select: { doneAt: true } }),
@@ -113,15 +116,16 @@ async function autoReportDays(employee, from, to) {
     const day = dayOf(k.missedAt);
     if (day) day.strikes += 1;
   }
-  for (const a of booked) {
-    const day = dayOf(a.createdAt);
-    if (day) day.booked += 1;
-  }
   for (const c of clients) {
     const day = dayOf(c.createdAt);
     if (day) day.newClients += 1;
   }
-  for (const k of consultations) if (days.has(k.consultationDate)) days.get(k.consultationDate).consultations += 1;
+  for (const a of consultations) {
+    const day = days.get(a.date);
+    if (!day) continue;
+    day.consultations += 1;
+    if (a.status === "attended") day.came += 1;
+  }
   for (const k of contracts) if (days.has(k.contractDate)) days.get(k.contractDate).contracts += 1;
   for (const p of payments) {
     const day = days.get(p.date);
@@ -148,7 +152,7 @@ function addUp(reports) {
       withCalls = true;
       for (const key of Object.keys(total.calls)) total.calls[key] += r.calls[key] || 0;
     }
-    for (const key of ["booked", "newClients", "consultations", "contracts", "followUpsDone", "strikes"]) total[key] += r[key] || 0;
+    for (const key of ["newClients", "consultations", "came", "contracts", "followUpsDone", "strikes"]) total[key] += r[key] || 0;
     total.payments.count += r.payments.count;
     total.payments.amount += r.payments.amount;
     total.consultationPayments.count += r.consultationPayments?.count || 0;

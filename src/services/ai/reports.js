@@ -82,6 +82,8 @@ const COMMON_RULES = [
   "- Faqat berilgan maʼlumotlardan foydalaning. Raqam yoki ismni oʻylab topmang; maʼlumot yetmasa — shuni ayting.",
   "- Qisqa va aniq: har bir fikr alohida qatorda, raqamlar bilan. Markdown jadval va sarlavha (#) ishlatmang; muhim soʻzni **qalin** qilish mumkin.",
   "- Mijozni ismi bilan ayting. Xodimni ismi bilan ayting — ayblovchi emas, holatni koʻrsatuvchi ohangda.",
+  // What the numbers' words mean — the same as in the chat.
+  ...require("./assistant").TERMS,
 ];
 
 // ------------------------------------------------------------- weekly

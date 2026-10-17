@@ -7,8 +7,12 @@ const { countsCalls } = require("../lib/calling");
 // Built-in measures — for people who work with clients (call center,
 // booking consultations):
 //   calls_answered  answered calls on their phone
-//   bookings        consultations they put in the calendar
-//   consultations   their cases whose consultation date is this month
+//   consultations   the consultations they booked in the calendar, not
+//                   cancelled, on their own day this month — a booking IS a
+//                   consultation (2026-10-17), whether or not anyone marked
+//                   that the client came. (The old separate "bookings"
+//                   measure is gone; a target set on it counts as a
+//                   consultations target.)
 //   contracts       their cases signed this month
 //   fees            consultation fees from their clients (soʻm)
 //   income          all the money they brought in, wherever it came from:
@@ -35,9 +39,9 @@ const { countsCalls } = require("../lib/calling");
 // position's consultations / contracts targets stay the default for people
 // without their own.
 
-const BUILTIN = ["consultations", "contracts", "bookings", "calls_answered", "fees", "income", "collected", "cases"];
+const BUILTIN = ["consultations", "contracts", "calls_answered", "fees", "income", "collected", "cases"];
 const MONEY = new Set(["fees", "income", "collected"]);
-const CLIENT_KEYS = ["consultations", "contracts", "bookings", "calls_answered", "fees"];
+const CLIENT_KEYS = ["consultations", "contracts", "calls_answered", "fees"];
 const COORDINATOR_KEYS = ["collected", "cases"];
 // Shown in soʻm only with Moliya (src/lib/finance.js); set only with Moliya.
 const FINANCE_ONLY = new Set(["income"]);
@@ -48,7 +52,6 @@ const NUMERIC = ["number", "money"];
 const BUILTIN_NAMES = {
   consultations: "Konsultatsiyalar",
   contracts: "Shartnomalar",
-  bookings: "Kalendarga yozgan",
   calls_answered: "Javob berilgan qoʻngʻiroqlar",
   fees: "Konsultatsiya toʻlovlari",
   income: "Jami tushum",
@@ -118,15 +121,27 @@ async function targetsFor(employees, month, db = prisma) {
   const rows = await db.target.findMany({
     where: { employeeId: { in: employees.map((e) => e.id) }, fromMonth: { lte: month } },
     orderBy: { fromMonth: "desc" },
-    select: { employeeId: true, metric: true, amount: true },
+    select: { employeeId: true, metric: true, amount: true, fromMonth: true },
   });
   const map = new Map(employees.map((e) => [e.id, new Map()]));
   const seen = new Set();
+  const since = new Map(); // `${employeeId}|${metric}` -> the month it's from
   for (const r of rows) {
     const k = `${r.employeeId}|${r.metric}`;
     if (seen.has(k)) continue;
     seen.add(k);
+    since.set(k, r.fromMonth);
     map.get(r.employeeId)?.set(r.metric, r.amount);
+  }
+  // Old targets on the separate "bookings" measure: bookings are
+  // consultations now — it stands for the consultations target when that one
+  // is missing or older.
+  for (const [id, mine] of map) {
+    if (!mine.has("bookings")) continue;
+    const old = mine.get("bookings");
+    const newer = !mine.has("consultations") || (since.get(`${id}|bookings`) || "") > (since.get(`${id}|consultations`) || "");
+    if (newer && old > 0) mine.set("consultations", old);
+    mine.delete("bookings");
   }
   for (const e of employees) {
     const mine = map.get(e.id);

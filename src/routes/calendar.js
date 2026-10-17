@@ -295,6 +295,9 @@ calendars.get("/:id/weeks/:weekStart", async (req, res, next) => {
       free: visible ? cal.freeSlots({ blocks, appointments, slotMinutes: calendar.slotMinutes, now }) : [],
       canManage: manage,
       canBook: (canBook(req.user) || manage) && Boolean(week) && visible,
+      // A client who came without booking can be written down today on a
+      // calendar taking consultations, its week published or not.
+      canWalkIn: (canBook(req.user) || manage) && calendar.active,
       nextFree: canBook(req.user) || manage ? await nextFreeSlot(calendar, now) : null,
       ...(manage ? { usual } : {}),
     });
@@ -415,20 +418,37 @@ calendars.post("/:id/appointments", async (req, res, next) => {
       if (call && own) callLogId = call.id;
     }
 
-    if (hasStarted({ date: b.date, start }, firmNow())) return res.status(409).json({ error: "in_the_past" });
+    // A walk-in (2026-10-17): the client came without booking and the
+    // consultation is happening or just happened — written down today, at a
+    // time that has started, as "came". A consultation is a calendar entry
+    // now, so one held without booking must be entered to count. No free
+    // time needed: it already took place.
+    const walkIn = b.walkIn === true;
+    const now = firmNow();
+    if (walkIn) {
+      if (b.date !== now.date || start > now.minutes) return res.status(409).json({ error: "walk_in_today" });
+      if (end > 24 * 60) throw badRequest("invalid duration");
+    } else if (hasStarted({ date: b.date, start }, now)) return res.status(409).json({ error: "in_the_past" });
 
     // Check and insert in one transaction, so two people can't book the
     // same slot at the same moment.
     const result = await prisma.$transaction(async (tx) => {
-      const week = await tx.calendarWeek.findUnique({
-        where: { calendarId_weekStart: { calendarId: calendar.id, weekStart: weekStartOf(b.date) } },
-      });
-      if (!week || (!manage && week.status !== "published")) return { error: "not_published" };
-      if (!cal.fitsAvailability(week.blocks, b.date, start, end)) return { error: "not_free_time" };
-      const sameDay = await tx.appointment.findMany({
-        where: { calendarId: calendar.id, date: b.date, status: { not: "cancelled" } },
-      });
-      if (sameDay.some((a) => cal.overlaps(a, { date: b.date, start, end }))) return { error: "slot_taken" };
+      if (!walkIn) {
+        const week = await tx.calendarWeek.findUnique({
+          where: { calendarId_weekStart: { calendarId: calendar.id, weekStart: weekStartOf(b.date) } },
+        });
+        if (!week || (!manage && week.status !== "published")) return { error: "not_published" };
+        if (!cal.fitsAvailability(week.blocks, b.date, start, end)) return { error: "not_free_time" };
+        const sameDay = await tx.appointment.findMany({
+          where: { calendarId: calendar.id, date: b.date, status: { not: "cancelled" } },
+        });
+        if (sameDay.some((a) => cal.overlaps(a, { date: b.date, start, end }))) return { error: "slot_taken" };
+      } else if (phoneKey(clientPhone)) {
+        // Entered twice (the week isn't published, so it doesn't show)? The
+        // same number already has a consultation here today.
+        const twice = await tx.appointment.findFirst({ where: { calendarId: calendar.id, date: b.date, phoneKey: phoneKey(clientPhone), status: { not: "cancelled" } }, select: { id: true } });
+        if (twice) return { error: "already_today" };
+      }
       const appointment = await tx.appointment.create({
         data: {
           calendarId: calendar.id,
@@ -441,6 +461,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
           matter: typeof b.matter === "string" && b.matter.trim() ? b.matter.trim().slice(0, 300) : null,
           notes: typeof b.notes === "string" && b.notes.trim() ? b.notes.trim().slice(0, 2000) : null,
           format,
+          ...(walkIn ? { status: "attended", walkIn: true } : {}),
           bookedById: req.user.id,
           callLogId,
         },
@@ -456,6 +477,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
         user: req.user,
         lawyerId: calendar.ownerId,
         clientId,
+        source: walkIn ? "walk_in" : "call",
       });
       if (bookedFor) {
         await tx.appointment.update({ where: { id: appointment.id }, data: { clientId: bookedFor } });
@@ -545,6 +567,9 @@ appointments.patch("/:id", async (req, res, next) => {
 
     const manage = canManage(req.user, appointment.calendar);
     const isBooker = appointment.bookedById === req.user.id;
+    // Their own walk-in, entered by mistake or wrong: theirs to fix or take
+    // back the same day, until its summary is written.
+    const ownWalkIn = isBooker && appointment.walkIn && appointment.status === "attended" && appointment.date === firmNow().date && !appointment.summaryAt;
     const b = req.body || {};
     const data = {};
 
@@ -552,9 +577,7 @@ appointments.patch("/:id", async (req, res, next) => {
       if (!["booked", "attended", "no_show", "cancelled"].includes(b.status)) throw badRequest("invalid status");
       const mayCancel =
         b.status === "cancelled" &&
-        appointment.status === "booked" &&
-        !hasStarted(appointment, firmNow()) &&
-        (isBooker || isManager(req.user));
+        ((appointment.status === "booked" && !hasStarted(appointment, firmNow()) && (isBooker || isManager(req.user))) || ownWalkIn);
       if (!manage && !mayCancel) return res.status(403).json({ error: "forbidden" });
       data.status = b.status;
       if (b.status === "cancelled") {
@@ -573,7 +596,7 @@ appointments.patch("/:id", async (req, res, next) => {
     }
 
     // Details: owner, or whoever booked it while it's still booked.
-    const mayEdit = manage || (isBooker && appointment.status === "booked");
+    const mayEdit = manage || (isBooker && appointment.status === "booked") || ownWalkIn;
     if (b.format !== undefined) {
       if (!mayEdit) return res.status(403).json({ error: "forbidden" });
       data.format = parseFormat(b.format);

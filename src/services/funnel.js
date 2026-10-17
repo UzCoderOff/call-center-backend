@@ -18,6 +18,10 @@ const { countedCallsWhere } = require("../lib/calling");
 //   booked     a consultation booked for that number within 30 days
 //   came       …and they came
 //   signed     a contract signed by that client since the period began
+//   outcomes   new numbers they talked to that didn't book: the reason the
+//              operator tapped (services/callOutcomes.js); outcomeMissing:
+//              how many in the period are still on the operators' lists
+//              waiting for one (the same rule as the list)
 //
 // What the lost new numbers could have been worth: each one × the share of
 // reached new numbers that booked × the consultation fee — "if they had
@@ -50,11 +54,11 @@ async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now
     if (!first.has(c.phoneKey) || t < first.get(c.phoneKey)) first.set(c.phoneKey, t);
   }
   const keys = [...first.keys()];
-  const empty = { numbers: 0, new: 0, returning: 0, reached: 0, lost: 0, lostNew: 0, booked: 0, came: 0, signed: 0, rates: {}, fee, expectedLost: 0, lostReasons: [] };
+  const empty = { numbers: 0, new: 0, returning: 0, reached: 0, lost: 0, lostNew: 0, booked: 0, came: 0, signed: 0, rates: {}, fee, expectedLost: 0, outcomes: [], outcomeMissing: 0, lostReasons: [] };
   if (keys.length === 0) return { ...empty, lostReasons: await lostReasons(db, employeeIds, from, to) };
 
   const start = from ?? Math.min(...first.values());
-  const [everCalls, before, clientsBefore, appointments, phones] = await Promise.all([
+  const [everCalls, before, clientsBefore, appointments, phones, outcomeRows, waiting] = await Promise.all([
     // Every call with these numbers from the period on, any phone.
     db.callLog.findMany({ where: { phoneKey: { in: keys }, callTimestampMs: { gte: BigInt(start) } }, select: { phoneKey: true, missed: true, durationSeconds: true, callTimestampMs: true } }),
     // Numbers seen before the period.
@@ -62,7 +66,12 @@ async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now
     db.clientPhone.findMany({ where: { phoneKey: { in: keys }, client: { createdAt: { lt: new Date(start) } } }, select: { phoneKey: true } }),
     db.appointment.findMany({ where: { phoneKey: { in: keys }, status: { not: "cancelled" }, createdAt: { gte: new Date(start) } }, select: { phoneKey: true, status: true, createdAt: true } }),
     db.clientPhone.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, client: { select: { cases: { select: { contractDate: true } } } } } }),
+    db.callOutcome.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, outcome: true } }),
+    waitingForReason(db, employeeIds, now),
   ]);
+  const outcomeOf = new Map(outcomeRows.map((r) => [r.phoneKey, r.outcome]));
+  const outcomeCounts = new Map();
+  const outcomeMissing = waiting.filter((r) => (from == null || r.firstAt >= from) && (to == null || r.firstAt <= to)).length;
   const known = new Set([...before.map((r) => r.phoneKey), ...clientsBefore.map((r) => r.phoneKey)]);
   const startDate = firmDate(new Date(start));
 
@@ -100,6 +109,11 @@ async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now
       if (appts.some((a) => a.status === "attended")) came.add(key);
     }
     if (signedKeys.has(key)) signed.add(key);
+    // A new number they talked to that didn't book: why.
+    if (fresh && talked && !appts.length) {
+      const o = outcomeOf.get(key);
+      if (o) outcomeCounts.set(o, (outcomeCounts.get(o) || 0) + 1);
+    }
   }
 
   const bookingShare = newReached > 0 ? newBooked / newReached : 0;
@@ -122,9 +136,18 @@ async function computeFunnel({ employeeIds = null, from, to, fee, now = Date.now
     fee,
     bookingShare: Math.round(bookingShare * 100),
     expectedLost: Math.round(lostNew * bookingShare * fee),
+    outcomes: [...outcomeCounts].map(([outcome, count]) => ({ outcome, count })).sort((a, b) => b.count - a.count),
+    outcomeMissing,
     lostReasons: await lostReasons(db, employeeIds, from, to),
     now,
   };
+}
+
+// The new numbers still waiting for a reason on these phones' lists (the
+// call center's when no phones are given).
+async function waitingForReason(db, employeeIds, now) {
+  const co = require("./callOutcomes");
+  return co.pending({ employeeIds: employeeIds || (await co.callCenterIds(db)), now, db });
 }
 
 // Why the period's consultations didn't continue: cases closed as

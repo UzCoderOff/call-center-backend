@@ -22,8 +22,10 @@ const short = (s, n = 200) => (s && String(s).length > n ? `${String(s).slice(0,
 
 // ------------------------------------------------------------- trends
 // Week by week (Monday–Sunday, firm time), newest last: calls, new matters,
-// consultations, contracts, lost ones, bookings — and money with Moliya.
-// Plus each operator's consultations and contracts over the whole span.
+// consultations (the calendar's entries, not cancelled — a booking is a
+// consultation, 2026-10-17) and how many came, contracts, lost ones — and
+// money with Moliya. Plus each person's consultations (the ones they
+// booked) and contracts (as the case's operator) over the whole span.
 async function trends(user, { weeks = 8, employeeIds = null } = {}) {
   const n = Math.min(26, Math.max(2, Number(weeks) || 8));
   const today = firmNow().date;
@@ -32,15 +34,18 @@ async function trends(user, { weeks = 8, employeeIds = null } = {}) {
   const from = starts[0];
   const caseWhere = {
     ...(employeeIds ? { operatorId: { in: employeeIds } } : {}),
-    OR: [{ startDate: { gte: from } }, { consultationDate: { gte: from } }, { contractDate: { gte: from } }, { closedDate: { gte: from } }],
+    OR: [{ startDate: { gte: from } }, { contractDate: { gte: from } }, { closedDate: { gte: from } }],
   };
   const money = canSeeFinance(user);
   const [cases, appointments, payments] = await Promise.all([
     prisma.clientCase.findMany({
       where: caseWhere,
-      select: { startDate: true, consultationDate: true, contractDate: true, closedDate: true, status: true, operator: { select: { id: true, name: true } } },
+      select: { startDate: true, contractDate: true, closedDate: true, status: true, operator: { select: { id: true, name: true } } },
     }),
-    prisma.appointment.findMany({ where: { date: { gte: from, lte: today } }, select: { date: true, status: true } }),
+    prisma.appointment.findMany({
+      where: { date: { gte: from, lte: today }, ...(employeeIds ? { bookedBy: { employee: { is: { id: { in: employeeIds } } } } } : {}) },
+      select: { date: true, status: true, bookedBy: { select: { employee: { select: { id: true, name: true } } } } },
+    }),
     prisma.payment.findMany({ where: { date: { gte: from, lte: today } }, select: { date: true, amount: true, kind: true } }),
   ]);
   const out = [];
@@ -55,24 +60,23 @@ async function trends(user, { weeks = 8, employeeIds = null } = {}) {
       missed: calls.totals.missedCalls,
       missedNotCalledBack: calls.totals.followUp.needsCallback,
       newMatters: cases.filter((k) => inRange(k.startDate, start, end)).length,
-      consultations: cases.filter((k) => inRange(k.consultationDate, start, end)).length,
+      consultations: appointments.filter((a) => inRange(a.date, start, end) && a.status !== "cancelled").length,
+      came: appointments.filter((a) => inRange(a.date, start, end) && a.status === "attended").length,
+      noShows: appointments.filter((a) => inRange(a.date, start, end) && a.status === "no_show").length,
       contracts: cases.filter((k) => inRange(k.contractDate, start, end)).length,
       lost: cases.filter((k) => k.status === "declined" && inRange(k.closedDate, start, end)).length,
-      bookings: appointments.filter((a) => inRange(a.date, start, end) && a.status !== "cancelled").length,
-      noShows: appointments.filter((a) => inRange(a.date, start, end) && a.status === "no_show").length,
       consultationFees: payments.filter((p) => inRange(p.date, start, end) && p.kind === "consultation").reduce((s, p) => s + p.amount, 0),
     };
     if (money) week.otherIncome = payments.filter((p) => inRange(p.date, start, end) && p.kind !== "consultation").reduce((s, p) => s + p.amount, 0);
     out.push(week);
   }
   const people = new Map();
-  for (const k of cases) {
-    if (!k.operator) continue;
-    const p = people.get(k.operator.id) || { name: k.operator.name, consultations: [], contracts: [] };
-    if (k.consultationDate >= from) p.consultations.push(k.consultationDate);
-    if (k.contractDate >= from) p.contracts.push(k.contractDate);
-    people.set(k.operator.id, p);
-  }
+  const person = (e) => {
+    if (!people.has(e.id)) people.set(e.id, { name: e.name, consultations: [], contracts: [] });
+    return people.get(e.id);
+  };
+  for (const a of appointments) if (a.status !== "cancelled" && a.bookedBy?.employee) person(a.bookedBy.employee).consultations.push(a.date);
+  for (const k of cases) if (k.operator && k.contractDate >= from) person(k.operator).contracts.push(k.contractDate);
   // Each person: per week too, so a trajectory shows (rising, falling).
   const perWeek = (dates) => starts.map((s) => dates.filter((d) => inRange(d, s, shiftDate(s, 6))).length);
   const byPerson = [...people.values()]

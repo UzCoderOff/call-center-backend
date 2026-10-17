@@ -23,10 +23,12 @@ function when(a, today) {
 // themselves).
 async function onBooked({ appointmentId }) {
   const a = await prisma.appointment.findUnique({ where: { id: appointmentId }, include: APPOINTMENT_INCLUDE });
+  // Their own booking or walk-in: nothing to tell them.
   if (!a || a.bookedById === a.calendar.ownerId) return;
   const today = firmNow().date;
   const lines = [
-    "🗓 <b>Yangi uchrashuv</b>",
+    // A walk-in someone else wrote down: it's theirs — the summary too.
+    a.walkIn ? "🚶 <b>Yozilmasdan kelgan mijoz yozildi</b> — konsultatsiya yakunini yozishni unutmang" : "🗓 <b>Yangi konsultatsiya</b>",
     `<b>${when(a, today)}</b>`,
     `Mijoz: ${f.escapeHtml(a.clientName)}`,
     a.format === "online" ? "💻 Onlayn konsultatsiya" : null,
@@ -68,7 +70,7 @@ async function onCancelled({ appointmentIds, byUserId }) {
       ].join("\n")
     );
     const text = [
-      `❌ <b>${list.length > 1 ? `${list.length} ta uchrashuv` : "Uchrashuv"} bekor qilindi — mijozga xabar bering</b>`,
+      `❌ <b>${list.length > 1 ? `${list.length} ta konsultatsiya` : "Konsultatsiya"} bekor qilindi — mijozga xabar bering</b>`,
       ...items,
       `Bekor qildi: ${byName}`,
       f.portalLink("/", "Xabar berganingizni belgilash"),
@@ -88,10 +90,15 @@ const TASK_INCLUDE = {
   client: { select: { name: true } },
 };
 
-// The "✅ Bajarildi" button under a task message.
-function taskButton(taskId) {
-  return { reply_markup: { inline_keyboard: [[{ text: "✅ Bajarildi", callback_data: `task:done:${taskId}` }]] } };
+// The "✅ Bajarildi" button under a task message — not on one that asks for
+// an answer: that's written in Ledger (the message says so).
+function taskButton(task) {
+  if (task.needsAnswer && !task.answer) return undefined;
+  return { reply_markup: { inline_keyboard: [[{ text: "✅ Bajarildi", callback_data: `task:done:${task.id}` }]] } };
 }
+
+// Who gave it, as the person sees it: Ledger AI for what it prepared.
+const giverName = (task) => (task.viaAi ? "Ledger AI" : f.personName(task.createdBy));
 
 function taskText(task, head) {
   return [
@@ -100,8 +107,9 @@ function taskText(task, head) {
     `Muddat: ${f.moment(task.dueAt)}`,
     task.client ? `Mijoz: ${f.escapeHtml(task.client.name)}` : null,
     task.notes ? f.escapeHtml(task.notes) : null,
-    task.createdBy ? `Berdi: ${f.escapeHtml(f.personName(task.createdBy))}` : null,
-    f.portalLink("/tasks", "Vazifalarni ochish"),
+    task.createdBy ? `Berdi: ${f.escapeHtml(giverName(task))}` : null,
+    task.needsAnswer && !task.answer ? "✍️ Bu vazifaga javob yozasiz — Ledgerda oching, javobni yozib «Bajarildi» ni bosing." : null,
+    f.portalLink("/tasks", task.needsAnswer && !task.answer ? "Javob yozish" : "Vazifalarni ochish"),
   ]
     .filter(Boolean)
     .join("\n");
@@ -111,15 +119,16 @@ function taskText(task, head) {
 async function onTaskCreated({ taskId }) {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: TASK_INCLUDE });
   if (!task || task.doneAt || task.assigneeId === task.createdById) return;
-  await notifyUser(task.assigneeId, "tasks", taskText(task, "📌 <b>Yangi vazifa</b>"), taskButton(task.id));
+  await notifyUser(task.assigneeId, "tasks", taskText(task, "📌 <b>Yangi vazifa</b>"), taskButton(task));
 }
 
-// Done -> whoever gave it (unless they did it themselves).
+// Done -> whoever gave it (unless they did it themselves), with the answer.
 async function onTaskDone({ taskId, byUserId }) {
   const task = await prisma.task.findUnique({ where: { id: taskId }, include: TASK_INCLUDE });
   if (!task?.createdById || task.createdById === byUserId) return;
   const by = await prisma.user.findUnique({ where: { id: byUserId }, include: { employee: true } });
-  await notifyUser(task.createdById, "tasks", `✅ <b>Vazifa bajarildi</b>\n${f.escapeHtml(task.title)}\n${f.escapeHtml(f.personName(by))}`);
+  const answer = task.answer ? `\n\n💬 <b>Javob:</b>\n${f.escapeHtml(task.answer.length > 1500 ? `${task.answer.slice(0, 1497)}…` : task.answer)}` : "";
+  await notifyUser(task.createdById, "tasks", `✅ <b>Vazifa bajarildi</b>\n${f.escapeHtml(task.title)}\n${f.escapeHtml(f.personName(by))}${answer}\n${f.portalLink("/tasks", "Vazifalarni ochish")}`);
 }
 
 // A material the manager announced -> everyone it's for.

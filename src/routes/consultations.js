@@ -37,6 +37,8 @@ const LIST_SELECT = {
   start: true,
   end: true,
   status: true,
+  walkIn: true,
+  createdAt: true,
   format: true,
   clientName: true,
   clientPhone: true,

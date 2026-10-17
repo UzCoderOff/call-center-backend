@@ -16,11 +16,15 @@ const { firmNow, shiftDate, firmDayRange } = require("../lib/firmTime");
 //   GET    /api/tasks?caseId=      a case's tasks, open and done (its people)
 //   GET    /api/tasks/people       who a task can be given to (managers);
 //                                  ?caseId=: the case's people (its people)
-//   POST   /api/tasks              { title, notes?, assigneeId, dueAt, clientId?, caseId? }
+//   POST   /api/tasks              { title, notes?, assigneeId, dueAt, clientId?, caseId?, needsAnswer? }
 //                                  (managers; with caseId also the case's people)
 //   PATCH  /api/tasks/:id          done: true/false (the person it's for, a manager, or —
 //                                  a case's task — whoever gave it, its lawyers and coordinator);
-//                                  title, notes, dueAt, assigneeId (managers, whoever gave a case's task)
+//                                  answer (the person it's for, while it's open or as they
+//                                  tick it done — a task that needsAnswer can't be ticked
+//                                  done by them without one);
+//                                  title, notes, dueAt, assigneeId, needsAnswer (managers,
+//                                  whoever gave a case's task)
 //   DELETE /api/tasks/:id          managers; a case's task also whoever gave it
 //   GET    /api/tasks/checklists   ready-made lists of a case's usual tasks
 //   PUT    /api/tasks/checklists   { lists: [{ id?, name, items: [{ title, days }] }] } (managers)
@@ -42,10 +46,17 @@ const TASK_INCLUDE = {
 };
 const personName = (u) => (u ? u.employee?.name || u.name || u.username : null);
 
+// Shown as the one who gave a task Ledger AI prepared (the person who
+// confirmed it stays in createdById).
+const AI_NAME = "Ledger AI";
+
 function publicTask(t) {
   const who = (u) => (u ? { id: u.id, name: personName(u), role: u.role } : null);
-  return { ...t, assignee: who(t.assignee), createdBy: who(t.createdBy), doneBy: who(t.doneBy) };
+  const giver = who(t.createdBy);
+  return { ...t, assignee: who(t.assignee), createdBy: t.viaAi && giver ? { ...giver, name: AI_NAME, ai: true } : giver, doneBy: who(t.doneBy) };
 }
+
+const MAX_ANSWER = 4000;
 
 function notFound() {
   const err = new Error("not_found");
@@ -107,7 +118,14 @@ async function casePeople(kase) {
 const caseEvent = (task, userId, action) =>
   task.caseId
     ? prisma.clientEvent.create({
-        data: { clientId: task.clientId ?? task.case?.clientId, caseId: task.caseId, kind: "task", text: "", authorId: userId, data: { action, title: task.title, taskId: task.id, assignee: personName(task.assignee) } },
+        data: {
+          clientId: task.clientId ?? task.case?.clientId,
+          caseId: task.caseId,
+          kind: "task",
+          text: "",
+          authorId: userId,
+          data: { action, title: task.title, taskId: task.id, assignee: personName(task.assignee), ...(action === "done" && task.answer ? { answer: task.answer.slice(0, 1000) } : {}) },
+        },
       })
     : null;
 
@@ -178,8 +196,10 @@ router.post("/", async (req, res, next) => {
       dueAt: cleanDue(b.dueAt),
       clientId: onCase ? onCase.kase.clientId : (await clientRef(b.clientId)) ?? null,
       caseId: onCase ? onCase.kase.id : null,
+      needsAnswer: b.needsAnswer === true,
       createdById: req.user.id,
     };
+    if (b.needsAnswer !== undefined && typeof b.needsAnswer !== "boolean") throw badRequest("invalid needsAnswer");
     if (!data.title) throw badRequest("title is required");
     if (!data.dueAt) throw badRequest("invalid dueAt");
     if (onCase && !(await casePeople(onCase.kase)).some((u) => u.id === data.assigneeId)) throw badRequest("not on this case");
@@ -279,9 +299,16 @@ router.post("/checklists/:listId/apply", async (req, res, next) => {
   }
 });
 
+// The person it's for can't tick a task done that asks for an answer
+// without writing one (someone else ticking it — a manager — can).
+function answerMissing(task, user, done) {
+  return done && !task.doneAt && task.needsAnswer && task.assigneeId === user.id && !task.answer;
+}
+
 // Marks done or not done: the person it's for (or a manager). Shared with the
 // Telegram button.
 async function setDone(task, user, done) {
+  if (answerMissing(task, user, done)) throw Object.assign(new Error("answer_required"), { status: 400 });
   const updated = await prisma.task.update({
     where: { id: task.id },
     data: done ? { doneAt: new Date(), doneById: user.id } : { doneAt: null, doneById: null },
@@ -306,12 +333,22 @@ router.patch("/:id", async (req, res, next) => {
     const ticks = manager || task.assigneeId === req.user.id || giver || (team && TEAM_ROLES.includes(team.role));
     if (!ticks) throw notFound();
     const b = req.body || {};
-    const edits = ["title", "notes", "dueAt", "assigneeId", "clientId"].filter((k) => b[k] !== undefined);
+    const edits = ["title", "notes", "dueAt", "assigneeId", "clientId", "needsAnswer"].filter((k) => b[k] !== undefined);
     if (edits.length > 0 && !manager && !giver) return res.status(403).json({ error: "forbidden" });
     if (task.caseId && b.clientId !== undefined) return res.status(400).json({ error: "a case's task stays with its client" });
     if (b.done !== undefined && typeof b.done !== "boolean") throw badRequest("invalid done");
+    if (b.needsAnswer !== undefined && typeof b.needsAnswer !== "boolean") throw badRequest("invalid needsAnswer");
 
     let updated = task;
+    // Their answer: only theirs to write, and only while it's open (or as
+    // they open it again) — once done it stays as it was read. Checked now,
+    // saved after the other changes pass their checks.
+    let answer;
+    if (b.answer !== undefined) {
+      if (task.assigneeId !== req.user.id) return res.status(403).json({ error: "forbidden" });
+      if (task.doneAt && b.done !== false) return res.status(409).json({ error: "task_done" });
+      answer = cleanText(b.answer, "answer", MAX_ANSWER);
+    }
     if (edits.length > 0) {
       const data = {};
       if (b.title !== undefined) data.title = cleanText(b.title, "title", 200, { required: true });
@@ -322,12 +359,18 @@ router.patch("/:id", async (req, res, next) => {
         if (team?.kase && !(await casePeople(team.kase)).some((u) => u.id === data.assigneeId)) throw badRequest("not on this case");
       }
       if (b.clientId !== undefined) data.clientId = await clientRef(b.clientId);
+      if (b.needsAnswer !== undefined) data.needsAnswer = b.needsAnswer;
+      // Someone else's now: the answer was the last person's — it goes.
+      if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) Object.assign(data, { answer: null, answeredAt: null });
       updated = await prisma.task.update({ where: { id: task.id }, data });
       // Given to someone else, or moved to a new time: reminders start over.
       if (data.assigneeId !== undefined && data.assigneeId !== task.assigneeId) events.emit("task.created", { taskId: task.id });
       if (data.dueAt !== undefined || data.assigneeId !== undefined) {
         await prisma.telegramNotice.deleteMany({ where: { key: { in: [`task-soon:${task.id}`, `task-due:${task.id}`] } } });
       }
+    }
+    if (answer !== undefined && updated.assigneeId === req.user.id && answer !== (updated.answer ?? null)) {
+      updated = await prisma.task.update({ where: { id: task.id }, data: { answer, answeredAt: answer ? new Date() : null } });
     }
     if (b.done !== undefined) updated = await setDone(updated, req.user, b.done);
     res.json(publicTask(await prisma.task.findUnique({ where: { id: task.id }, include: TASK_INCLUDE })));
@@ -353,3 +396,6 @@ router.delete("/:id", async (req, res, next) => {
 module.exports = router;
 module.exports.setDone = setDone;
 module.exports.TASK_INCLUDE = TASK_INCLUDE;
+module.exports.publicTask = publicTask;
+module.exports.answerMissing = answerMissing;
+module.exports.AI_NAME = AI_NAME;

@@ -152,14 +152,14 @@ async function taskReminders() {
     include: TASK_INCLUDE,
   });
   for (const task of soon) {
-    await once(`task-soon:${task.id}`, () => notifyUser(task.assigneeId, "tasks", taskText(task, "⏰ <b>Vazifa muddati yaqin</b>"), taskButton(task.id)));
+    await once(`task-soon:${task.id}`, () => notifyUser(task.assigneeId, "tasks", taskText(task, "⏰ <b>Vazifa muddati yaqin</b>"), taskButton(task)));
   }
   const due = await prisma.task.findMany({
     where: { doneAt: null, dueAt: { lte: new Date(now), gt: new Date(now - 12 * 60 * 60 * 1000) } },
     include: TASK_INCLUDE,
   });
   for (const task of due) {
-    await once(`task-due:${task.id}`, () => notifyUser(task.assigneeId, "tasks", taskText(task, "⚠️ <b>Vazifa muddati keldi</b>"), taskButton(task.id)));
+    await once(`task-due:${task.id}`, () => notifyUser(task.assigneeId, "tasks", taskText(task, "⚠️ <b>Vazifa muddati keldi</b>"), taskButton(task)));
   }
 }
 
@@ -249,7 +249,7 @@ async function summaryReminders(now) {
   const rule = await s.summaryRule();
   const rows = await prisma.appointment.findMany({
     where: s.missingWhere(rule, now),
-    select: { id: true, date: true, start: true, end: true, clientName: true, matter: true, calendar: { select: { ownerId: true } } },
+    select: { id: true, date: true, start: true, end: true, walkIn: true, createdAt: true, clientName: true, matter: true, calendar: { select: { ownerId: true } } },
     orderBy: [{ date: "asc" }, { start: "asc" }],
     take: 300,
   });

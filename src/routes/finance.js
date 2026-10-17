@@ -123,7 +123,9 @@ async function financeData(user, monthParam) {
           where: { createdAt: { gte: new Date(firmDayRange(`${month}-01`).from), lte: new Date(firmDayRange(lastDayOf(month)).to) } },
           select: { source: true },
         }),
-        prisma.clientCase.findMany({ where: { consultationDate: range(month, month) }, select: { client: { select: { source: true } } } }),
+        // A consultation: an entry in the calendar that isn't cancelled
+        // (2026-10-17) — by where its client came from.
+        prisma.appointment.findMany({ where: { date: range(month, month), status: { not: "cancelled" } }, select: { client: { select: { source: true } } } }),
       ]);
 
   // Who came to a consultation this month and signed a contract after.
@@ -176,7 +178,7 @@ async function financeData(user, monthParam) {
     report: lawyer ? null : reportMoney(monthReports, templates),
     reportTrend: lawyer ? [] : reportMoney(reports, templates).entries,
     names,
-    channels: lawyer ? null : { newClients: newClients.map((c) => c.source), consultations: consultCases.map((k) => k.client.source) },
+    channels: lawyer ? null : { newClients: newClients.map((c) => c.source), consultations: consultCases.map((k) => k.client?.source ?? null) },
   });
 
   return { month, current, today, scope: lawyer ? "lawyer" : "firm", ...data };

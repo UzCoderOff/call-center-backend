@@ -465,7 +465,7 @@ async function clientIdsWithDebt(caseWhere = {}) {
 
 // The current list (same filters) as an Excel file — one row per case; the
 // column titles are ones the importer recognises, so it can be imported back.
-const EXPORT_STATUS = { consultation: "Konsultatsiya", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Davom etmadi" };
+const EXPORT_STATUS = { consultation: "Murojaat", call_again: "Qayta qoʻngʻiroq", contract: "Shartnoma tuzildi", done: "Ish tugallandi", declined: "Davom etmadi" };
 const EXPORT_STAGE = {
   inquiry: "Surishtiruv",
   investigation: "Tergov harakatlari",
@@ -558,36 +558,39 @@ clients.get("/coordinators", managersOnly, async (req, res, next) => {
 });
 
 // This month's consultations and contracts per operator, against their
-// position's targets. Staff see only their own row.
+// targets (their own, or their position's — as Natijalar counts them).
+// A consultation is one they booked in the calendar, not cancelled, on its
+// own day up to today (services/performance.js). Staff see only their own row.
 clients.get("/targets", async (req, res, next) => {
   try {
     const month = /^\d{4}-\d{2}$/.test(req.query.month || "") ? req.query.month : today().slice(0, 7);
     const from = `${month}-01`;
     const to = `${month}-31`;
+    const until = today() < to ? today() : to;
     const mineOnly = !isManager(req.user);
     const employees = await prisma.employee.findMany({
-      where: {
-        active: true,
-        ...(mineOnly ? { id: req.user.employee?.id ?? -1 } : {}),
-        OR: [
-          { position: { OR: [{ targetConsultations: { not: null } }, { targetContracts: { not: null } }] } },
-          { cases: { some: { OR: [{ consultationDate: { gte: from, lte: to } }, { contractDate: { gte: from, lte: to } }] } } },
-        ],
-      },
-      select: { id: true, name: true, position: { select: { targetConsultations: true, targetContracts: true } } },
+      where: { active: true, ...(mineOnly ? { id: req.user.employee?.id ?? -1 } : {}) },
+      select: { id: true, name: true, userId: true, position: { select: { targetConsultations: true, targetContracts: true } } },
       orderBy: { name: "asc" },
     });
-    const count = (field, operatorId) =>
-      prisma.clientCase.count({ where: { operatorId, [field]: { gte: from, lte: to } } });
-    const rows = await Promise.all(
-      employees.map(async (e) => ({
+    const { targetsFor } = require("../services/performanceMetrics");
+    const userIds = employees.map((e) => e.userId).filter(Boolean);
+    const [targets, booked, signed] = await Promise.all([
+      targetsFor(employees, month),
+      prisma.appointment.groupBy({ by: ["bookedById"], where: { bookedById: { in: userIds }, status: { not: "cancelled" }, date: { gte: from, lte: until } }, _count: { _all: true } }),
+      prisma.clientCase.groupBy({ by: ["operatorId"], where: { operatorId: { in: employees.map((e) => e.id) }, contractDate: { gte: from, lte: to } }, _count: { _all: true } }),
+    ]);
+    const bookedBy = new Map(booked.map((r) => [r.bookedById, r._count._all]));
+    const signedBy = new Map(signed.map((r) => [r.operatorId, r._count._all]));
+    const rows = employees
+      .map((e) => ({
         employee: { id: e.id, name: e.name },
-        consultations: await count("consultationDate", e.id),
-        contracts: await count("contractDate", e.id),
-        targetConsultations: e.position?.targetConsultations ?? null,
-        targetContracts: e.position?.targetContracts ?? null,
+        consultations: (e.userId && bookedBy.get(e.userId)) || 0,
+        contracts: signedBy.get(e.id) || 0,
+        targetConsultations: targets.get(e.id)?.get("consultations") ?? null,
+        targetContracts: targets.get(e.id)?.get("contracts") ?? null,
       }))
-    );
+      .filter((r) => r.targetConsultations || r.targetContracts || r.consultations || r.contracts);
     res.json({ month, rows });
   } catch (err) {
     next(err);
@@ -801,7 +804,8 @@ clients.get("/:id", async (req, res, next) => {
       finance: canSeeFinance(req.user),
       // Altogether: given, left, overdue, next (the cases whose money they see).
       money: moneyIds.size ? clientMoney(visible.filter((k) => moneyIds.has(k.id)).map(withMoney), shownPayments) : null,
-      events: shownEvents,
+      // What Ledger AI wrote (a note, a next step) shows it as the author.
+      events: shownEvents.map((e) => (e.data?.viaAi && e.author ? { ...e, author: { ...e.author, name: "Ledger AI", employee: null } } : e)),
       links: lawyer
         ? []
         : [

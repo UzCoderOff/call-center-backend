@@ -168,4 +168,26 @@ router.get("/", async (req, res, next) => {
   }
 });
 
+// GET /api/dashboard/funnel-by-employee?from=&to= (managers): the funnel for
+// each call-center person side by side — the numbers their phone talked to
+// (a number that called two of them counts for both), booked, came, signed,
+// and why new ones didn't book. Asked for separately: one funnel per person
+// is too slow for every dashboard load.
+router.get("/funnel-by-employee", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
+    const from = parseMs(req.query.from, "from");
+    const to = parseMs(req.query.to, "to");
+    const people = (await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true, extraJobs: true, collectCalls: true, pbxCalling: true }, orderBy: { name: "asc" } })).filter(
+      (e) => isCallCenter(e) && hasCalls(e)
+    );
+    const rows = await Promise.all(
+      people.map(async (e) => ({ id: e.id, name: e.name, ...(await computeFunnel({ employeeIds: [e.id], from, to, fee: DEFAULT_FEE })), now: undefined }))
+    );
+    res.json({ rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

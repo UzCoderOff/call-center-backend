@@ -24,6 +24,33 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    // The release date goes here when it's pushed (notes go out within
+    // SEND_DAYS of it).
+    id: "2026-10-17-consultations-answers",
+    date: "2026-10-17",
+    boss: [
+      "<b>Konsultatsiya = kalendarga yozilgan uchrashuv.</b> Endi bitta raqam: operator yozgan konsultatsiyalar (bekor qilinganidan tashqari) oʻz kunida hisoblanadi — «Keldi» belgilanmagan boʻlsa ham. Alohida «Kalendarga yozgan» olib tashlandi; oylik reja shu raqamga. Mijoz ishining «Konsultatsiya» holati endi «Murojaat» deb ataladi, Mijozlardagi boʻlim — «Murojaatlar».",
+      "<b>Yozilmasdan kelgan mijoz</b>: Kalendarda bugungi kun ostida «Yozilmasdan kelgan mijozni yozish» — konsultatsiya «Keldi» deb saqlanadi va hisoblanadi.",
+      "<b>Vazifaga javob</b>: vazifa berayotganda «Javob yozsin» ni yoqing — xodim javobini yozmaguncha vazifani bajarildi deb belgilay olmaydi. Javob sizga Telegramda va Vazifalarda keladi.",
+      "<b>Yangi raqamlar: nima boʻldi?</b> Operator gaplashgan, lekin konsultatsiyaga yozilmagan har bir yangi raqamga bitta sabab belgilaydi: narx, faqat savol, boshqa joyga ketdi… Sabablar Asosiy sahifadagi voronkada; «Har bir operator» — operatorlar yonma-yon.",
+      "<b>Ledger AI</b>: u tayyorlagan vazifa va eslatmalarda muallif «Ledger AI» deb yoziladi; ochiq vazifani oʻzgartira oladi (har doim tasdiqlash bilan) va xodimlarning javoblarini oʻqiydi. Oʻchira olmaydi, pulga tegmaydi. Baʼzan chiqqan «Claude javob bermadi» xatosi tuzatildi.",
+    ],
+    staff: [
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCallCenter(u.employee),
+        text: "Konsultatsiyalaringiz endi kalendarga yozganlaringiz boʻyicha hisoblanadi (bekor qilinganidan tashqari) — «Keldi» belgilanmagan boʻlsa ham. Yozilmasdan kelgan mijozni Kalendarda bugungi kun ostidagi tugma bilan yozing. Asosiy sahifada «Yangi raqamlar: nima boʻldi?» — gaplashib, yozilmagan har bir yangi raqamga bitta sabab belgilang.",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE" || isLawyerUser(u),
+        text: "Vazifaga javob yozsa boʻladi: vazifani oching, javobingizni yozing va «Bajarildi» ni bosing. «Javob yozsin» deb berilgan vazifani javobsiz bajarib boʻlmaydi.",
+      },
+      {
+        to: (u) => isLawyerUser(u),
+        text: "Yozilmasdan kelgan mijozni kalendaringizda bugungi kun ostidagi «Yozilmasdan kelgan mijozni yozish» bilan yozing — konsultatsiya hisoblanadi va yakunini yozish eslatiladi.",
+      },
+    ],
+  },
+  {
     id: "2026-10-15-telegram-inbox",
     date: "2026-10-15",
     boss: [

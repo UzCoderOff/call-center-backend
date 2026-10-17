@@ -29,7 +29,8 @@ function publicReminder(r, { clientVisible = true } = {}) {
     phone: r.phone,
     client: clientVisible ? r.client : null,
     user: who(r.user),
-    createdBy: who(r.createdBy),
+    // Prepared by Ledger AI: shown as Ledger AI (who confirmed it stays in createdById).
+    createdBy: r.viaAi && r.createdBy ? { ...who(r.createdBy), name: "Ledger AI", ai: true } : who(r.createdBy),
     sentAt: r.sentAt,
     doneAt: r.doneAt,
     createdAt: r.createdAt,
@@ -64,7 +65,7 @@ function reminderText(r, f) {
     r.notes ? f.escapeHtml(r.notes) : null,
     r.client ? `Mijoz: ${f.escapeHtml(r.client.name)}` : null,
     r.phone ? `Raqam: ${f.escapeHtml(f.phoneCompact(r.phone))}` : null,
-    r.createdById && r.createdById !== r.userId && r.createdBy ? `Eslatma qoʻydi: ${f.escapeHtml(personName(r.createdBy))}` : null,
+    r.createdById && r.createdById !== r.userId && r.createdBy ? `Eslatma qoʻydi: ${f.escapeHtml(r.viaAi ? "Ledger AI" : personName(r.createdBy))}` : null,
     f.portalLink("/tasks/reminders", "Eslatmalarni ochish"),
   ];
   return lines.filter(Boolean).join("\n");

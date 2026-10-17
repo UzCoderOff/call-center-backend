@@ -43,7 +43,53 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
-### This release (2026-10-15): office workers' calls back, who took the cash, adding client money from the top, each case as a project
+### This release (2026-10-17): one consultation count, answers on tasks, new callers' outcomes, walk-ins, Ledger AI fixes
+
+- **A consultation = a booking = an appointment** (the firm's call): every
+  count is now the consultation calendar's entries that aren't cancelled, on
+  their own date, credited to whoever booked them — Natijalar and targets
+  (`services/performance.js`), the Mijozlar targets card (now also uses
+  each person's own targets), the automatic daily report (`day.booked` is
+  gone; `day.came` added), Excel, the morning digest, Moliya's "where clients
+  come from", and Ledger AI's lookups and reports. The separate "bookings"
+  measure is gone; an old target on it counts as the consultations target
+  (`targetsFor`). `ClientCase.consultationDate` stays only as a date on the
+  case. The case status "consultation" is now shown as «Murojaat»
+  (Mijozlar tab «Murojaatlar»). **October's numbers are recounted** — they
+  change on the day of the release.
+- **Walk-ins** (`Appointment.walkIn`): `POST /api/calendars/:id/appointments`
+  with `walkIn: true` — today, a time that has started, saved as "attended";
+  no free time needed, but not the same number twice on a calendar in a day
+  (409 `already_today`). The lawyer is told when someone else enters one;
+  its summary is due from when it was entered (no instant strike); whoever
+  entered it may fix or cancel it that day until the summary is written. New
+  clients from walk-ins get source `walk_in`. Calendar: «Yozilmasdan kelgan
+  mijozni yozish» under today (`canWalkIn`).
+- **Answers on tasks** (migration `20261017100000_task_answers_call_outcomes`):
+  `Task.answer/answeredAt/needsAnswer`. Only the person it's for writes it,
+  while it's open; with `needsAnswer` they can't tick it done without one
+  (portal, Telegram — such tasks get no tick button). The giver's "done"
+  message carries the answer.
+- **"Ledger AI" as the author**: `viaAi` on Task, Reminder, ClientFollowUp
+  (and `data.viaAi` on its notes) — shown as "Ledger AI"; who confirmed it
+  stays in `createdById`. New action `edit_task` (open tasks only; never
+  delete). Ledger AI's chat no longer fails with "Claude javob bermadi" when
+  the clock turns a minute mid-answer (the prompt is built once per answer;
+  the time goes as a system message).
+- **New callers' outcomes** (table `CallOutcome`, `services/callOutcomes.js`,
+  `/api/call-outcomes`): the call center taps one reason for each new number
+  they talked to that didn't book (last 7 days, from the release day —
+  Setting `callOutcomes.since` is stamped on first use). The funnel shows the
+  reasons; `GET /api/dashboard/funnel-by-employee` (managers) — each
+  operator side by side.
+- Migration: added columns and the `CallOutcome` table only (hand-written,
+  nothing dropped).
+- What's-new: the boss, the call center, everyone with tasks, lawyers
+  (`services/news.js`, "2026-10-17-consultations-answers" — set its `date` to
+  the release day).
+- No `.env` change, no app update.
+
+### Earlier release (2026-10-15): office workers' calls back, who took the cash, adding client money from the top, each case as a project
 
 - **Office workers' calls** (`src/lib/calling.js`): anyone with the phone
   switch syncs again and sees their own calls (Calls, and on Home under their
@@ -107,7 +153,7 @@ The startup log should say `database: journal mode wal`, `listening on port
   record payments, lawyers, coordinators (`services/news.js`).
 - No `.env` change, no app update.
 
-### This release (2026-10-15, second): the clients' Telegram + AI review (beta)
+### Earlier release (2026-10-15, second): the clients' Telegram + AI review (beta)
 
 - **Clients' Telegram** (migration `20261015200000_telegram_inbox`: new
   tables `TgChat`, `TgMessage`, `TgReview` only): the firm's Telegram account

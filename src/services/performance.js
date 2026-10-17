@@ -15,12 +15,18 @@ const { strikeCounts } = require("./strikes");
 //   calls        answered / missed, in / out, missed ones called back and
 //                how fast (median), talk time — for people whose calls are
 //                collected
-//   bookings     consultations they booked, and what happened to the ones
-//                that fall in the month: came, didn't, cancelled, online, paid
-//   targets      consultations and contracts on the cases they're the
-//                operator of, against their position's monthly target and
-//                where they should be by today (working days, Mon–Sat)
-//   conversion   of this month's consultations, how many have signed so far
+//   consultations  the consultations they booked — a consultation, a
+//                booking and an appointment are one thing (2026-10-17): an
+//                entry in a consultation calendar that isn't cancelled,
+//                counted on its own day (so far this month), whether or not
+//                anyone marked that the client came. What happened to them:
+//                came, didn't, not marked, today, still to come, cancelled,
+//                online, paid
+//   targets      consultations (as above) and contracts on the cases they're
+//                the operator of, against their monthly target and where
+//                they should be by today (working days, Mon–Sat)
+//   conversion   of the clients they had consultations with this month, how
+//                many have signed since
 //   money        brought in: payments on their cases (and fees for their
 //                bookings without a case); taken: what they recorded, by
 //                method (the cash they should hand over); report income and
@@ -106,11 +112,21 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     computeCallStats({ employeeIds: ids, from: msFrom, to: msTo }),
     prisma.appointment.findMany({
       where: { bookedById: { in: userIds }, date: dateRange },
-      select: { bookedById: true, date: true, end: true, status: true, format: true, payments: { where: { kind: "consultation" }, select: { amount: true } } },
+      select: {
+        id: true,
+        bookedById: true,
+        date: true,
+        end: true,
+        status: true,
+        format: true,
+        clientId: true,
+        client: { select: { cases: { select: { contractDate: true } } } },
+        payments: { where: { kind: "consultation" }, select: { amount: true } },
+      },
     }),
     prisma.clientCase.findMany({
-      where: { operatorId: { in: ids }, OR: [{ consultationDate: dateRange }, { contractDate: dateRange }] },
-      select: { operatorId: true, consultationDate: true, contractDate: true, contractAmount: true },
+      where: { operatorId: { in: ids }, contractDate: dateRange },
+      select: { operatorId: true, contractDate: true, contractAmount: true },
     }),
     // Brought in: payments on their cases, and consultation fees for their
     // bookings that have no case.
@@ -178,27 +194,16 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
       };
     }
 
-    // --------------------------------------------------------- bookings
+    // ---------------------------------------------------- consultations
+    // Theirs: the ones they booked. Counted: not cancelled, on or before
+    // today — a later one this month counts on its day.
     const mine = bookings.filter((a) => byUser.get(a.bookedById) === e.id);
     const active = mine.filter((a) => a.status !== "cancelled");
-    const past = (a) => a.date < today;
-    const bookingsOut = {
-      made: myDays.reduce((t, d) => t + d.booked, 0),
-      total: active.length,
-      attended: active.filter((a) => a.status === "attended").length,
-      noShow: active.filter((a) => a.status === "no_show").length,
-      unmarked: active.filter((a) => a.status === "booked" && past(a)).length,
-      upcoming: active.filter((a) => a.status === "booked" && !past(a)).length,
-      cancelled: mine.length - active.length,
-      online: active.filter((a) => a.format === "online").length,
-      paid: active.filter((a) => a.payments.length > 0).length,
-      paidAmount: active.reduce((t, a) => t + a.payments.reduce((s, p) => s + p.amount, 0), 0),
-    };
+    const consulted = active.filter((a) => a.date <= until);
 
     // ---------------------------------------------- targets, conversion
     const myCases = own(cases, (k) => k.operatorId);
     const inMonth = (d) => d && d >= cal.first && d <= cal.last;
-    const consulted = myCases.filter((k) => inMonth(k.consultationDate));
     const signed = myCases.filter((k) => inMonth(k.contractDate));
     // Where they should be by today: the target spread over their working
     // days (from the day they joined, if that's this month).
@@ -209,11 +214,36 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     const myTargets = targets.get(e.id) || new Map();
     const targetC = myTargets.get("consultations") ?? null;
     const targetK = myTargets.get("contracts") ?? null;
-    const consultations = { count: consulted.length, target: targetC, expected: expected(targetC), pct: pct(consulted.length, targetC) };
+    const consultations = {
+      count: consulted.length,
+      target: targetC,
+      expected: expected(targetC),
+      pct: pct(consulted.length, targetC),
+      // What happened to them: the client came, didn't, nobody marked it yet
+      // (still counted), today's not marked yet; and this month's still to
+      // come (not counted yet), and the cancelled ones (never counted).
+      came: consulted.filter((a) => a.status === "attended").length,
+      noShow: consulted.filter((a) => a.status === "no_show").length,
+      unmarked: consulted.filter((a) => a.status === "booked" && a.date < today).length,
+      today: consulted.filter((a) => a.status === "booked" && a.date === today).length,
+      upcoming: active.length - consulted.length,
+      cancelled: mine.length - active.length,
+      online: consulted.filter((a) => a.format === "online").length,
+      paid: consulted.filter((a) => a.payments.length > 0).length,
+      paidAmount: consulted.reduce((t, a) => t + a.payments.reduce((s, p) => s + p.amount, 0), 0),
+    };
     const contracts = { count: signed.length, target: targetK, expected: expected(targetK), pct: pct(signed.length, targetK) };
     if (finance) contracts.amount = signed.reduce((t, k) => t + (k.contractAmount || 0), 0);
-    const cohortSigned = consulted.filter((k) => k.contractDate && k.contractDate >= k.consultationDate).length;
-    const conversion = { consultations: consulted.length, signed: cohortSigned, rate: pct(cohortSigned, consulted.length) };
+    // The clients they had a consultation with this month (each once, from
+    // their first one), and how many have signed a contract since. A booking
+    // with no client (no phone number) can't be followed, so it's left out.
+    const firstSeen = new Map();
+    for (const a of consulted) {
+      if (!a.clientId) continue;
+      if (!firstSeen.has(a.clientId) || a.date < firstSeen.get(a.clientId).date) firstSeen.set(a.clientId, a);
+    }
+    const cohortSigned = [...firstSeen.values()].filter((a) => (a.client?.cases || []).some((k) => k.contractDate && k.contractDate >= a.date)).length;
+    const conversion = { consultations: firstSeen.size, signed: cohortSigned, rate: pct(cohortSigned, firstSeen.size) };
 
     // -------------------------------------------------------------- money
     const myBrought = brought.filter((p) => (p.case ? p.case.operatorId === e.id : byUser.get(p.appointment?.bookedById) === e.id));
@@ -295,7 +325,7 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     // What they're measured on is their job (set by the developer).
     // Someone can do more than one job: they're measured on each of them.
     const kind = jobOf(e);
-    const clientActivity = Boolean(consulted.length || signed.length || mine.length || bookingsOut.made);
+    const clientActivity = Boolean(consulted.length || signed.length || mine.length);
     const clientWork = hasJob(e, "call_center");
     const coordinatorWork = hasJob(e, "coordinator");
     // Office work: they fill in a report form (or sent reports this month
@@ -332,7 +362,6 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
     const builtinValue = {
       consultations: consulted.length,
       contracts: signed.length,
-      bookings: bookingsOut.made,
       calls_answered: calls?.answered ?? 0,
       fees: moneyOut.brought.consultation,
       income,
@@ -369,7 +398,6 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
       workDays: { total: workMine.length, soFar: workMineSoFar.length, away: mineCal.off.filter((o) => o.kind !== "weekly" && o.date >= joined).map((o) => ({ date: o.date, kind: o.kind, name: o.name ?? null })) },
       calls,
       clientsAdded: myDays.reduce((t, d) => t + d.newClients, 0),
-      bookings: bookingsOut,
       consultations,
       contracts,
       conversion,
@@ -381,15 +409,14 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
 
     if (detail) {
       // Day by day, up to today.
-      const perDay = new Map(cal.dates.filter((d) => d <= until).map((d) => [d, { date: d, answered: 0, missed: 0, booked: 0, consultations: 0, contracts: 0, fees: 0, brought: 0, income: 0 }]));
+      const perDay = new Map(cal.dates.filter((d) => d <= until).map((d) => [d, { date: d, answered: 0, missed: 0, consultations: 0, contracts: 0, fees: 0, brought: 0, income: 0 }]));
       for (const d of myDays) {
         const x = perDay.get(d.date);
         if (!x) continue;
         x.answered = d.calls?.answered || 0;
         x.missed = d.calls?.missed || 0;
-        x.booked = d.booked;
       }
-      for (const k of consulted) if (perDay.has(k.consultationDate)) perDay.get(k.consultationDate).consultations += 1;
+      for (const a of consulted) if (perDay.has(a.date)) perDay.get(a.date).consultations += 1;
       for (const k of signed) if (perDay.has(k.contractDate)) perDay.get(k.contractDate).contracts += 1;
       for (const p of myBrought) {
         const x = perDay.get(p.date);
@@ -427,14 +454,18 @@ async function monthPerformance({ month, employees, finance, detail = false, tod
 // Six months up to `month` for one person: consultations, contracts, money
 // brought in and all income (contract money only with Moliya), and their
 // report measures.
-async function history(employee, month, finance) {
+async function history(employee, month, finance, today = firmDate()) {
   const first = shiftMonth(month, -5);
   const range = { gte: `${first}-01`, lte: `${month}-31` };
-  const [cases, brought, reports, templates] = await Promise.all([
+  const [cases, booked, brought, reports, templates] = await Promise.all([
     prisma.clientCase.findMany({
-      where: { operatorId: employee.id, OR: [{ consultationDate: range }, { contractDate: range }] },
-      select: { consultationDate: true, contractDate: true, contractAmount: true },
+      where: { operatorId: employee.id, contractDate: range },
+      select: { contractDate: true, contractAmount: true },
     }),
+    // Their consultations: booked by them, not cancelled, up to today.
+    employee.userId
+      ? prisma.appointment.findMany({ where: { bookedById: employee.userId, status: { not: "cancelled" }, date: { gte: range.gte, lte: today < range.lte ? today : range.lte } }, select: { date: true } })
+      : [],
     prisma.payment.findMany({
       where: { date: range, OR: [{ case: { operatorId: employee.id } }, ...(employee.userId ? [{ caseId: null, appointment: { bookedById: employee.userId } }] : [])] },
       select: { date: true, amount: true, kind: true },
@@ -447,9 +478,11 @@ async function history(employee, month, finance) {
     for (const [key, v] of reportValues(reports.filter((r) => r.date.startsWith(m.month)))) m.measures[key] = v.total;
   }
   const at = (date) => date && months.find((m) => m.month === date.slice(0, 7));
-  for (const k of cases) {
-    const c = at(k.consultationDate);
+  for (const a of booked) {
+    const c = at(a.date);
     if (c) c.consultations += 1;
+  }
+  for (const k of cases) {
     const s = at(k.contractDate);
     if (s) {
       s.contracts += 1;

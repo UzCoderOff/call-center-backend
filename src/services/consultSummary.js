@@ -152,7 +152,13 @@ const needsSummary = (a, now) => !a.summaryAt && OPEN_STATUSES.includes(a.status
 // that day.
 function deadlineFor(a, rule) {
   const range = firmDayRange(a.date);
-  if (rule?.hours) return new Date(range.from + a.end * 60 * 1000 + rule.hours * 60 * 60 * 1000);
+  if (rule?.hours) {
+    // A walk-in written down later: from when it was entered, not from a
+    // time that had already passed.
+    const ended = range.from + a.end * 60 * 1000;
+    const from = a.walkIn && a.createdAt ? Math.max(ended, new Date(a.createdAt).getTime()) : ended;
+    return new Date(from + rule.hours * 60 * 60 * 1000);
+  }
   return new Date(range.to);
 }
 
@@ -289,7 +295,7 @@ async function evaluateSummaryStrikes(db = prisma, nowDate = new Date()) {
   const sinceDate = firmNow(new Date(rule.since)).date;
   const rows = await db.appointment.findMany({
     where: { status: { in: OPEN_STATUSES }, date: { gte: sinceDate, lte: now.date }, summaryStrike: null, calendar: { active: true } },
-    select: { id: true, date: true, start: true, end: true, status: true, summaryAt: true, createdAt: true, calendar: { select: { ownerId: true } } },
+    select: { id: true, date: true, start: true, end: true, status: true, walkIn: true, summaryAt: true, createdAt: true, calendar: { select: { ownerId: true } } },
   });
   let created = 0;
   for (const a of rows) {

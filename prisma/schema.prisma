@@ -128,6 +128,7 @@ model User {
   coversTaken             LawyerCover[]         @relation("CoverBy")
   coversSet               LawyerCover[]         @relation("CoverSetBy")
   caseOutcomesWritten     CaseDate[]            @relation("CaseDateOutcomeBy")
+  callOutcomesSet         CallOutcome[]         @relation("CallOutcomeBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -215,11 +216,13 @@ model Employee {
   // ("123456" = Monday–Saturday; call-center staff, who work from their own
   // phone, "1234567"), and whether public holidays are days off for them.
   // Their approved days off (Absence) come on top.
-  workDays    String    @default("123456")
-  holidaysOff Boolean   @default(true)
-  absences    Absence[]
-  strikes     Strike[]
-  targets     Target[]
+  workDays     String        @default("123456")
+  holidaysOff  Boolean       @default(true)
+  absences     Absence[]
+  strikes      Strike[]
+  targets      Target[]
+  // The new callers whose outcome they recorded (CallOutcome).
+  callOutcomes CallOutcome[]
 
   // Calls through Ledger's own phone line (2026-10, see pbx/README.md): they
   // get a phone ID (PbxExtension) and make and take calls in the Ledger app.
@@ -593,6 +596,10 @@ model Appointment {
   // "online" (a video/phone call).
   format         String         @default("office")
   status         String         @default("booked") // "booked" | "attended" | "no_show" | "cancelled"
+  // Written down after the client came without booking (2026-10-17): saved
+  // as attended, at a time that had already started — its summary is due
+  // from when it was entered, and whoever entered it may fix it that day.
+  walkIn         Boolean        @default(false)
   bookedById     Int
   bookedBy       User           @relation("AppointmentBookedBy", fields: [bookedById], references: [id])
   // Set when booked from a call's page.
@@ -999,6 +1006,14 @@ model Task {
   doneAt      DateTime?
   doneById    Int?
   doneBy      User?       @relation("TaskDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  // What the person wrote back when doing it (2026-10-17): "why calls aren't
+  // turning into consultations" needs an answer, not just a tick. needsAnswer:
+  // whoever gave it asked for one — then it can't be ticked done without.
+  answer      String?
+  answeredAt  DateTime?
+  needsAnswer Boolean     @default(false)
+  // Prepared by Ledger AI (and confirmed by createdBy): shown as "Ledger AI".
+  viaAi       Boolean     @default(false)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
@@ -1239,12 +1254,39 @@ model ClientFollowUp {
   doneBy      User?          @relation("FollowUpDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
   // When the Telegram reminder went out (once).
   remindedAt  DateTime?
+  // Prepared by Ledger AI (and confirmed by createdBy): shown as "Ledger AI".
+  viaAi       Boolean        @default(false)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   @@index([assigneeId, status, dueAt])
   @@index([clientId, status])
   @@index([status, dueAt])
+}
+
+// What came of a new caller who didn't book a consultation (2026-10-17): the
+// operator taps one reason — the price, only had a question, went to another
+// firm, will call again, wrong number, not our kind of matter, or something
+// else (with a word). One per number; a later booking wins over it (the
+// funnel counts that as booked). Only new numbers are asked about — see
+// src/services/callOutcomes.js.
+model CallOutcome {
+  id          Int       @id @default(autoincrement())
+  // The number, reduced (src/lib/phone.js).
+  phoneKey    String    @unique
+  // "price" | "question" | "other_firm" | "call_again" | "wrong_number" |
+  // "not_our_field" | "other"
+  outcome     String
+  note        String?
+  // Whose caller it was: the operator who recorded it.
+  employeeId  Int?
+  employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  createdById Int?
+  createdBy   User?     @relation("CallOutcomeBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([employeeId, createdAt])
 }
 
 // A late call-back: a call-center phone missed a call and nobody called the
@@ -1407,6 +1449,8 @@ model Reminder {
   // When it went out; cleared when the time is moved, so it goes again.
   sentAt      DateTime?
   doneAt      DateTime?
+  // Prepared by Ledger AI (and confirmed by createdBy): shown as "Ledger AI".
+  viaAi       Boolean   @default(false)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

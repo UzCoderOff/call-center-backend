@@ -145,10 +145,11 @@ async function onCallback(query) {
   if (task) {
     const row = await prisma.task.findUnique({ where: { id: Number(task[1]) } });
     if (!row || row.assigneeId !== user.id) return answer("Bu vazifa sizga emas");
-    if (!row.doneAt) {
-      const { setDone } = require("../../routes/tasks");
-      await setDone(row, user, true);
-    }
+    const { setDone, answerMissing } = require("../../routes/tasks");
+    // It asks for an answer (an older message still has the button): that's
+    // written in Ledger.
+    if (answerMissing(row, user, true)) return answer("Bu vazifaga javob yozish kerak — Ledgerda oching");
+    if (!row.doneAt) await setDone(row, user, true);
     const text = `${query.message.text || ""}\n\n✅ Bajarildi`;
     await api.enqueue("editMessageText", { chat_id: chatId, message_id: query.message.message_id, text: text.slice(0, 4000) }).catch(() => {});
     return answer("Bajarildi");

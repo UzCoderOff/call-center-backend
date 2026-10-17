@@ -68,8 +68,8 @@ router.get("/", async (req, res, next) => {
             // Everyone working now, and anyone who left but did something that month.
             OR: [
               { active: true },
-              { cases: { some: { OR: [{ consultationDate: range }, { contractDate: range }] } } },
-              { user: { bookedAppointments: { some: { date: range } } } },
+              { cases: { some: { contractDate: range } } },
+              { user: { bookedAppointments: { some: { date: range, status: { not: "cancelled" } } } } },
             ],
           }
         : { id: req.user.employee.id },
@@ -94,8 +94,8 @@ router.get("/export", async (req, res, next) => {
       where: {
         OR: [
           { active: true },
-          { cases: { some: { OR: [{ consultationDate: range }, { contractDate: range }] } } },
-          { user: { bookedAppointments: { some: { date: range } } } },
+          { cases: { some: { contractDate: range } } },
+          { user: { bookedAppointments: { some: { date: range, status: { not: "cancelled" } } } } },
         ],
       },
       select: EMPLOYEE_SELECT,
@@ -123,8 +123,8 @@ function performanceSheets(data, finance) {
       "Javob berilgan",
       "Oʻtkazib yuborilgan",
       "Qayta bogʻlanildi",
-      "Yozgan konsultatsiyalar",
       "Konsultatsiyalar",
+      "Keldi",
       "Reja",
       "Bugungacha kerak",
       "Shartnomalar",
@@ -151,8 +151,8 @@ function performanceSheets(data, finance) {
       r.calls ? r.calls.answered : "",
       r.calls ? r.calls.missed : "",
       r.calls ? r.calls.reached : "",
-      r.bookings.made,
       r.consultations.count,
+      r.consultations.came ?? "",
       r.consultations.target ?? "",
       r.consultations.expected ?? "",
       r.contracts.count,
@@ -169,10 +169,10 @@ function performanceSheets(data, finance) {
       r.workDays.away.filter((a) => a.kind !== "holiday").length,
     ]);
   }
-  const days = [["Xodim", "Sana", "Javob berilgan", "Oʻtkazib yuborilgan", "Yozgan", "Konsultatsiyalar", "Shartnomalar", "Konsultatsiya toʻlovi", ...(finance ? ["Olib kelgan"] : [])]];
+  const days = [["Xodim", "Sana", "Javob berilgan", "Oʻtkazib yuborilgan", "Konsultatsiyalar", "Shartnomalar", "Konsultatsiya toʻlovi", ...(finance ? ["Olib kelgan"] : [])]];
   for (const r of data.rows) {
     for (const d of r.days || []) {
-      days.push([r.employee.name, d.date, d.answered, d.missed, d.booked, d.consultations, d.contracts, d.fees, ...(finance ? [d.brought] : [])]);
+      days.push([r.employee.name, d.date, d.answered, d.missed, d.consultations, d.contracts, d.fees, ...(finance ? [d.brought] : [])]);
     }
   }
   const away = [["Xodim", "Sana", "Sabab"]];
@@ -184,7 +184,7 @@ function performanceSheets(data, finance) {
   return [
     { name: "Rejalar", rows: plans, widths: [24, 34, 26, 12, 10, 16, 12] },
     { name: "Jamoa", rows: team, widths: [24, 22, ...team[0].slice(2).map(() => 14)] },
-    { name: "Kunlar", rows: days, widths: [24, 12, 14, 16, 10, 16, 12, 18, 14] },
+    { name: "Kunlar", rows: days, widths: [24, 12, 14, 16, 16, 12, 18, 14] },
     { name: "Dam olish", rows: away, widths: [24, 12, 40] },
   ];
 }

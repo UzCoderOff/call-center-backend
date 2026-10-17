@@ -39,7 +39,7 @@ async function appointmentLines(user, date, now) {
   if (upcoming.length === 0) return [];
   const showCalendar = !own;
   return [
-    `🗓 <b>Uchrashuvlar (${upcoming.length})</b>`,
+    `🗓 <b>Konsultatsiyalar (${upcoming.length})</b>`,
     ...upcoming.map((a) => {
       const bits = [f.escapeHtml(a.clientName), a.format === "online" ? "onlayn" : null, a.matter ? f.escapeHtml(a.matter) : null, showCalendar ? f.escapeHtml(a.calendar.name) : null].filter(Boolean);
       return `${f.clock(a.start)} — ${bits.join(" · ")}`;
@@ -193,7 +193,8 @@ async function managerLines(user, now) {
   const { from, to } = firmDayRange(yesterday);
   const [{ totals }, consultations, contracts, payments, pendingMissed] = await Promise.all([
     computeCallStats({ from, to }),
-    prisma.clientCase.count({ where: { consultationDate: yesterday } }),
+    // Consultations: the calendar's entries that day, not cancelled.
+    prisma.appointment.count({ where: { date: yesterday, status: { not: "cancelled" } } }),
     prisma.clientCase.count({ where: { contractDate: yesterday } }),
     prisma.payment.aggregate({ where: { date: yesterday }, _sum: { amount: true } }),
     prisma.callLog.count({ where: { missed: true, followUp: "pending", callTimestampMs: { gte: BigInt(from), lte: BigInt(to) }, ...countedCallsWhere() } }),
@@ -239,8 +240,8 @@ async function tomorrow(user, { now = firmNow() } = {}) {
   const lines = await appointmentLines(user, date, now);
   if (lines.length === 0) {
     return ownsCalendar(user) || booksAppointments(user)
-      ? `Ertaga (${f.day(date)}) uchrashuvlar yoʻq.`
-      : "Ertangi uchrashuvlar faqat kalendar bilan ishlaydiganlarga koʻrinadi.";
+      ? `Ertaga (${f.day(date)}) konsultatsiyalar yoʻq.`
+      : "Ertangi konsultatsiyalar faqat kalendar bilan ishlaydiganlarga koʻrinadi.";
   }
   return `<b>Ertaga — ${f.day(date)}</b>\n\n${lines.join("\n")}`;
 }
