@@ -28,6 +28,9 @@ const { firmDayRange, firmNow } = require("../lib/firmTime");
 //   GET    /api/tg-inbox/reviews          ?employeeId=&month= — the AI's reviews (beta) of
 //                                         someone's chats (Natijalar): managers, or their own
 //   POST   /api/tg-inbox/:id/review       the AI reviews it now (managers)
+//   PUT    /api/tg-inbox/reviews/:reviewId/feedback  { verdict: "right"|"wrong"|null,
+//                                         kind?, note? } — a manager checks the AI's review;
+//                                         corrections go back to the AI as examples
 
 const router = express.Router();
 router.use(requireAuth);
@@ -161,14 +164,20 @@ router.get("/reviews", async (req, res, next) => {
     const from = new Date(firmDayRange(`${month}-01`).from);
     const to = new Date(firmDayRange(nextMonth).from);
     if (!employee.userId) return res.json({ month, counts: {}, averageScore: null, reviews: [] });
-    // The latest look at each chat that month (a chat looked at twice: once).
+    // The latest look at each chat that month (a chat looked at twice: once)
+    // — new leads only: an existing client's chat isn't selling, and a
+    // manager's correction decides.
     const rows = await prisma.tgReview.findMany({
-      where: { operatorId: employee.userId, relevant: true, createdAt: { gte: from, lt: to } },
+      where: { operatorId: employee.userId, createdAt: { gte: from, lt: to } },
       orderBy: { createdAt: "desc" },
-      include: { chat: { select: { id: true, firstName: true, lastName: true, username: true, client: { select: { id: true, name: true } } } }, operator: { select: { name: true, username: true, employee: { select: { name: true } } } } },
+      include: {
+        chat: { select: { id: true, firstName: true, lastName: true, username: true, client: { select: { id: true, name: true } } } },
+        operator: { select: { name: true, username: true, employee: { select: { name: true } } } },
+        feedbackBy: ANSWERED_BY,
+      },
     });
     const seen = new Set();
-    const latest = rows.filter((r) => !seen.has(r.chatId) && seen.add(r.chatId));
+    const latest = rows.filter((r) => !seen.has(r.chatId) && seen.add(r.chatId)).filter((r) => reviews.effectiveKind(r) === "lead");
     const counts = {};
     for (const r of latest) counts[r.outcome] = (counts[r.outcome] || 0) + 1;
     const scored = latest.filter((r) => r.score > 0);
@@ -178,6 +187,27 @@ router.get("/reviews", async (req, res, next) => {
       averageScore: scored.length ? Math.round((scored.reduce((s, r) => s + r.score, 0) / scored.length) * 10) / 10 : null,
       reviews: latest.slice(0, 50).map((r) => ({ ...reviews.reviewLine(r), chat: { id: r.chat.id, name: r.chat.client?.name || inbox.displayName(r.chat), clientId: r.chat.client?.id ?? null } })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A manager checks the AI's review: right, or wrong — with the right kind
+// (new lead, existing client, not relevant) and a word why. The latest
+// corrections go back to the AI as the firm's examples (services/tgReview.js).
+router.put("/reviews/:reviewId/feedback", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) throw forbidden();
+    const b = req.body || {};
+    const verdict = b.verdict === null ? null : String(b.verdict || "");
+    if (verdict !== null && !["right", "wrong"].includes(verdict)) throw badRequest("invalid verdict");
+    const kind = verdict === "wrong" ? String(b.kind || "") : null;
+    if (verdict === "wrong" && !reviews.KINDS.includes(kind)) throw badRequest("kind_required");
+    const note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 500) : null;
+    const updated = await reviews.setFeedback(parseId(req.params.reviewId, "reviewId"), req.user, { verdict, kind, note });
+    if (!updated) throw notFound();
+    const full = await prisma.tgReview.findUnique({ where: { id: updated.id }, include: { operator: ANSWERED_BY, feedbackBy: ANSWERED_BY } });
+    res.json(reviews.reviewLine(full));
   } catch (err) {
     next(err);
   }
@@ -245,7 +275,7 @@ router.get("/:id", async (req, res, next) => {
       include: { answeredBy: ANSWERED_BY },
     });
     const hasOlder = rows.length > MESSAGES;
-    const latest = await prisma.tgReview.findFirst({ where: { chatId: chat.id }, orderBy: { id: "desc" }, include: { operator: ANSWERED_BY } });
+    const latest = await prisma.tgReview.findFirst({ where: { chatId: chat.id }, orderBy: { id: "desc" }, include: { operator: ANSWERED_BY, feedbackBy: ANSWERED_BY } });
     // A judgement of someone's work: for managers, and for the one it's about.
     // The AI's feedback: managers, and everyone who answers the firm's
     // Telegram — one shared account, one shared lesson (2026-10-17).
@@ -273,7 +303,7 @@ router.post("/:id/review", async (req, res, next) => {
       return res.status(409).json({ error: "ai_failed", message: claude.explain(err) });
     }
     if (!review) return res.status(409).json({ error: "nothing_to_review" });
-    const full = await prisma.tgReview.findUnique({ where: { id: review.id }, include: { operator: ANSWERED_BY } });
+    const full = await prisma.tgReview.findUnique({ where: { id: review.id }, include: { operator: ANSWERED_BY, feedbackBy: ANSWERED_BY } });
     res.json(reviews.reviewLine(full));
   } catch (err) {
     next(err);

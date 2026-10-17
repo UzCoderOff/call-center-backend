@@ -115,6 +115,7 @@ model User {
   chatMemberships         ConversationMember[]
   tgAnswered              TgMessage[]           @relation("TgAnsweredBy")
   tgReviews               TgReview[]            @relation("TgReviewOperator")
+  tgReviewsChecked        TgReview[]            @relation("TgReviewFeedbackBy")
   messages                Message[]             @relation("MessageAuthor")
   summariesWritten        Appointment[]         @relation("AppointmentSummaryBy")
   summaryStrikes          SummaryStrike[]       @relation("SummaryStrikeUser")
@@ -1705,6 +1706,13 @@ model TgReview {
   // The last message it read.
   upToMessageId Int
   relevant      Boolean
+  // What kind of chat (2026-10-17): "lead" (someone new — judged by the sales
+  // script), "existing" (a client the firm already works with or talked to —
+  // summarized, not scored), "not_relevant" (spam, personal — hidden).
+  kind          String   @default("lead")
+  // What Ledger told the AI: who wrote first, the linked client (its cases,
+  // earlier calls), whether it surely is an existing client.
+  facts         Json?
   topic         String?
   // "booked" | "lost_by_us" | "lost_not_serious" | "lost_other" | "open" | "not_client"
   outcome       String
@@ -1719,8 +1727,17 @@ model TgReview {
   betterReply   String?
   model         String
   costUsd       Float    @default(0)
+  // A manager's check of the review: "right" | "wrong"; when wrong, the right
+  // kind and a word why. Corrections go back to the AI as examples.
+  feedback      String?
+  feedbackKind  String?
+  feedbackNote  String?
+  feedbackById  Int?
+  feedbackBy    User?    @relation("TgReviewFeedbackBy", fields: [feedbackById], references: [id], onDelete: SetNull)
+  feedbackAt    DateTime?
   createdAt     DateTime @default(now())
 
   @@index([chatId, createdAt])
   @@index([operatorId, createdAt])
+  @@index([feedbackAt])
 }

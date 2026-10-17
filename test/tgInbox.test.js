@@ -99,3 +99,49 @@ test("whatever the AI sends back, the review has one shape", () => {
   // The firm's order is in the default rules: the problem first, then the offer.
   assert.match(DEFAULT_RULES, /avval mijozning muammosini/);
 });
+
+test("three kinds of chat: an existing client isn't scored on selling, and Ledger's facts decide", () => {
+  const { clean, effectiveKind, factsText } = require("../src/services/tgReview");
+  const lead = clean({ kind: "lead", outcome: "lost_by_us", score: 2, improve: ["Salomlashing"], betterReply: "Assalomu alaykum!" });
+  assert.equal(lead.kind, "lead");
+  assert.equal(lead.score, 2);
+  // The AI said lead, but the linked client had calls before the chat.
+  const sure = clean({ kind: "lead", outcome: "open", score: 2, improve: ["Salomlashing"], betterReply: "Assalomu alaykum!", summary: "Qaror yubordi" }, { knownExisting: true });
+  assert.equal(sure.kind, "existing");
+  assert.equal(sure.outcome, "existing");
+  assert.equal(sure.score, 0);
+  assert.deepEqual(sure.improve, []);
+  assert.equal(sure.betterReply, null);
+  assert.equal(sure.summary, "Qaror yubordi");
+  assert.equal(sure.relevant, true);
+  const existing = clean({ kind: "existing", outcome: "lost_by_us", score: 3 });
+  assert.equal(existing.outcome, "existing");
+  assert.equal(existing.score, 0);
+  const spam = clean({ kind: "not_relevant", score: 4, good: ["x"] });
+  assert.equal(spam.relevant, false);
+  assert.deepEqual(spam.good, []);
+  // A lead can't be "existing" or "not a client" by its outcome alone.
+  assert.equal(clean({ kind: "lead", outcome: "existing" }).outcome, "open");
+  // A manager's correction wins.
+  assert.equal(effectiveKind({ kind: "lead", feedback: "wrong", feedbackKind: "existing" }), "existing");
+  assert.equal(effectiveKind({ kind: "lead", feedback: "right" }), "lead");
+  assert.equal(effectiveKind({ relevant: false }), "not_relevant");
+  // What the AI is told.
+  const text = factsText({ firstFrom: "firm", linked: true, caseStatuses: ["contract"], casesBefore: 1, callsBefore: 3, bookingsBefore: 0, knownExisting: true });
+  assert.match(text, /FIRMA \(operator\) yozgan/);
+  assert.match(text, /ANIQ MAVJUD MIJOZ/);
+  assert.match(factsText({ firstFrom: "them", linked: false }), /bogʻlanmagan/);
+});
+
+test("the firm's corrections go back to the AI as examples", async () => {
+  const { lessons } = require("../src/services/tgReview");
+  const rows = [
+    { kind: "lead", outcome: "open", score: 2, topic: "Sud qarori", summary: "PDF yubordi.", facts: { firstFrom: "firm" }, feedback: "wrong", feedbackKind: "existing", feedbackNote: "Biz bilan ishlayotgan mijoz" },
+    { kind: "lead", outcome: "booked", score: 5, topic: "Meros", summary: "Yozildi.", facts: { firstFrom: "them" }, feedback: "right", feedbackKind: null, feedbackNote: "Yaxshi ish" },
+  ];
+  const text = await lessons({ tgReview: { findMany: async () => rows } });
+  const [first, second] = text.split("\n");
+  assert.match(first, /firma birinchi yozgan/);
+  assert.match(first, /AI: lead, open, 2\/5\. Toʻgʻrisi: existing — «Biz bilan ishlayotgan mijoz»/);
+  assert.match(second, /AI toʻgʻri — «Yaxshi ish»/);
+});

@@ -14,6 +14,15 @@ const inbox = require("./tgInbox");
 //     operator did (1-5), what was good, what to do next time, a better reply.
 // Judged by the firm's own rules for operators (Sozlamalar → Mijozlar
 // Telegrami, editable). Shown on the chat and in Natijalar, marked Beta.
+//
+// Three kinds of chat (2026-10-17): a new lead (judged by the sales script),
+// an existing client (the firm already works with or talked to them —
+// documents, updates: summarized, never scored on selling), not relevant
+// (spam, personal: hidden). Ledger tells the AI who wrote first and what it
+// knows of the linked client; a client with a case, a call or a booking from
+// before the chat is surely existing — no guessing. A manager checks each
+// review (Toʻgʻri / Notoʻgʻri, the right kind, a word why); the latest
+// corrections go back to the AI as the firm's own examples.
 // Uses Claude Haiku by default (cheap; tried in voice-lab/review first), on
 // the firm's Claude key, its monthly cap and the "tgReview" switch.
 //
@@ -40,7 +49,10 @@ const DEFAULT_RULES = [
 // forced "review" tool; the bigger models answer that with an error.
 const MODELS = ["claude-haiku-5-5"];
 const REVIEW_DEFAULTS = { rules: "", reviewModel: MODELS[0] };
-const OUTCOMES = ["booked", "lost_by_us", "lost_not_serious", "lost_other", "open", "not_client"];
+const OUTCOMES = ["booked", "lost_by_us", "lost_not_serious", "lost_other", "open", "existing", "not_client"];
+const KINDS = ["lead", "existing", "not_relevant"];
+// The firm's corrections shown to the AI with every review.
+const LESSONS = 20;
 const POTENTIALS = ["high", "medium", "low", "none"];
 
 // Quiet this long before a review (the conversation has paused).
@@ -53,19 +65,20 @@ const MAX_MESSAGES = 150;
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["relevant", "topic", "outcome", "potential", "score", "summary", "lossReason", "good", "improve", "betterReply"],
+  required: ["kind", "topic", "outcome", "potential", "score", "summary", "lossReason", "good", "improve", "betterReply"],
   properties: {
-    relevant: {
-      type: "boolean",
+    kind: {
+      type: "string",
+      enum: KINDS,
       description:
-        "Is this a person with a legal matter the firm could help with (a possible or current client)? false for spam, ads, a wrong number, a job seeker, a supplier, a personal chat. Someone who only greeted a law firm counts as true",
+        "lead = someone new asking for legal help (a possible client); existing = someone the firm already works with or already talked to (sending documents, asking about their case, the firm asked them for something); not_relevant = spam, ads, a wrong number, a job seeker, a supplier, a personal chat. Someone who only greeted a law firm is a lead",
     },
     topic: { type: "string", description: "The legal area in a few Uzbek words («Oila — ajrashish», «Meros», «Mehnat nizosi»), or what it is if not relevant («Reklama», «Ish soʻrab»)" },
     outcome: {
       type: "string",
       enum: OUTCOMES,
       description:
-        "booked = konsultatsiyaga yozildi; lost_by_us = operator tufayli yoʻqotildi; lost_not_serious = niyati jiddiy emas edi; lost_other = boshqa sabab, operator yaxshi ishlagan; open = hali hal boʻlmagan; not_client = mijoz emas",
+        "booked = konsultatsiyaga yozildi; lost_by_us = operator tufayli yoʻqotildi; lost_not_serious = niyati jiddiy emas edi; lost_other = boshqa sabab, operator yaxshi ishlagan; open = hali hal boʻlmagan; existing = mavjud mijoz bilan ish yuzasidan yozishma; not_client = firma ishiga aloqasi yoʻq",
     },
     potential: { type: "string", enum: POTENTIALS, description: "How likely this person was to become a client at the start" },
     score: { type: "integer", minimum: 0, maximum: 5, description: "The operator's handling, 1-5 (0 = nothing to judge)" },
@@ -77,13 +90,18 @@ const SCHEMA = {
   },
 };
 
-const SYSTEM = (rules) => `You review a law firm operator's Telegram conversation with a person who wrote to the firm, the way a kind senior colleague coaches a junior one.
+const SYSTEM = (rules, lessons) => `You review a law firm operator's Telegram conversation, the way a kind senior colleague coaches a junior one.
 
-The firm and its rules for operators:
+The firm and its rules for operators (for talking to NEW people):
 ${rules}
 
-Decide:
-- Is this chat about the firm's work at all — a person with a legal matter (a possible client), or not (spam, ads, a wrong number, a job seeker, a personal chat)? Someone who only greeted a law firm and hasn't said more yet still counts as relevant.
+First decide what kind of chat it is ("kind"):
+- lead: someone new asking for legal help — a possible client. Only these are judged by the rules above.
+- existing: someone the firm already works with or already talked to — on the phone or before: sending documents, asking about their case or a hearing, the firm asking them for something. The firm writing first is a strong sign of this (the operator follows up on a call or a case), unless the chat clearly shows a new request. Here the sales rules don't apply: don't expect a greeting script, questions about the problem or an offer of a consultation.
+- not_relevant: spam, ads, a wrong number, a job seeker, a supplier, a personal chat.
+Ledger's facts about the chat come before it (who wrote first, the client it's linked to). When they say it is surely an existing client, it is.
+
+For a lead decide:
 - Did the person become a client (booked a consultation)? If not, why: the operator's fault (slow, too short, unclear, wrong language, no concrete time offered, gave a legal conclusion, didn't follow the rules above), the person wasn't serious (just asking, no real intention), or something else (price, distance) while the operator did fine. If the conversation is still going, "open".
 - How promising the person was at the start.
 - Score the operator's handling 1-5 (0 if there is nothing to judge).
@@ -91,8 +109,12 @@ Be fair: answering a late-night message the next morning in working hours is fin
 
 Advice only where it's earned:
 - "improve" and "betterReply" are for real mistakes against the rules above. If the operator did well (score 4-5), leave "betterReply" empty and "improve" empty (or one small tip). Never suggest a reply that isn't clearly better than what the operator actually wrote.
-- If the chat isn't about the firm's work (relevant = false): score 0, and leave "good", "improve", "betterReply" and "lossReason" empty.
-
+- existing: outcome "existing", score 0, potential "none"; the summary says what they sent or need and whether something is still to be done for them; leave "good", "improve", "betterReply" and "lossReason" empty.
+- not_relevant: outcome "not_client", score 0; leave "good", "improve", "betterReply" and "lossReason" empty.
+${lessons ? `
+The firm checked earlier reviews and corrected these — learn from them and judge alike:
+${lessons}
+` : ""}
 Write every text in Uzbek (Latin script, with oʻ and gʻ), short and plain, speaking to the operator as "siz".
 
 Record the review with the review tool.`;
@@ -159,23 +181,126 @@ function transcript(messages) {
     .join("\n");
 }
 
-// Whatever came back, the same shape.
-function clean(r) {
+// The kind the AI gave (or, from an older answer, its relevant yes/no).
+function kindOf(r) {
+  if (KINDS.includes(r.kind)) return r.kind;
+  if (r.relevant === false || r.relevant === "false") return "not_relevant";
+  return "lead";
+}
+
+// Whatever came back, the same shape. `facts.knownExisting`: Ledger knows
+// it's an existing client — that decides the kind.
+function clean(r, facts = {}) {
   const list = (x) => (Array.isArray(x) ? x.map((v) => String(v).trim()).filter(Boolean).slice(0, 3) : x ? [String(x).trim()] : []);
   const text = (x, max = 2000) => (x == null ? "" : String(x).trim().slice(0, max));
-  const relevant = r.relevant === true || r.relevant === "true";
-  return {
-    relevant,
+  const kind = facts.knownExisting ? "existing" : kindOf(r);
+  const base = {
+    kind,
+    relevant: kind !== "not_relevant",
     topic: text(r.topic, 80) || null,
-    outcome: OUTCOMES.includes(r.outcome) ? r.outcome : relevant ? "open" : "not_client",
+    summary: text(r.summary) || null,
+  };
+  // Not a sale: no score, no selling advice.
+  if (kind === "existing") return { ...base, outcome: "existing", potential: null, score: 0, lossReason: null, good: [], improve: [], betterReply: null };
+  if (kind === "not_relevant") return { ...base, outcome: "not_client", potential: null, score: 0, lossReason: null, good: [], improve: [], betterReply: null };
+  const outcome = OUTCOMES.includes(r.outcome) && !["existing", "not_client"].includes(r.outcome) ? r.outcome : "open";
+  return {
+    ...base,
+    outcome,
     potential: POTENTIALS.includes(r.potential) ? r.potential : null,
     score: Math.max(0, Math.min(5, Math.round(Number(r.score) || 0))),
-    summary: text(r.summary) || null,
     lossReason: text(r.lossReason) || null,
     good: list(r.good),
     improve: list(r.improve),
     betterReply: text(r.betterReply) || null,
   };
+}
+
+// What Ledger knows about the chat before the AI reads it: who wrote first,
+// and the linked client — their cases, and calls and bookings from before
+// the chat began (then they surely are an existing client).
+async function chatFacts(chat, db = prisma) {
+  const first = await db.tgMessage.findFirst({ where: { chatId: chat.id, auto: false }, orderBy: [{ sentAt: "asc" }, { id: "asc" }], select: { out: true, sentAt: true } });
+  const facts = { firstFrom: first ? (first.out ? "firm" : "them") : null, linked: Boolean(chat.clientId) };
+  if (!chat.clientId || !first) return { ...facts, knownExisting: false };
+  const client = await db.client.findUnique({
+    where: { id: chat.clientId },
+    select: { cases: { select: { status: true, createdAt: true } }, phones: { select: { phoneKey: true } } },
+  });
+  const before = first.sentAt;
+  const keys = (client?.phones || []).map((p) => p.phoneKey).filter(Boolean);
+  const [callsBefore, bookingsBefore] = await Promise.all([
+    keys.length ? db.callLog.count({ where: { phoneKey: { in: keys }, missed: false, durationSeconds: { gt: 0 }, callTimestampMs: { lt: BigInt(before.getTime()) } } }) : 0,
+    db.appointment.count({ where: { clientId: chat.clientId, status: { not: "cancelled" }, createdAt: { lt: before } } }),
+  ]);
+  const casesBefore = (client?.cases || []).filter((k) => k.createdAt < before).length;
+  return {
+    ...facts,
+    caseStatuses: [...new Set((client?.cases || []).map((k) => k.status))],
+    casesBefore,
+    callsBefore,
+    bookingsBefore,
+    knownExisting: casesBefore > 0 || callsBefore > 0 || bookingsBefore > 0,
+  };
+}
+
+// The facts, as the AI reads them.
+function factsText(f) {
+  const lines = [];
+  if (f.firstFrom) lines.push(`- Birinchi xabarni ${f.firstFrom === "firm" ? "FIRMA (operator) yozgan" : "MIJOZ yozgan"}.`);
+  if (!f.linked) lines.push("- Yozishma Ledgerdagi mijozga bogʻlanmagan (raqami nomaʼlum).");
+  else {
+    lines.push(`- Yozishma Ledgerdagi mijozga bogʻlangan. Ishlari: ${f.caseStatuses?.length ? f.caseStatuses.join(", ") : "yoʻq"}.`);
+    lines.push(`- Bu yozishmadan oldin: ishlar ${f.casesBefore}, firma bilan qoʻngʻiroqlar ${f.callsBefore}, konsultatsiyaga yozilishlar ${f.bookingsBefore}.`);
+    if (f.knownExisting) lines.push("- Demak, bu ANIQ MAVJUD MIJOZ (kind = existing).");
+  }
+  return lines.join("\n");
+}
+
+// The firm's latest checks of reviews, for the AI to learn from: every
+// correction, and agreements that came with a word.
+async function lessons(db = prisma) {
+  const rows = await db.tgReview.findMany({
+    where: { OR: [{ feedback: "wrong" }, { feedback: "right", feedbackNote: { not: null } }] },
+    orderBy: { feedbackAt: "desc" },
+    take: LESSONS,
+    select: { kind: true, outcome: true, score: true, topic: true, summary: true, facts: true, feedback: true, feedbackKind: true, feedbackNote: true },
+  });
+  return rows
+    .map((r) => {
+      const first = r.facts?.firstFrom === "firm" ? "firma birinchi yozgan" : r.facts?.firstFrom === "them" ? "mijoz birinchi yozgan" : null;
+      const ai = `AI: ${r.kind}${r.kind === "lead" ? `, ${r.outcome}, ${r.score}/5` : ""}`;
+      const right = r.feedback === "wrong" ? `Toʻgʻrisi: ${r.feedbackKind || r.kind}` : "AI toʻgʻri";
+      const note = r.feedbackNote ? ` — «${r.feedbackNote}»` : "";
+      return `- «${r.topic || "?"}»${first ? ` (${first})` : ""}: ${r.summary || ""} ${ai}. ${right}${note}`.replace(/\s+/g, " ").trim();
+    })
+    .join("\n");
+}
+
+// The kind that counts: a manager's correction over the AI's.
+const effectiveKind = (r) => (r.feedback === "wrong" && KINDS.includes(r.feedbackKind) ? r.feedbackKind : r.kind || (r.relevant === false ? "not_relevant" : "lead"));
+
+// A manager checks a review: "right", "wrong" (with the right kind and a
+// word), or null to take the check back. A chat set not relevant leaves the
+// list; set back to a lead or a client (or the check taken back), it returns.
+async function setFeedback(reviewId, user, { verdict, kind, note }, db = prisma) {
+  const review = await db.tgReview.findUnique({ where: { id: reviewId }, include: { chat: { select: { id: true, hidden: true, aiHidden: true, clientId: true } } } });
+  if (!review) return null;
+  const data =
+    verdict == null
+      ? { feedback: null, feedbackKind: null, feedbackNote: null, feedbackById: null, feedbackAt: null }
+      : { feedback: verdict, feedbackKind: verdict === "wrong" ? kind : null, feedbackNote: note || null, feedbackById: user.id, feedbackAt: new Date() };
+  const updated = await db.tgReview.update({ where: { id: reviewId }, data });
+  const latest = await db.tgReview.findFirst({ where: { chatId: review.chatId }, orderBy: { id: "desc" }, select: { id: true } });
+  if (latest?.id === reviewId) {
+    const now = effectiveKind(updated);
+    // Hidden as the AI would (it comes back if they write again, or if the
+    // check is changed).
+    if (now === "not_relevant" && !review.chat.hidden && !review.chat.clientId) await db.tgChat.update({ where: { id: review.chatId }, data: { hidden: true, aiHidden: true } });
+    if (now !== "not_relevant" && review.chat.aiHidden) await db.tgChat.update({ where: { id: review.chatId }, data: { hidden: false, aiHidden: false } });
+    inbox.bumpInbox();
+  }
+  return updated;
 }
 
 // Review one chat now. -> the TgReview row, or null when there's nothing to read.
@@ -196,12 +321,13 @@ async function reviewChat(chatId) {
     return null;
   }
   const { rules, reviewModel } = await reviewSettings();
+  const [facts, learned] = await Promise.all([chatFacts(chat), lessons()]);
   const response = await claude.create(
     {
       model: reviewModel,
       max_tokens: 2000,
-      system: SYSTEM(rules),
-      messages: [{ role: "user", content: `Telegram yozishmasi (${inbox.displayName(chat)}):\n\n${transcript(messages)}` }],
+      system: SYSTEM(rules, learned),
+      messages: [{ role: "user", content: `Ledger maʼlumoti:\n${factsText(facts)}\n\nTelegram yozishmasi (${inbox.displayName(chat)}):\n\n${transcript(messages)}` }],
       tools: [{ name: "review", description: "Record the review of this conversation.", input_schema: SCHEMA }],
       tool_choice: { type: "tool", name: "review" },
     },
@@ -213,7 +339,7 @@ async function reviewChat(chatId) {
     await prisma.tgChat.update({ where: { id: chatId }, data: { reviewedAt } });
     return null;
   }
-  const r = clean(used.input);
+  const r = clean(used.input, facts);
   const lastOut = [...messages].reverse().find((m) => m.out && !m.auto && m.answeredById);
   const operatorId = lastOut?.answeredById ?? (await answeringNow());
   const review = await prisma.tgReview.create({
@@ -222,6 +348,7 @@ async function reviewChat(chatId) {
       operatorId,
       upToMessageId: messages[messages.length - 1].id,
       ...r,
+      facts,
       model: response.model || reviewModel,
       costUsd: claude.costOf(response.model || reviewModel, response.usage),
     },
@@ -231,9 +358,9 @@ async function reviewChat(chatId) {
   // unless a person already brought it back after the AI hid it before, or
   // the answer was cut short (then it can't be trusted to hide anything).
   const data = { reviewedAt, ...(r.topic ? { topic: r.topic } : {}) };
-  const surelyNot = used.input.relevant === false && response.stop_reason !== "max_tokens";
+  const surelyNot = r.kind === "not_relevant" && response.stop_reason !== "max_tokens";
   if (surelyNot && !chat.clientId && !chat.hidden) {
-    const hiddenBefore = await prisma.tgReview.count({ where: { chatId, relevant: false, id: { not: review.id } } });
+    const hiddenBefore = await prisma.tgReview.count({ where: { chatId, kind: "not_relevant", id: { not: review.id } } });
     if (!hiddenBefore) Object.assign(data, { hidden: true, aiHidden: true });
   }
   // The AI hid it, but now it is about the firm's work: back in the list.
@@ -295,10 +422,19 @@ const failures = new Map();
 
 function reviewLine(r) {
   if (!r) return null;
+  const kind = effectiveKind(r);
   return {
     id: r.id,
     at: r.createdAt,
-    relevant: r.relevant,
+    // The kind that counts (a manager's correction wins) and the AI's own.
+    kind,
+    aiKind: r.kind || (r.relevant === false ? "not_relevant" : "lead"),
+    relevant: kind !== "not_relevant",
+    firstFrom: r.facts?.firstFrom ?? null,
+    knownExisting: Boolean(r.facts?.knownExisting),
+    feedback: r.feedback
+      ? { verdict: r.feedback, kind: r.feedbackKind, note: r.feedbackNote, at: r.feedbackAt, by: r.feedbackBy ? r.feedbackBy.employee?.name || r.feedbackBy.name || r.feedbackBy.username : null }
+      : null,
     topic: r.topic,
     outcome: r.outcome,
     potential: r.potential,
@@ -313,4 +449,4 @@ function reviewLine(r) {
   };
 }
 
-module.exports = { DEFAULT_RULES, MODELS, OUTCOMES, SCHEMA, reviewSettings, transcript, words, clean, reviewChat, tick, reviewLine, QUIET_MS };
+module.exports = { DEFAULT_RULES, MODELS, OUTCOMES, KINDS, SCHEMA, reviewSettings, transcript, words, clean, chatFacts, factsText, lessons, effectiveKind, setFeedback, reviewChat, tick, reviewLine, QUIET_MS };

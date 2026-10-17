@@ -43,6 +43,20 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### Follow-up (2026-10-17, later): the Telegram AI review learns from the firm
+
+- Three kinds of chat (`TgReview.kind`): new lead (judged by the sales
+  script), existing client (summarized, no score, never hidden), not
+  relevant (hidden). Ledger tells the AI who wrote first and what it knows
+  of the linked client (`TgReview.facts`); a client with a case, a call or a
+  booking from before the chat is an existing client without asking the AI.
+- Managers check each review: `PUT /api/tg-inbox/reviews/:id/feedback`
+  ({ verdict: right|wrong|null, kind, note }). Natijalar counts new leads
+  only, by the corrected kind. The latest 20 corrections go to the AI as
+  examples on every review.
+- Migration `20261017120000_tg_review_feedback`: added columns only (and
+  older "not relevant" reviews get kind `not_relevant`).
+
 ### Follow-up (2026-10-17): «Mijozlar Telegrami» only for the people who answer
 
 - The section, new people's chats and the AI's feedback on each chat:
