@@ -90,12 +90,14 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       if (r.kind === "transfer") transfers.push({ ext: r.ext, employeeId: r.employeeId, fromEmployeeId: holder, answered: r.status === "ANSWER", status: r.status, talkSec: r.talkSec });
       if (r.status === "ANSWER" && r.employeeId) holder = r.employeeId;
     }
+    // Their talk in all: a call passed on can come back to them.
+    const talk = rang.filter((r) => r.status === "ANSWER" && r.employeeId === answer.employeeId).reduce((sum, r) => sum + r.talkSec, 0);
     return {
       ...base,
       employeeId: answer.employeeId,
       callType: "incoming",
       missed: false,
-      durationSeconds: answer.talkSec,
+      durationSeconds: talk,
       answered: true,
       detail: { rang, owner: "answered", status: call.status || null, ...(transfers.length ? { transfers } : {}) },
     };

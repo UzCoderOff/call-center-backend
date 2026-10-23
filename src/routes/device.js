@@ -154,8 +154,13 @@ router.get("/caller", requireDevice, async (req, res, next) => {
 //   POST /transfer { employeeId }  moves this phone's client call to them
 router.get("/transfer", requireDevice, async (req, res, next) => {
   try {
-    const { transferTargets } = require("../services/pbx/transfer");
-    res.json(await transferTargets(req.user, { number: String(req.query.number || "").slice(0, 40), q: req.query.q }));
+    const { transferTargets, TransferError } = require("../services/pbx/transfer");
+    try {
+      res.json(await transferTargets(req.user, { number: String(req.query.number || "").slice(0, 40), q: req.query.q }));
+    } catch (err) {
+      if (err instanceof TransferError) return res.status(err.status).json({ error: err.code });
+      throw err;
+    }
   } catch (err) {
     next(err);
   }

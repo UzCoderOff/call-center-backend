@@ -177,6 +177,8 @@ const phoneTail = (phone) => {
 //   number  the other side of the call: the people who work on that client
 //   q       a client's name or number (3+ letters), or a colleague's name
 async function transferTargets(user, { number, q } = {}) {
+  // Only for people on the line: they're the ones with calls to pass on.
+  if (!(await extensionOf(user.employee?.id)) || !user.employee?.pbxCalling) throw new TransferError("no_phone_id", 403);
   const status = await reachability();
   const all = await colleagues(user, status);
   const byEmployee = new Map(all.map((c) => [c.employeeId, c]));

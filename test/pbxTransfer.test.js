@@ -100,6 +100,19 @@ test("a call passed on stays the answering operator's, with whom it went to", ()
   ]);
 });
 
+test("a call that came back to the operator counts all their talk", () => {
+  const call = parseEvt("dir=in&num=998901234567&start=1000&end=1200");
+  const rings = [
+    parseEvt("ext=203&rs=1001&status=ANSWER&talk=18&kind=queue"),
+    parseEvt("ext=206&rs=1020&status=NOANSWER&talk=0&kind=transfer"),
+    parseEvt("ext=203&rs=1050&status=ANSWER&talk=43&kind=transfer_back"),
+  ];
+  const s = summarizeCall(call, rings, ctx);
+  assert.equal(s.employeeId, 11);
+  assert.equal(s.durationSeconds, 61);
+  assert.equal(s.detail.transfers.length, 1);
+});
+
 test("an ordinary call has no transfers on it", () => {
   const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1060"), [parseEvt("ext=203&rs=1001&status=ANSWER&talk=50&kind=queue")], ctx);
   assert.equal(s.detail.transfers, undefined);
