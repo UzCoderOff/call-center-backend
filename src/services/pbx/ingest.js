@@ -76,10 +76,20 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       status: r.status || "",
       waitedSec: Number(r.waited) || 0,
       talkSec: Number(r.talk) || 0,
+      kind: r.kind || null,
     }));
   const queueWaitSec = Math.max(0, (Number(call.end) || start) - start);
   const answer = rang.find((r) => r.status === "ANSWER" && r.employeeId);
   if (answer) {
+    // Passed on to colleagues ([ledger-transfer]): the call stays the
+    // operator's who answered it; whom it went to — and from whom, the last
+    // person who had answered before — is kept with it.
+    const transfers = [];
+    let holder = null;
+    for (const r of rang) {
+      if (r.kind === "transfer") transfers.push({ ext: r.ext, employeeId: r.employeeId, fromEmployeeId: holder, answered: r.status === "ANSWER", status: r.status, talkSec: r.talkSec });
+      if (r.status === "ANSWER" && r.employeeId) holder = r.employeeId;
+    }
     return {
       ...base,
       employeeId: answer.employeeId,
@@ -87,7 +97,7 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       missed: false,
       durationSeconds: answer.talkSec,
       answered: true,
-      detail: { rang, owner: "answered", status: call.status || null },
+      detail: { rang, owner: "answered", status: call.status || null, ...(transfers.length ? { transfers } : {}) },
     };
   }
   // Missed: the operator whose turn it was (rung first) owns it — their
@@ -161,6 +171,49 @@ async function saveRecording(rec, { employeeId, callTimestampMs, callId, answere
   return { recordingPath: relative, recordingFilename: name };
 }
 
+// The names on a call's transfers (the portal shows "Aziza'ga ulandi").
+async function nameTransfers(transfers) {
+  const ids = [...new Set(transfers.flatMap((t) => [t.employeeId, t.fromEmployeeId]).filter(Boolean))];
+  const names = new Map((await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
+  for (const t of transfers) {
+    t.name = names.get(t.employeeId) || null;
+    t.fromName = names.get(t.fromEmployeeId) || null;
+  }
+}
+
+// A colleague a client's call was passed to who didn't answer it (and didn't
+// get it on another try): a reminder, now, to call the client back — so the
+// client never has to call again.
+async function remindUnanswered(transfers, phone) {
+  const { planOne, REMINDER_INCLUDE } = require("../reminders");
+  const { clientIndexFor } = require("../../lib/clientAccess");
+  const answered = new Set(transfers.filter((t) => t.answered).map((t) => t.employeeId));
+  const done = new Set();
+  for (const t of transfers) {
+    if (t.answered || !t.employeeId || answered.has(t.employeeId) || done.has(t.employeeId)) continue;
+    done.add(t.employeeId);
+    const user = await prisma.user.findFirst({ where: { employee: { id: t.employeeId }, active: true }, include: { employee: true } });
+    if (!user) continue;
+    const from = t.fromEmployeeId ? await prisma.user.findFirst({ where: { employee: { id: t.fromEmployeeId } }, select: { id: true } }) : null;
+    const key = phoneKey(phone);
+    const client = key ? (await clientIndexFor(user, [key])).get(key) : null;
+    const known = client && !client.restricted ? client : null;
+    const row = await prisma.reminder.create({
+      data: {
+        userId: user.id,
+        createdById: from?.id ?? null,
+        title: `Qayta qoʻngʻiroq: ${known?.name || phone}`.slice(0, 200),
+        notes: `${t.fromName || "Hamkasbingiz"} bu mijozning qoʻngʻirogʻini sizga ulagan edi — javob berilmadi. Mijozga qoʻngʻiroq qiling.`,
+        dueAt: new Date(),
+        phone: String(phone).slice(0, 40),
+        clientId: known?.id ?? null,
+      },
+      include: REMINDER_INCLUDE,
+    });
+    planOne(row);
+  }
+}
+
 async function processCall(callId, ringFiles, rotation) {
   const call = readEvt(`${callId}.call.evt`);
   const rings = ringFiles.map(readEvt);
@@ -173,6 +226,10 @@ async function processCall(callId, ringFiles, rotation) {
     if (/^[\w.-]+\.wav$/.test(call.rec || "")) removeQuietly(path.join(env.pbx.monitorDir, call.rec));
     return null;
   }
+
+  const transfers = summary.detail.transfers || [];
+  if (transfers.length) await nameTransfers(transfers);
+  const isNew = !(await prisma.callLog.findUnique({ where: { pbxCallId: callId }, select: { id: true } }));
 
   const recording = await saveRecording(call.rec, { ...summary, callId });
   const key = phoneKey(summary.phoneNumber);
@@ -201,6 +258,14 @@ async function processCall(callId, ringFiles, rotation) {
       await reconcileFollowUps([key]);
     } catch (err) {
       console.error("[pbx] follow-up reconciliation failed:", err.message);
+    }
+  }
+  // Once per call (not again when it's taken in a second time).
+  if (isNew && summary.phoneNumber) {
+    try {
+      await remindUnanswered(transfers, summary.phoneNumber);
+    } catch (err) {
+      console.error("[pbx] transfer reminders failed:", err.message);
     }
   }
   events.emit("calls.synced", { employeeId: summary.employeeId, callIds: [row.id], recordingCallIds: recording.recordingPath ? [row.id] : [] });

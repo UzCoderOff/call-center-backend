@@ -40,6 +40,18 @@ Ledger app (TLS + SRTP) ◄──────────────── [rin
 - **A missed client call** belongs to the operator whose turn it was (rung
   first). If nobody could be rung, it goes to the call-center staff in turn
   (`summarizeCall` in `ingest.js`).
+- **Passing a call on ("Ulash" on the call screen):** an operator can hand a
+  client's call to a colleague, usually the client's coordinator
+  (`src/services/pbx/transfer.js`, `[ledger-transfer]` in `extensions.conf`).
+  - The client stays on the line and hears music while the colleague's
+    phone rings.
+  - If nobody answers in 30 s, it rings the operator again. If they don't
+    answer either, it goes back in line for the call center.
+  - A colleague who didn't answer gets a reminder to call the client back.
+  - In Ledger it stays one call, the operator's, with whom it went to
+    (`pbxDetail.transfers`) and one recording.
+  - To find whom to pass it to, operators see only who works on a client:
+    names and jobs, no case details.
 
 ## The pieces
 
@@ -110,18 +122,26 @@ database. If it's lost, every phone simply signs in again.
 
 ## The outside line (SkyLine)
 
-When the operator delivers it:
+The company number is **+998 78 113-90-01** (contract SIP-26-231, 5 lines).
+SkyLine connects us **by our address** (82.115.51.61), with no login. Their
+calls must come to **5160/udp**: tell them that port if they ask.
 
-1. Write `/etc/asterisk/pjsip_trunk.conf` with an endpoint named `skyline`:
-   - `context=from-trunk`, `allow=alaw`, `dtmf_mode=rfc4733`;
-   - their registration (login/password), or `identify` by their addresses;
-   - the `from_user`/`from_domain` they require.
-2. Reload: `sudo asterisk -rx "module reload res_pjsip.so"`.
-3. Firewall: `sudo ufw allow from <their address> to any port 5160 proto udp`,
-   once for each of their addresses.
-4. Sozlamalar → Telefon liniyasi: the company number, and "outside line
+When they send their settings (their SIP server, and the addresses their
+calls come from):
+
+1. On the server, from the backend:
+   ```bash
+   sudo bash pbx/connect-trunk.sh --host <their server> --port <its port> --ips "<address>,<address>"
+   ```
+   - It writes `/etc/asterisk/pjsip_trunk.conf` from
+     `asterisk/pjsip_trunk.conf.template`: an endpoint `skyline`,
+     `context=from-trunk`, G.711, rfc4733, recognised by their addresses.
+   - It opens 5160/udp to their addresses only, then reloads Asterisk.
+   - `--number` is our number on calls out, `781139001` unless they want
+     another form.
+2. Sozlamalar → Telefon liniyasi: the company number, and "outside line
    connected" on.
-5. Check the number format they want: `TRUNK_PREFIX` in `extensions.conf`
+3. Check the number format they want: `TRUNK_PREFIX` in `extensions.conf`
    ("998" + 9 digits).
 
 Only Uzbek numbers can be dialled out (`[staff-out]`). Anything abroad,

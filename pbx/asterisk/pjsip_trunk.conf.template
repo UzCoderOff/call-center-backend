@@ -1,0 +1,40 @@
+; The outside line (SkyLine): the company number, +998 78 113-90-01.
+; Written to /etc/asterisk/pjsip_trunk.conf by pbx/connect-trunk.sh from this
+; template (pbx/README.md, "The outside line") - edit here, then run it again.
+; pjsip.conf includes it (#tryinclude) on the plain-SIP transport, 5160/udp,
+; which the firewall opens only to SkyLine's addresses.
+;
+; SkyLine connects us by our address (82.115.51.61): no login, no password.
+; Their calls are recognised by the addresses they come from (identify), and
+; can only reach [from-trunk] (extensions.conf).
+
+[skyline]
+type=endpoint
+transport=transport-udp
+context=from-trunk
+disallow=all
+allow=alaw,ulaw
+dtmf_mode=rfc4733
+direct_media=no
+rtp_symmetric=yes
+force_rport=yes
+rewrite_contact=yes
+media_encryption=no
+aors=skyline
+; Our number as they want it in From on calls out.
+from_user=__FROM_USER__
+from_domain=__HOST__
+send_pai=yes
+trust_id_inbound=yes
+; Calls out end if the line drops audio for a minute.
+rtp_timeout=60
+
+[skyline]
+type=aor
+contact=sip:__HOST__:__PORT__
+qualify_frequency=60
+
+[skyline]
+type=identify
+endpoint=skyline
+match=__MATCH__

@@ -20,6 +20,7 @@ const { pbxSettings } = require("../services/pbx/settings");
 //   POST /api/device/logout   device token -> token revoked
 //   POST /api/device/push     { token } this phone's Google push address (app 3.0+)
 //   POST /api/device/sip      this phone's sign-in to Ledger's phone line, shown once
+//   GET/POST /api/device/transfer  pass a client's call on to a colleague
 //
 // Call syncing itself (POST /api/calls/sync) accepts the same device token.
 const router = express.Router();
@@ -142,6 +143,33 @@ router.get("/notices/:id", requireDevice, async (req, res, next) => {
 router.get("/caller", requireDevice, async (req, res, next) => {
   try {
     res.json(await require("../services/pbx/callerCard").callerCard(req.user, String(req.query.number || "").slice(0, 40)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Passing a client's call on to a colleague (services/pbx/transfer.js):
+//   GET  /transfer?number=&q=  whom to: the people who work on that client,
+//                              clients found by name or number, colleagues
+//   POST /transfer { employeeId }  moves this phone's client call to them
+router.get("/transfer", requireDevice, async (req, res, next) => {
+  try {
+    const { transferTargets } = require("../services/pbx/transfer");
+    res.json(await transferTargets(req.user, { number: String(req.query.number || "").slice(0, 40), q: req.query.q }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/transfer", requireDevice, async (req, res, next) => {
+  try {
+    const { transferCall, TransferError } = require("../services/pbx/transfer");
+    try {
+      res.json(await transferCall(req.user, req.body?.employeeId));
+    } catch (err) {
+      if (err instanceof TransferError) return res.status(err.status).json({ error: err.code });
+      throw err;
+    }
   } catch (err) {
     next(err);
   }

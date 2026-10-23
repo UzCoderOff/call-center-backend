@@ -682,8 +682,16 @@ function callSelect() {
     callTimestampMs: true,
     durationSeconds: true,
     recordingPath: true,
+    pbxDetail: true,
     employee: { select: { id: true, name: true, job: true } },
   };
+}
+
+// A call for the client page: whether it has a recording, and — passed on to
+// colleagues on Ledger's line — whom it went to (names only).
+function clientCall({ recordingPath, pbxDetail, ...c }) {
+  const transfers = Array.isArray(pbxDetail?.transfers) ? pbxDetail.transfers.map((x) => ({ name: x.name || null, answered: Boolean(x.answered) })) : undefined;
+  return { ...c, hasRecording: Boolean(recordingPath), ...(transfers?.length ? { pbxDetail: { transfers } } : {}) };
 }
 
 clients.get("/:id", async (req, res, next) => {
@@ -732,7 +740,7 @@ clients.get("/:id", async (req, res, next) => {
         results: client.cases
           .filter((k) => roles.get(k.id) === "result")
           .map((k) => ({ id: k.id, status: k.status, startDate: k.startDate, consultationDate: k.consultationDate, contractDate: k.contractDate, coordinator: k.coordinator?.name ?? null })),
-        calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
+        calls: calls.map(clientCall),
         appointments,
         canManage: false,
       });
@@ -815,7 +823,7 @@ clients.get("/:id", async (req, res, next) => {
             ...linksFrom.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "from", other: shownLink(l.to) })),
             ...linksTo.map((l) => ({ id: l.id, kind: l.kind, label: l.label, direction: "to", other: shownLink(l.from) })),
           ],
-      calls: calls.map(({ recordingPath, ...c }) => ({ ...c, hasRecording: Boolean(recordingPath) })),
+      calls: calls.map(clientCall),
       // A consultation's summary only with its case (someone on another of
       // the client's cases sees that it happened, not what was said).
       appointments: appointments.map((a) => (manager || a.calendar?.ownerId === req.user.id || !a.caseId || visibleIds.has(a.caseId) ? a : { ...a, summary: null })),
