@@ -18,7 +18,7 @@ const { isCallCenter } = require("../lib/jobs");
 // The standard in short — what the AI scores. Editable later in a setting
 // ("callReview".rules); this is the default.
 const DEFAULT_RULES = [
-  "Firma: «Mir Said Baraka Himoya» advokatlik firmasi. Konsultatsiyani firma rahbari, advokat shaxsan oʻtkazadi: ofisda — 600 000 soʻm, videoaloqa orqali — 450 000 soʻm, toʻlov oldindan. Firma mehnat nizolarini olmaydi. Operator yuridik masalani oʻzi hal qilmaydi: maqsad — mijozni eshitish, tushunish va konsultatsiyaga yozish.",
+  "Firma: «Xondamir Azamovich» advokatlik firmasi. Konsultatsiyani firma rahbari — advokat Xondamir Azamovichning oʻzi shaxsan oʻtkazadi: ofisda — 600 000 soʻm, videoaloqa orqali — 450 000 soʻm, toʻlov oldindan. Firma mehnat nizolarini olmaydi. Operator yuridik masalani oʻzi hal qilmaydi: maqsad — mijozni eshitish, tushunish va konsultatsiyaga yozish.",
   "Mezonlar (jami 100 ball):",
   "1. Salomlashish (10): firma nomi, oʻz ismi, mijozning ismini soʻradi va keyin ismi bilan murojaat qildi.",
   "2. Yoʻnaltirish (5): yangi yoki firma bilan ishlayotgan mijozligini aniqladi; ishlayotgan boʻlsa — koordinatoriga uladi, ish haqida oʻzi maʼlumot bermadi.",
