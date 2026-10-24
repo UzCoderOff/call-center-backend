@@ -20,7 +20,7 @@ const { isCallCenter } = require("../lib/jobs");
 const DEFAULT_RULES = [
   "Firma: «Xondamir Azamovich» advokatlik firmasi. Konsultatsiyani firma rahbari — advokat Xondamir Azamovichning oʻzi shaxsan oʻtkazadi: ofisda — 600 000 soʻm, videoaloqa orqali — 450 000 soʻm, toʻlov oldindan. Firma mehnat nizolarini olmaydi. Operator yuridik masalani oʻzi hal qilmaydi: maqsad — mijozni eshitish, tushunish va konsultatsiyaga yozish.",
   "Mezonlar (jami 100 ball):",
-  "1. Salomlashish (10): firma nomi, oʻz ismi, mijozning ismini soʻradi va keyin ismi bilan murojaat qildi.",
+  "1. Salomlashish (10): firma nomi, oʻz ismi, mijozning ismini soʻradi («Sizga qanday murojaat qilsam boʻladi?» — bu ismini soʻrash) va keyin ismi bilan murojaat qildi.",
   "2. Yoʻnaltirish (5): yangi yoki firma bilan ishlayotgan mijozligini aniqladi; ishlayotgan boʻlsa — koordinatoriga uladi, ish haqida oʻzi maʼlumot bermadi.",
   "3. Tinglash (15): mijozni boʻlmadi, mijoz koʻp gapirdi; takrorladi, his-tuygʻuni nomladi («Bu sizni juda xavotirga solgan koʻrinadi»).",
   "4. Aniqlovchi savollar (15): qachon boshlandi, qanday hujjatlar bor, yaqin sana (sud, tergov, muddat) bormi, avval biror chora koʻrdimi, qanday natija kutadi, qarorni yana kim qiladi — bittadan.",
@@ -32,6 +32,7 @@ const DEFAULT_RULES = [
   "Qoʻpol xato — har biri −20 ball: yuridik maslahat yoki xulosa berdi; natija vaʼda qildi yoki foizda imkoniyat aytdi; oʻylab topilgan chegirma yoki muddat ishlatdi; mijozga qoʻpollik qildi; ishlayotgan mijozga uning ishi haqida maʼlumot berdi.",
   "Eʼtirozlar (qimmat, oʻylab koʻraman, oilam bilan maslahatlashaman, vaqtim yoʻq…): tan olish → asl sababni aniqlash → qiymatni koʻrsatish → tanlov bilan savol; bir eʼtirozga ikki martadan ortiq urinmaslik, bosim oʻtkazmaslik.",
   "Mijoz qaysi tilda gapirsa, operator oʻsha tilda gapiradi.",
+  "Narxlar: 450 000 soʻm (videoaloqa) va 600 000 soʻm (ofis) — ikkalasi ham firmaning haqiqiy narxi. Faqat bittasini aytish xato emas (formatni ham aytsa yaxshiroq). Avtomatik matnda raqamlar buzilishi mumkin: «tort yuz ellik ming son» = 450 000 soʻm.",
 ].join("\n");
 
 const MODELS = ["claude-haiku-5-5"];
@@ -49,6 +50,16 @@ const LABELS = {
   manner: "Ovoz va odob",
 };
 const KINDS = ["lead", "existing", "not_relevant"];
+// The gross errors of the standard (−20 each) — only these count.
+const GROSS = ["legal_advice", "promised_result", "made_up_deadline_or_discount", "rude", "case_info_to_existing_client"];
+const GROSS_LABELS = {
+  legal_advice: "Yuridik maslahat yoki xulosa berdi",
+  promised_result: "Natija vaʼda qildi yoki foizda imkoniyat aytdi",
+  made_up_deadline_or_discount: "Oʻylab topilgan muddat yoki chegirma ishlatdi",
+  // (the firm's own prices, 450 000 and 600 000, are never this)
+  rude: "Mijozga qoʻpollik qildi",
+  case_info_to_existing_client: "Ishlayotgan mijozga uning ishi haqida maʼlumot berdi",
+};
 const OUTCOMES = ["booked", "not_booked", "existing", "not_client"];
 // Calls shorter than this aren't reviewed (a wrong number, "call me later").
 const MIN_TALK_SEC = 20;
@@ -79,7 +90,25 @@ const SCHEMA = {
         properties: { key: { type: "string", enum: CRITERIA }, points: { type: "integer", minimum: 0, maximum: 15 }, note: { type: "string" } },
       },
     },
-    grossErrors: { type: "array", items: { type: "string" }, maxItems: 5, description: "Each gross error from the rules that really happened, in a few Uzbek words (−20 each). Empty when none" },
+    grossErrors: {
+      type: "array",
+      maxItems: 5,
+      description: "Only gross errors that really happened in this call (−20 each), each with the operator's words that show it. An empty list when there were none — never list an absence",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["key", "quote"],
+        properties: {
+          key: {
+            type: "string",
+            enum: GROSS,
+            description:
+              "legal_advice = the operator says what the law says or what the client should do legally or will get («borishingiz shart emas», «sizga 3 yil beriladi», «prokuraturaga ariza yozing»); recommending to see the firm's lawyer or a consultation is NOT this — it is the operator's job. promised_result = «yutamiz», «100 foiz», «pulingizni qaytaramiz». made_up_deadline_or_discount = a discount or deadline that isn't real («faqat bugun 50% chegirma»); the firm's own prices, 450 000 and 600 000 soʻm, are never this. rude = insulting, mocking or shouting at the client. case_info_to_existing_client = telling a client in work about their case instead of passing them to their coordinator",
+          },
+          quote: { type: "string", description: "What the operator said" },
+        },
+      },
+    },
     good: { type: "array", items: { type: "string" }, maxItems: 3, description: "What the operator did well (Uzbek)" },
     improve: { type: "array", items: { type: "string" }, maxItems: 3, description: "The most important things to do better next time (Uzbek) — only real gaps" },
     betterLines: {
@@ -102,7 +131,7 @@ Decide the kind of call first:
 - lead: a new person with a legal question — judge all nine criteria by the standard.
 - existing: someone the firm already works with — they aren't sold to: give full points for criteria that don't apply (listening and questions still count as relevant to helping them; "routing" is whether the operator connected them to their coordinator instead of discussing the case).
 - not_relevant: a wrong number, an ad, a personal call — full points for criteria that don't apply; judge only greeting and manner.
-Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they really happened.
+Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they clearly happened, quoting the operator; when in doubt, it is not a gross error — leave the list empty. Recommending a consultation with the firm's lawyer is the operator's job, never "legal advice". Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
 Advice only where it's earned: "improve" and "betterLines" are for real gaps; never suggest a line that isn't clearly better than what was said. Quote "said" from the transcript.
 Don't decide what should happen with the client next, and don't give legal opinions yourself.${lessons ? `
 
@@ -136,7 +165,10 @@ function clean(r) {
     return { key, points: Math.max(0, Math.min(MAX[key], Math.round(Number(c.points) || 0))), max: MAX[key], note: String(c.note || "").slice(0, 400) };
   });
   const list = (v, n) => (Array.isArray(v) ? v : []).map((x) => String(x || "").trim()).filter(Boolean).slice(0, n);
-  const grossErrors = list(r?.grossErrors, 5);
+  const seen = new Set();
+  const grossErrors = (Array.isArray(r?.grossErrors) ? r.grossErrors : [])
+    .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
+    .map((g) => `${GROSS_LABELS[g.key]}: «${String(g.quote).trim().slice(0, 200)}»`);
   const sum = criteria.reduce((s, c) => s + c.points, 0);
   return {
     kind: KINDS.includes(r?.kind) ? r.kind : "lead",
@@ -265,4 +297,4 @@ async function setFeedback(callLogId, user, { correct, note }) {
   });
 }
 
-module.exports = { DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, reviewSettings, transcriptText, clean, reviewable, reviewCall, tick, setFeedback, lessons };
+module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, reviewSettings, transcriptText, clean, reviewable, reviewCall, tick, setFeedback, lessons };

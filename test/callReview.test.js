@@ -20,7 +20,7 @@ test("the review's points stay within each criterion and the total is out of 100
       { key: "closing", points: 9, note: "" },
       { key: "manner", points: 9.6, note: "" },
     ],
-    grossErrors: ["Natija vaʼda qildi"],
+    grossErrors: [{ key: "promised_result", quote: "100 foiz yutamiz" }, { key: "promised_result", quote: "again" }, { key: "made_up", quote: "x" }, { key: "rude", quote: "" }],
     good: ["Ismi bilan murojaat qildi", "", "Ikki vaqt taklif qildi", "extra", "more"],
     improve: [],
     betterLines: [{ said: "Qachon qulay?", better: "Ertaga 11:00 yoki payshanba 16:00?" }, { said: "", better: "x" }],
@@ -37,7 +37,8 @@ test("the review's points stay within each criterion and the total is out of 100
   assert.equal(r.score, 49);
   assert.deepEqual(r.good, ["Ismi bilan murojaat qildi", "Ikki vaqt taklif qildi", "extra"]);
   assert.equal(r.betterLines.length, 1);
-  assert.equal(clean({ grossErrors: ["a", "b", "c", "d", "e"] }).score, 0);
+  assert.deepEqual(r.grossErrors, ["Natija vaʼda qildi yoki foizda imkoniyat aytdi: «100 foiz yutamiz»"]);
+  assert.equal(clean({ grossErrors: ["Qoʻpol xato yoʻq"] }).grossErrors.length, 0);
   assert.equal(Object.values(MAX).reduce((a, b) => a + b, 0), 100);
 });
 
