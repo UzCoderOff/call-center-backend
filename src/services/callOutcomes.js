@@ -1,6 +1,6 @@
 const prisma = require("../lib/prisma");
 const { phoneKey: keyOf } = require("../lib/phone");
-const { firmNow, firmDayRange } = require("../lib/firmTime");
+const { firmNow, firmDayRange, firmDate, isValidDate, shiftDate } = require("../lib/firmTime");
 const { getSetting, setSetting } = require("../lib/settings");
 const { isCallCenter, jobWhere } = require("../lib/jobs");
 
@@ -23,8 +23,37 @@ const { isCallCenter, jobWhere } = require("../lib/jobs");
 // went (a case moved on from "consultation"). Only the call center's phones
 // are asked, and only from the day this was switched on (Setting
 // "callOutcomes".since) and the last 7 days — older calls are no backlog.
+//
+// Who the caller belongs to after that (the firm's rule, 2026-10-24):
+//   thinking   "Oʻylab koʻradi" (call_again) with the day to talk again: the
+//              operator gets a reminder that day, and until two days after
+//              it the caller's calls ring that operator first (ownerFor,
+//              services/pbx/route.js). Not booked by then: lost.
+//   lost       the price, only a question, another firm, something else:
+//              after SECOND_DAYS a DIFFERENT operator, the next in turn, gets
+//              an «Ikkinchi imkoniyat» task with what happened the first
+//              time; from then on the caller rings them first (secondChances).
+//   not ours   a wrong number, not the firm's field: nothing more.
 
 const OUTCOMES = ["price", "question", "other_firm", "call_again", "wrong_number", "not_our_field", "other"];
+const GROUPS = { thinking: ["call_again"], lost: ["price", "question", "other_firm", "other"], notOurs: ["wrong_number", "not_our_field"] };
+const LABELS = {
+  price: "Narx qimmat",
+  question: "Faqat savol berdi",
+  other_firm: "Boshqa joyga ketdi",
+  call_again: "Oʻylab koʻradi",
+  wrong_number: "Notoʻgʻri raqam",
+  not_our_field: "Bizning yoʻnalish emas",
+  other: "Boshqa",
+};
+// A thinking caller stays the operator's this many days past their day.
+const THINKING_GRACE_DAYS = 2;
+// The furthest "talk again" day an operator can set.
+const MAX_FOLLOW_UP_DAYS = 30;
+// A second-chance operator stays the caller's first ring this long.
+const SECOND_OWN_DAYS = 30;
+const SECOND_SETTING = "secondChance";
+const SECOND_DEFAULT = { days: 3 };
 const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const SETTING = "callOutcomes";
 const connected = (c) => !c.missed && c.durationSeconds > 0;
@@ -114,15 +143,178 @@ async function pending({ employeeIds, now = Date.now(), db = prisma }) {
     .sort((a, b) => b.lastAt - a.lastAt);
 }
 
+// A "talk again" day: from tomorrow to MAX_FOLLOW_UP_DAYS ahead, or null.
+function cleanFollowUp(value, today = firmDate()) {
+  if (!isValidDate(value)) return null;
+  if (value <= today || value > shiftDate(today, MAX_FOLLOW_UP_DAYS)) return null;
+  return value;
+}
+
 // Saves (or, with outcome null, takes back) the outcome for a number —
-// credited to `employeeId`, the operator who talked to the caller.
-async function record({ user, phoneKey, outcome, note, employeeId = user.employee?.id ?? null, db = prisma }) {
+// credited to `employeeId`, the operator who talked to the caller. A thinking
+// caller (`followUpOn`) gets that operator a reminder for the day, at 10:00.
+async function record({ user, phoneKey, outcome, note, followUpOn = null, phone = null, employeeId = user.employee?.id ?? null, db = prisma }) {
+  const existing = await db.callOutcome.findUnique({ where: { phoneKey } });
+  // The reminder of an answer being changed, unless it's gone off already.
+  if (existing?.reminderId) await db.reminder.deleteMany({ where: { id: existing.reminderId, sentAt: null } });
   if (outcome === null) {
     await db.callOutcome.deleteMany({ where: { phoneKey } });
     return null;
   }
-  const data = { outcome, note: note || null, employeeId, createdById: user.id };
+  let reminderId = null;
+  const day = outcome === "call_again" ? followUpOn : null;
+  if (day && employeeId) {
+    const operator = await db.employee.findUnique({ where: { id: employeeId }, select: { userId: true } });
+    if (operator?.userId) {
+      const f = require("./telegram/format");
+      const reminder = await db.reminder.create({
+        data: {
+          userId: operator.userId,
+          createdById: user.id,
+          title: `Qayta qoʻngʻiroq: ${f.phone(phone || phoneKey)} — oʻylab koʻrayotgan edi`.slice(0, 200),
+          dueAt: new Date(firmDayRange(day).from + 10 * 60 * 60 * 1000),
+          phone: phone ? String(phone).slice(0, 40) : phoneKey,
+        },
+      });
+      reminderId = reminder.id;
+    }
+  }
+  const data = { outcome, note: note || null, employeeId, createdById: user.id, followUpOn: day, reminderId };
   return db.callOutcome.upsert({ where: { phoneKey }, create: { phoneKey, ...data }, update: data });
 }
 
-module.exports = { OUTCOMES, askedSince, pending, record, callCenterIds, WINDOW_MS };
+// Whose caller this number is now, for its calls to ring them first:
+// { employeeId, kind: "second" | "thinking" } or null. Pure: the outcome row.
+function ownerOf(row, today = firmDate(), now = Date.now()) {
+  if (!row) return null;
+  if (row.secondEmployeeId && row.secondAt && now - new Date(row.secondAt).getTime() < SECOND_OWN_DAYS * 24 * 60 * 60 * 1000) {
+    return { employeeId: row.secondEmployeeId, kind: "second" };
+  }
+  if (row.outcome === "call_again" && row.employeeId && row.followUpOn && today <= shiftDate(row.followUpOn, THINKING_GRACE_DAYS)) {
+    return { employeeId: row.employeeId, kind: "thinking" };
+  }
+  return null;
+}
+
+async function ownerFor(phoneKey, db = prisma) {
+  return ownerOf(await db.callOutcome.findUnique({ where: { phoneKey } }));
+}
+
+// Lost now: given up on (GROUPS.lost) SECOND_DAYS ago, or thinking whose day
+// passed THINKING_GRACE_DAYS ago. Pure.
+function lostSince(row, today = firmDate()) {
+  if (GROUPS.lost.includes(row.outcome)) return firmDate(new Date(row.createdAt));
+  if (row.outcome === "call_again") return row.followUpOn ? shiftDate(row.followUpOn, THINKING_GRACE_DAYS + 1) : firmDate(new Date(row.createdAt));
+  return null;
+}
+
+// The next operator in turn after `lastId` (ids in order, around), not the
+// one who had the caller first. Pure.
+function nextInTurn(ids, lastId, notId) {
+  const sorted = [...ids].sort((a, b) => a - b).filter((id) => id !== notId);
+  if (!sorted.length) return null;
+  return sorted.find((id) => id > (lastId ?? 0)) ?? sorted[0];
+}
+
+// Lost callers whose second chance is due -> the next operator in turn, as a
+// task. Only callers recorded since this first ran (no backlog), at most a
+// few at a time, in working hours.
+async function secondChances({ now = new Date(), db = prisma } = {}) {
+  const firm = firmNow(now);
+  if (firm.minutes < 9 * 60 || firm.minutes > 17 * 60) return 0;
+  const settings = { ...SECOND_DEFAULT, ...(await getSetting(SECOND_SETTING, {}, db)) };
+  if (!Number.isFinite(settings.since)) {
+    await setSetting(SECOND_SETTING, { ...settings, since: now.getTime() }, null, db);
+    return 0;
+  }
+  const today = firm.date;
+  const rows = await db.callOutcome.findMany({
+    where: { secondAt: null, outcome: { in: [...GROUPS.lost, ...GROUPS.thinking] }, createdAt: { gte: new Date(settings.since) } },
+    orderBy: { createdAt: "asc" },
+    take: 50,
+  });
+  const due = rows.filter((r) => {
+    const since = lostSince(r, today);
+    return since && shiftDate(since, settings.days) <= today;
+  });
+  if (!due.length) return 0;
+  const operators = await db.employee.findMany({ where: { active: true, userId: { not: null }, ...jobWhere(["call_center"]) }, select: { id: true, userId: true, name: true, job: true, extraJobs: true } });
+  const pool = operators.filter(isCallCenter);
+  const byId = new Map(pool.map((e) => [e.id, e]));
+  let lastId = settings.lastId ?? null;
+  let given = 0;
+  for (const row of due.slice(0, 10)) {
+    if (await bookedSince(row, db)) {
+      // Booked after all: nothing to chase.
+      await db.callOutcome.update({ where: { id: row.id }, data: { secondAt: now } });
+      continue;
+    }
+    const nextId = nextInTurn([...byId.keys()], lastId, row.employeeId);
+    if (!nextId) break; // one operator only: nobody to give it to
+    const operator = byId.get(nextId);
+    const task = await db.task.create({ data: await secondChanceTask(row, operator, now, db) });
+    await db.callOutcome.update({ where: { id: row.id }, data: { secondEmployeeId: operator.id, secondAt: now, secondTaskId: task.id } });
+    require("../lib/events").events.emit("task.created", { taskId: task.id });
+    lastId = nextId;
+    given += 1;
+  }
+  await setSetting(SECOND_SETTING, { ...settings, lastId }, null, db);
+  return given;
+}
+
+// Booked since the outcome was recorded: by the number, or for its client.
+async function bookedSince(row, db) {
+  const since = new Date(row.createdAt.getTime() - 60 * 60 * 1000);
+  if (await db.appointment.count({ where: { phoneKey: row.phoneKey, status: { not: "cancelled" }, createdAt: { gte: since } } })) return true;
+  const phones = await db.clientPhone.findMany({ where: { phoneKey: row.phoneKey }, select: { clientId: true } });
+  if (!phones.length) return false;
+  return (await db.appointment.count({ where: { clientId: { in: phones.map((p) => p.clientId) }, status: { not: "cancelled" }, createdAt: { gte: since } } })) > 0;
+}
+
+// The task: who talked to them first and when, why it didn't work out, what
+// the AI review of that call said — and to come with a new offer.
+async function secondChanceTask(row, operator, now, db) {
+  const f = require("./telegram/format");
+  const call = await db.callLog.findFirst({
+    where: { phoneKey: row.phoneKey, missed: false, durationSeconds: { gt: 0 } },
+    orderBy: { callTimestampMs: "desc" },
+    select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { name: true } }, analysis: { select: { summary: true, status: true } } },
+  });
+  const first = call?.employee?.name || (row.employeeId ? (await db.employee.findUnique({ where: { id: row.employeeId }, select: { name: true } }))?.name : null);
+  const why = row.outcome === "call_again" ? "Oʻylab koʻrishini aytgan, lekin yozilmadi" : LABELS[row.outcome];
+  const notes = [
+    first ? `Birinchi boʻlib ${first} gaplashgan${call ? ` (${f.moment(new Date(Number(call.callTimestampMs)))})` : ""}.` : null,
+    `Natija: ${why}${row.note ? ` — ${row.note}` : ""}.`,
+    call?.analysis?.status === "done" && call.analysis.summary ? `Qoʻngʻiroq haqida (AI): ${call.analysis.summary}` : null,
+    "Yangi taklif bilan qoʻngʻiroq qiling (Material 1 jadvali). Qanday boʻlganini javobga yozing.",
+    call ? `Birinchi qoʻngʻiroq: ${require("../config/env").portalUrl || ""}/calls/${call.id}` : null,
+  ].filter(Boolean);
+  const today = firmDate(now);
+  const due = firmNow(now).minutes < 15 * 60 ? today : shiftDate(today, 1);
+  return {
+    title: `Ikkinchi imkoniyat: ${f.phone(call?.phoneNumber || row.phoneKey)}`.slice(0, 200),
+    notes: notes.join("\n").slice(0, 2000),
+    assigneeId: operator.userId,
+    createdById: null,
+    dueAt: new Date(firmDayRange(due).from + 18 * 60 * 60 * 1000),
+    needsAnswer: true,
+  };
+}
+
+module.exports = {
+  OUTCOMES,
+  GROUPS,
+  LABELS,
+  askedSince,
+  pending,
+  record,
+  callCenterIds,
+  cleanFollowUp,
+  ownerOf,
+  ownerFor,
+  lostSince,
+  nextInTurn,
+  secondChances,
+  WINDOW_MS,
+  THINKING_GRACE_DAYS,
+};

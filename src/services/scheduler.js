@@ -13,7 +13,8 @@ const { firmNow } = require("../lib/firmTime");
 //   every hour       consultations gone quiet to the archive (services/clientArchive.js);
 //                    planned case stages whose day has come (services/caseHistory.js)
 //   every 10 minutes covers for lawyers who are away begin and end on their
-//                    days (services/covers.js)
+//                    days (services/covers.js); lost callers' second chance
+//                    (services/callOutcomes.js)
 // Each run waits for the previous one; an error is logged, never thrown.
 
 const STRIKES_EVERY_MS = 5 * 60 * 1000;
@@ -130,7 +131,26 @@ async function callReviewTick() {
   }
 }
 
+// Lost callers whose second chance is due -> the next operator in turn
+// (services/callOutcomes.js).
+const SECOND_CHANCE_EVERY_MS = 10 * 60 * 1000;
+let secondChancing = false;
+async function secondChanceTick() {
+  if (secondChancing) return;
+  secondChancing = true;
+  try {
+    const given = await require("./callOutcomes").secondChances();
+    if (given) console.log(`[second-chance] ${given} given`);
+  } catch (err) {
+    console.error("[second-chance] failed:", err.message);
+  } finally {
+    secondChancing = false;
+  }
+}
+
 function start() {
+  setTimeout(secondChanceTick, 4 * 60 * 1000).unref();
+  setInterval(secondChanceTick, SECOND_CHANCE_EVERY_MS).unref();
   setTimeout(callReviewTick, 3 * 60 * 1000).unref();
   setInterval(callReviewTick, CALL_REVIEW_EVERY_MS).unref();
   setTimeout(tgReviewTick, 2 * 60 * 1000).unref();
@@ -147,4 +167,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick };
+module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick, secondChanceTick };

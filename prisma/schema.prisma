@@ -227,8 +227,10 @@ model Employee {
   absences     Absence[]
   strikes      Strike[]
   targets      Target[]
-  // The new callers whose outcome they recorded (CallOutcome).
-  callOutcomes CallOutcome[]
+  // The new callers whose outcome they recorded (CallOutcome), and lost
+  // ones handed to them for a second try.
+  callOutcomes  CallOutcome[] @relation("CallOutcomeOwner")
+  secondChances CallOutcome[] @relation("CallOutcomeSecond")
 
   // Calls through Ledger's own phone line (2026-10, see pbx/README.md): they
   // get a phone ID (PbxExtension) and make and take calls in the Ledger app.
@@ -1305,13 +1307,27 @@ model CallOutcome {
   note        String?
   // Whose caller it was: the operator who recorded it.
   employeeId  Int?
-  employee    Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  employee    Employee? @relation("CallOutcomeOwner", fields: [employeeId], references: [id], onDelete: SetNull)
+  // "Oʻylab koʻradi" (call_again): the day to talk again, "YYYY-MM-DD". Until
+  // two days after it their calls ring this operator first
+  // (services/pbx/route.js); unbooked by then, it counts as lost. The
+  // operator's reminder for that day.
+  followUpOn  String?
+  reminderId  Int?
+  // The second chance (services/callOutcomes.js secondChances): a lost
+  // caller handed to another operator, in turn, as a task. From then on
+  // their calls ring that operator first.
+  secondEmployeeId Int?
+  secondEmployee   Employee? @relation("CallOutcomeSecond", fields: [secondEmployeeId], references: [id], onDelete: SetNull)
+  secondAt         DateTime?
+  secondTaskId     Int?
   createdById Int?
   createdBy   User?     @relation("CallOutcomeBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
   @@index([employeeId, createdAt])
+  @@index([secondEmployeeId, secondAt])
 }
 
 // A late call-back: a call-center phone missed a call and nobody called the

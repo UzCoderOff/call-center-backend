@@ -2,18 +2,25 @@ const prisma = require("../../lib/prisma");
 const { phoneKey } = require("../../lib/phone");
 const { callerLabel } = require("./caller");
 
-// Who takes a client's call first (the firm's rule, 2026-10-24): a client the
-// firm already works with — a case with a contract — doesn't go to the
-// operators but straight to the coordinator of that case. Asterisk asks
-// (hooks.js, [company-line]) when the call comes in:
+// Who takes a call first (the firm's rule, 2026-10-24), in this order:
+//   1. a client the firm already works with — a case with a contract: the
+//      coordinator of that case, not the operators;
+//   2. a lost caller handed to another operator for a second try: that
+//      operator (services/callOutcomes.js);
+//   3. a caller who's thinking it over: the operator they talked to;
+//   4. everyone else: the call-center line, whoever's turn it is.
+// Asterisk asks (hooks.js, [company-line]) when the call comes in:
 //
 //   POST /pbx/route  s=<secret>&num=<number>
-//        -> "<phone ID>|<coordinator's name>", or "" (the call-center line)
+//        -> "<phone ID>|<name>|<coordinator | second | thinking>", or "" (the line)
 //
-// The coordinator's phone is woken if it's asleep; no answer in 25 s and the
-// call goes to the call-center line, whose phones say who didn't answer.
+// That phone is woken if it's asleep; no answer (25 s a coordinator, 20 s an
+// operator) and the call goes to the call-center line, whose phones say
+// whose caller it was and that they didn't answer — and that person is
+// reminded to call back (ingest.js).
 
 const CONTRACT = "contract";
+const { ownerFor } = require("../callOutcomes");
 
 // The coordinator of the client's newest case in work, who's on the line:
 // { ext, name } or null. Pure: `client` with cases (status, updatedAt,
@@ -40,15 +47,30 @@ const CLIENT = {
 async function route({ num }) {
   const key = phoneKey(num);
   if (!key) return "";
+  return (await coordinatorRoute(key)) || (await ownerRoute(key)) || "";
+}
+
+// The operator a caller belongs to (second chance, thinking), on the line.
+async function ownerRoute(key) {
+  const owner = await ownerFor(key);
+  if (!owner) return null;
+  const line = await prisma.pbxExtension.findFirst({
+    where: { employeeId: owner.employeeId, ha1Enc: { not: null }, employee: { active: true, pbxCalling: true } },
+    select: { ext: true, employee: { select: { name: true } } },
+  });
+  return line ? `${line.ext}|${callerLabel(line.employee.name)}|${owner.kind}` : null;
+}
+
+async function coordinatorRoute(key) {
   const phone = await prisma.clientPhone.findFirst({ where: { phoneKey: key, client: { archivedAt: null } }, orderBy: { id: "asc" }, select: { client: CLIENT } });
   const contact = phone ? null : await prisma.clientContact.findFirst({ where: { phoneKey: key, deletedAt: null, client: { archivedAt: null } }, orderBy: { id: "asc" }, select: { client: CLIENT } });
   const client = (phone || contact)?.client;
-  if (!client) return "";
+  if (!client) return null;
   const ids = client.cases.map((k) => k.coordinator?.id).filter(Boolean);
-  if (!ids.length) return "";
+  if (!ids.length) return null;
   const rows = await prisma.pbxExtension.findMany({ where: { employeeId: { in: ids }, ha1Enc: { not: null } }, select: { employeeId: true, ext: true } });
   const found = coordinatorFor(client, new Map(rows.map((r) => [r.employeeId, r.ext])));
-  return found ? `${found.ext}|${callerLabel(found.name)}` : "";
+  return found ? `${found.ext}|${callerLabel(found.name)}|coordinator` : null;
 }
 
 module.exports = { route, coordinatorFor };
