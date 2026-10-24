@@ -93,6 +93,9 @@ async function next() {
 // plain apostrophe (o'tdi, ma'lum) — Ledger writes oʻ, gʻ and ʼ.
 function uzLetters(text) {
   return text
+    // "Xo 'p", "bo 'ldi", "qoʻymadingiz -a": pieces of one word split apart
+    .replace(/([OoGg]) ['‘’`ʼ](?=[a-z])/g, "$1ʻ")
+    .replace(/([a-zʻ]) -(a|da|chi|mi|u|yu|ku|ki)(?![a-zʻ])/g, "$1-$2")
     .replace(/([OoGg])['‘’`ʼ]/g, "$1ʻ")
     .replace(/([A-Za-zʻ])['’`](?=[A-Za-z])/g, "$1ʼ");
 }

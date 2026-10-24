@@ -17,7 +17,7 @@ Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 # Never more than 2 GB: stopped rather than squeezing Ledger or the calls.
-MemoryMax=2G
+MemoryMax=3G
 MemorySwapMax=0
 Restart=always
 RestartSec=30

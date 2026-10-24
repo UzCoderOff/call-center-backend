@@ -30,7 +30,8 @@ SECRET = os.environ.get("PBX_HOOK_SECRET", "")
 # on telephone-band audio) — chosen 2026-10-24 over qirol-turbo, which garbled
 # real line calls.
 MODEL_DIR = os.environ.get("MODEL_DIR", os.path.expanduser("~/uz-asr-server/models/callcenter-ct2"))
-BEAM = int(os.environ.get("BEAM_SIZE", "5"))
+# Beam 3: as good as 5 on real calls, and it leaves memory to spare.
+BEAM = int(os.environ.get("BEAM_SIZE", "3"))
 THREADS = int(os.environ.get("THREADS", "4"))
 ASK_EVERY = 20  # seconds between asking for work when there's none
 UNLOAD_AFTER = 300  # seconds without work: free the model's memory
@@ -95,10 +96,13 @@ def transcribe(model, audio):
     )
     out = []
     for s in segments:
-        for w in s.words or []:
+        for i, w in enumerate(s.words or []):
             if out and w.start - out[-1]["end"] <= TURN_GAP:
-                # A new piece's first word can come without its space.
-                out[-1]["text"] += w.word if w.word[:1].isspace() else " " + w.word
+                # Within a piece the words carry their own spaces ("Xo" + "'p" is
+                # one word, "qo'ymadingiz" + "-a" too); only a new piece's first
+                # word can come without its space.
+                joiner = " " if i == 0 and not w.word[:1].isspace() else ""
+                out[-1]["text"] += joiner + w.word
                 out[-1]["end"] = w.end
             else:
                 out.append({"start": w.start, "end": w.end, "text": w.word})

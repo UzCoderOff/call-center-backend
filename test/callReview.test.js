@@ -120,4 +120,5 @@ test("call text is written with the proper Uzbek letters", () => {
   const { uzLetters } = require("../src/services/pbx/transcribe");
   assert.equal(uzLetters("O'tdi, bo'ldi, g'alaba, ma'lum, qo`ydim"), "Oʻtdi, boʻldi, gʻalaba, maʼlum, qoʻydim");
   assert.equal(uzLetters("'Salom' dedi"), "'Salom' dedi");
+  assert.equal(uzLetters("Xo 'p, bo 'ldi. Qo 'ymadingiz -a?"), "Xoʻp, boʻldi. Qoʻymadingiz-a?");
 });
