@@ -117,3 +117,84 @@ test("an ordinary call has no transfers on it", () => {
   const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1060"), [parseEvt("ext=203&rs=1001&status=ANSWER&talk=50&kind=queue")], ctx);
   assert.equal(s.detail.transfers, undefined);
 });
+
+// --- clients in work go straight to their coordinator (route.js) ---------
+const { coordinatorFor } = require("../src/services/pbx/route");
+const { missedBy } = require("../src/services/pbx/ingest");
+
+test("a client in work goes to the coordinator of their newest contract case who's on the line", () => {
+  const coord = (id, name, more = {}) => ({ id, name, active: true, pbxCalling: true, ...more });
+  const client = {
+    cases: [
+      { status: "contract", updatedAt: "2026-10-01", coordinator: coord(7, "Aziza") },
+      { status: "contract", updatedAt: "2026-10-20", coordinator: coord(8, "Bobur", { pbxCalling: false }) },
+      { status: "consultation", updatedAt: "2026-10-23", coordinator: coord(9, "Dilshod") },
+      { status: "done", updatedAt: "2026-10-22", coordinator: coord(10, "Eldor") },
+    ],
+  };
+  const lines = new Map([
+    [7, "205"],
+    [8, "206"],
+    [9, "207"],
+    [10, "208"],
+  ]);
+  // Bobur's case is newer, but he isn't on the line; a consultation or a
+  // finished case doesn't count.
+  assert.deepEqual(coordinatorFor(client, lines), { ext: "205", name: "Aziza" });
+  assert.equal(coordinatorFor(client, new Map([[8, "206"]])), null);
+  assert.equal(coordinatorFor({ cases: [{ status: "consultation", updatedAt: "2026-10-01", coordinator: coord(7, "Aziza") }] }, lines), null);
+  assert.equal(coordinatorFor(null, lines), null);
+});
+
+test("the coordinator's side of a client call sent straight to them can be passed on", () => {
+  const direct = [
+    { Channel: "PJSIP/skyline-00000001", ChannelState: "6", Context: "company-line", Application: "Dial", Uniqueid: "1", Linkedid: "1", BridgeId: "b1" },
+    { Channel: "Local/205@ring-person-00000001;1", ChannelState: "6", Context: "ring-person", Application: "AppDial", Uniqueid: "2", Linkedid: "1", BridgeId: "b1" },
+    { Channel: "Local/205@ring-person-00000001;2", ChannelState: "6", Context: "ring-person", Application: "Dial", Uniqueid: "3", Linkedid: "1", BridgeId: "b2" },
+    { Channel: "PJSIP/205-00000002", ChannelState: "6", Context: "ring-person", Application: "AppDial", Uniqueid: "4", Linkedid: "1", BridgeId: "b2" },
+  ];
+  assert.equal(findClientLeg(direct, "205").Channel, "PJSIP/skyline-00000001");
+});
+
+test("a client's call the coordinator answered is the coordinator's", () => {
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100"), [parseEvt("ext=205&rs=1001&status=ANSWER&talk=80&kind=direct")], ctx);
+  assert.equal(s.employeeId, 15);
+  assert.equal(s.durationSeconds, 80);
+  assert.deepEqual(s.detail.direct, { ext: "205", employeeId: 15, answered: true, status: "ANSWER" });
+  assert.deepEqual(missedBy(s), []);
+});
+
+test("the coordinator didn't answer, an operator did: the operator's call, a reminder for the coordinator", () => {
+  const rings = [parseEvt("ext=205&rs=1001&status=NOANSWER&kind=direct"), parseEvt("ext=203&rs=1026&status=ANSWER&talk=40&kind=queue")];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100"), rings, ctx);
+  assert.equal(s.employeeId, 11);
+  assert.equal(s.detail.direct.answered, false);
+  const who = missedBy(s);
+  assert.deepEqual(
+    who.map((w) => [w.employeeId, w.fromEmployeeId]),
+    [[15, 11]]
+  );
+  assert.match(who[0].notes, /Mijozingiz/);
+});
+
+test("nobody answered a client in work: a missed call for their coordinator, no extra reminder", () => {
+  const rings = [parseEvt("ext=205&rs=1001&status=NOANSWER&kind=direct"), parseEvt("ext=203&rs=1026&status=NOANSWER&kind=queue")];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100&status=TIMEOUT"), rings, ctx);
+  assert.equal(s.missed, true);
+  assert.equal(s.employeeId, 15);
+  assert.deepEqual(missedBy(s), []);
+});
+
+test("a colleague who didn't answer a call passed to them is reminded, once", () => {
+  const rings = [
+    parseEvt("ext=203&rs=1001&status=ANSWER&talk=30&kind=queue"),
+    parseEvt("ext=206&rs=1040&status=NOANSWER&kind=transfer"),
+    parseEvt("ext=203&rs=1075&status=ANSWER&talk=20&kind=transfer_back"),
+    parseEvt("ext=206&rs=1100&status=NOANSWER&kind=transfer"),
+  ];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1200"), rings, ctx);
+  assert.deepEqual(
+    missedBy(s).map((w) => w.employeeId),
+    [16]
+  );
+});

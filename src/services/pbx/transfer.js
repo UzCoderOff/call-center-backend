@@ -38,15 +38,16 @@ class TransferError extends Error {
 // ----------------------------------------------------------- the call itself
 
 // Of Asterisk's channels (CoreShowChannels), the client's side of the call
-// this phone ID is talking on — the channel that's in line or being passed
-// on (Queue in [company-line], Dial in [ledger-transfer]) and in the same
+// this phone ID is talking on — the channel that's in line, sent straight to
+// its coordinator or being passed on (Queue or Dial in [company-line], Dial
+// in [ledger-transfer]) and in the same
 // call (Linkedid) as their phone, which is up. null: they're on no such call
 // (a call out, a colleague, nothing).
 function findClientLeg(channels, ext) {
   const mine = channels.filter((c) => String(c.Channel || "").startsWith(`PJSIP/${ext}-`) && c.ChannelState === "6" && c.BridgeId);
   for (const m of mine) {
     const leg = channels.find(
-      (c) => c !== m && c.Linkedid === m.Linkedid && c.BridgeId && (c.Application === "Queue" || (c.Context === "ledger-transfer" && c.Application === "Dial"))
+      (c) => c !== m && c.Linkedid === m.Linkedid && c.BridgeId && (c.Application === "Queue" || (["ledger-transfer", "company-line"].includes(c.Context) && c.Application === "Dial"))
     );
     if (leg) return leg;
   }

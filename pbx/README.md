@@ -123,21 +123,25 @@ database. If it's lost, every phone simply signs in again.
 ## The outside line (SkyLine)
 
 The company number is **+998 78 113-90-01** (contract SIP-26-231, 5 lines).
-SkyLine connects us **by our address** (82.115.51.61), with no login. Their
-calls must come to **5160/udp**: tell them that port if they ask.
+Their settings (2026-10-23):
+- server `pbx.skyline.uz` (91.203.175.6);
+- login `781139001` and a password, which lives only in
+  `/etc/asterisk/pjsip_trunk.conf`;
+- our address (82.115.51.61) is on their allow-list.
 
-When they send their settings (their SIP server, and the addresses their
-calls come from):
+Their calls come to **5160/udp**.
 
 1. On the server, from the backend:
    ```bash
-   sudo bash pbx/connect-trunk.sh --host <their server> --port <its port> --ips "<address>,<address>"
+   printf '%s' '<password>' | sudo bash pbx/connect-trunk.sh --host pbx.skyline.uz --user 781139001 --password-stdin
    ```
-   - It writes `/etc/asterisk/pjsip_trunk.conf` from
-     `asterisk/pjsip_trunk.conf.template`: an endpoint `skyline`,
-     `context=from-trunk`, G.711, rfc4733, recognised by their addresses.
+   - It writes `/etc/asterisk/pjsip_trunk.conf`:
+     - an endpoint `skyline`, `context=from-trunk`, G.711, rfc4733;
+     - signing in with the login (registration `skyline-reg`), and their
+       calls recognised by their address.
    - It opens 5160/udp to their addresses only, then reloads Asterisk.
-   - `--number` is our number on calls out, `781139001` unless they want
+   - `pjsip show registrations` should say **Registered**.
+   - `--number` is our number on calls out, the login unless they want
      another form.
 2. Sozlamalar → Telefon liniyasi: the company number, and "outside line
    connected" on.

@@ -79,6 +79,9 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       kind: r.kind || null,
     }));
   const queueWaitSec = Math.max(0, (Number(call.end) || start) - start);
+  // A client in work rung straight to their coordinator first (route.js).
+  const directRing = rang.find((r) => r.kind === "direct");
+  const direct = directRing ? { ext: directRing.ext, employeeId: directRing.employeeId, answered: directRing.status === "ANSWER", status: directRing.status } : null;
   const answer = rang.find((r) => r.status === "ANSWER" && r.employeeId);
   if (answer) {
     // Passed on to colleagues ([ledger-transfer]): the call stays the
@@ -99,12 +102,13 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       missed: false,
       durationSeconds: talk,
       answered: true,
-      detail: { rang, owner: "answered", status: call.status || null, ...(transfers.length ? { transfers } : {}) },
+      detail: { rang, owner: "answered", status: call.status || null, ...(direct ? { direct } : {}), ...(transfers.length ? { transfers } : {}) },
     };
   }
   // Missed: the operator whose turn it was (rung first) owns it — their
   // call-back list, their Telegram, their strike — or, when nobody could be
-  // rung at all, whoever's turn it is in the rotation.
+  // rung at all, whoever's turn it is in the rotation. A client in work rang
+  // their coordinator first: the coordinator's.
   const first = rang.find((r) => r.employeeId);
   const employeeId = first ? first.employeeId : pickRotation();
   if (!employeeId) return null;
@@ -115,7 +119,7 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
     missed: true,
     durationSeconds: 0,
     answered: false,
-    detail: { rang, owner: first ? "first_rung" : "rotation", status: call.status || null, reason: rang.length ? "not_answered" : "nobody_free", queueWaitSec },
+    detail: { rang, owner: first ? "first_rung" : "rotation", status: call.status || null, reason: rang.length ? "not_answered" : "nobody_free", queueWaitSec, ...(direct ? { direct } : {}) },
   };
 }
 
@@ -183,17 +187,38 @@ async function nameTransfers(transfers) {
   }
 }
 
-// A colleague a client's call was passed to who didn't answer it (and didn't
-// get it on another try): a reminder, now, to call the client back — so the
-// client never has to call again.
-async function remindUnanswered(transfers, phone) {
+// Who should have taken a client's call and didn't, while someone else did:
+// a colleague it was passed to, or the coordinator a client in work was sent
+// straight to. [{ employeeId, fromEmployeeId, notes }] — once each, and not
+// if they got the call on another try. A call nobody answered is a missed
+// call instead (its own call-back list and alerts).
+function missedBy(summary) {
+  if (summary.missed) return [];
+  const { transfers = [], direct, rang = [] } = summary.detail;
+  const answered = new Set(rang.filter((r) => r.status === "ANSWER").map((r) => r.employeeId));
+  const out = [];
+  const seen = new Set();
+  const add = (employeeId, item) => {
+    if (!employeeId || answered.has(employeeId) || seen.has(employeeId)) return;
+    seen.add(employeeId);
+    out.push({ employeeId, ...item });
+  };
+  if (direct && !direct.answered) {
+    add(direct.employeeId, { fromEmployeeId: summary.employeeId, notes: "Mijozingiz qoʻngʻiroq qildi — javob bermadingiz, qoʻngʻiroqni call-markaz oldi. Mijozga qoʻngʻiroq qiling." });
+  }
+  for (const t of transfers) {
+    if (t.answered) continue;
+    add(t.employeeId, { fromEmployeeId: t.fromEmployeeId, notes: `${t.fromName || "Hamkasbingiz"} bu mijozning qoʻngʻirogʻini sizga ulagan edi — javob berilmadi. Mijozga qoʻngʻiroq qiling.` });
+  }
+  return out;
+}
+
+// A reminder, now, to call the client back — so the client never has to call
+// again.
+async function remindUnanswered(people, phone) {
   const { planOne, REMINDER_INCLUDE } = require("../reminders");
   const { clientIndexFor } = require("../../lib/clientAccess");
-  const answered = new Set(transfers.filter((t) => t.answered).map((t) => t.employeeId));
-  const done = new Set();
-  for (const t of transfers) {
-    if (t.answered || !t.employeeId || answered.has(t.employeeId) || done.has(t.employeeId)) continue;
-    done.add(t.employeeId);
+  for (const t of people) {
     const user = await prisma.user.findFirst({ where: { employee: { id: t.employeeId }, active: true }, include: { employee: true } });
     if (!user) continue;
     const from = t.fromEmployeeId ? await prisma.user.findFirst({ where: { employee: { id: t.fromEmployeeId } }, select: { id: true } }) : null;
@@ -205,7 +230,7 @@ async function remindUnanswered(transfers, phone) {
         userId: user.id,
         createdById: from?.id ?? null,
         title: `Qayta qoʻngʻiroq: ${known?.name || phone}`.slice(0, 200),
-        notes: `${t.fromName || "Hamkasbingiz"} bu mijozning qoʻngʻirogʻini sizga ulagan edi — javob berilmadi. Mijozga qoʻngʻiroq qiling.`,
+        notes: t.notes,
         dueAt: new Date(),
         phone: String(phone).slice(0, 40),
         clientId: known?.id ?? null,
@@ -231,6 +256,8 @@ async function processCall(callId, ringFiles, rotation) {
 
   const transfers = summary.detail.transfers || [];
   if (transfers.length) await nameTransfers(transfers);
+  const direct = summary.detail.direct;
+  if (direct) direct.name = (await prisma.employee.findUnique({ where: { id: direct.employeeId ?? -1 }, select: { name: true } }))?.name || null;
   const isNew = !(await prisma.callLog.findUnique({ where: { pbxCallId: callId }, select: { id: true } }));
 
   const recording = await saveRecording(call.rec, { ...summary, callId });
@@ -265,7 +292,7 @@ async function processCall(callId, ringFiles, rotation) {
   // Once per call (not again when it's taken in a second time).
   if (isNew && summary.phoneNumber) {
     try {
-      await remindUnanswered(transfers, summary.phoneNumber);
+      await remindUnanswered(missedBy(summary), summary.phoneNumber);
     } catch (err) {
       console.error("[pbx] transfer reminders failed:", err.message);
     }
@@ -350,4 +377,4 @@ function start() {
   soon();
 }
 
-module.exports = { parseEvt, storedNumber, summarizeCall, processCall, sweep, start };
+module.exports = { parseEvt, storedNumber, summarizeCall, missedBy, processCall, sweep, start };
