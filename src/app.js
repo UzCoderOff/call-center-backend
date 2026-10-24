@@ -155,6 +155,18 @@ app.use("/api/device", deviceRoutes);
 
 // Ledger's own phone line (pbx/README.md): status, settings, test sign-ins.
 app.use("/api/pbx", require("./routes/pbx"));
+// Listening to a call live: authenticated by the signed address it gives out
+// (services/pbx/live.js), since a plain <audio> can't send the login.
+app.get("/api/pbx-listen/:token", async (req, res, next) => {
+  try {
+    const live = require("./services/pbx/live");
+    const ok = await live.checkToken(req.params.token);
+    if (!ok) return res.status(403).json({ error: "forbidden" });
+    live.stream(ok.file, req, res);
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.use((req, res) => res.status(404).json({ error: "not_found" }));
 app.use(errorHandler);

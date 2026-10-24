@@ -150,6 +150,13 @@ const NEWS = [
   },
 ];
 
+// The whole release, for the firm's Telegram groups (telegram/groups.js):
+// everything the boss gets — it's about Ledger, not about any client.
+function groupMessage(news) {
+  if (!news.boss?.length) return null;
+  return ["🆕 <b>Ledger yangilandi</b>", ...news.boss.map((l) => `• ${l}`)].join("\n");
+}
+
 // The message for one person, or null.
 function messageFor(news, user) {
   if (user.role === "DEVELOPER") return null;
@@ -164,7 +171,10 @@ async function newsTick(now = firmNow()) {
   if (!current.length) return 0;
   let sent = 0;
   const users = await linkedUsers();
+  const { postToGroups } = require("./telegram/groups");
   for (const news of current) {
+    const forGroups = groupMessage(news);
+    if (forGroups) sent += await postToGroups(`news:${news.id}`, forGroups);
     for (const user of users) {
       const text = messageFor(news, user);
       if (!text) continue;
@@ -236,4 +246,4 @@ async function deployTick(file = DEPLOY_LOG) {
   return sent;
 }
 
-module.exports = { NEWS, messageFor, newsTick, parseDeployLog, deployMessage, deployTick };
+module.exports = { NEWS, messageFor, groupMessage, newsTick, parseDeployLog, deployMessage, deployTick };

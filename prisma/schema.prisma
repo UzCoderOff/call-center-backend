@@ -85,6 +85,11 @@ model User {
   // until the DEVELOPER turns it on, meant for the head of the firm only.
   // The DEVELOPER always sees money; staff never do. Rules: src/lib/finance.js.
   seesFinance        Boolean   @default(false)
+  // "Listens to calls" (boss and lawyer accounts): sees the client calls
+  // going on right now on Ledger's line and may listen to them live. Off
+  // until the DEVELOPER turns it on; the DEVELOPER always may
+  // (src/services/pbx/live.js).
+  hearsCalls         Boolean   @default(false)
   // Portal sessions started before this moment no longer count — set when
   // the password is reset or changed, so an old login stops working.
   sessionsValidAfter DateTime?

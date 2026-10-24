@@ -198,3 +198,61 @@ test("a colleague who didn't answer a call passed to them is reminded, once", ()
     [16]
   );
 });
+
+// --- Ledger's release notes in the firm's Telegram groups ----------------
+test("a group gets the whole release, and only groups count as groups", () => {
+  const { groupMessage } = require("../src/services/news");
+  const { isGroup } = require("../src/services/telegram/groups");
+  const text = groupMessage({ boss: ["<b>A</b>: one", "two"], staff: [] });
+  assert.equal(text, "🆕 <b>Ledger yangilandi</b>\n• <b>A</b>: one\n• two");
+  assert.equal(groupMessage({ boss: [], staff: [] }), null);
+  assert.equal(isGroup({ type: "supergroup" }), true);
+  assert.equal(isGroup({ type: "group" }), true);
+  assert.equal(isGroup({ type: "private" }), false);
+});
+
+// --- calls going on right now (live.js) -----------------------------------
+const { liveCalls, seconds, canHearCalls } = require("../src/services/pbx/live");
+
+test("calls going on: who's talking, who's ringing, who's waiting in line", () => {
+  const ch = (Channel, more) => ({ Channel, ChannelState: "6", BridgeId: "", Duration: "00:00:30", ...more });
+  const talking = [
+    ch("PJSIP/skyline-00000001", { Context: "company-line", Application: "Queue", Uniqueid: "1.1", Linkedid: "1.1", BridgeId: "b1", CallerIDNum: "+998901234567", Duration: "00:01:05" }),
+    ch("Local/203@ring-person-00000001;1", { Context: "ring-person", Application: "AppQueue", Uniqueid: "1.2", Linkedid: "1.1", BridgeId: "b1" }),
+    ch("Local/203@ring-person-00000001;2", { Context: "ring-person", Application: "Dial", Uniqueid: "1.3", Linkedid: "1.1", BridgeId: "b2" }),
+    ch("PJSIP/203-00000002", { Context: "ring-person", Application: "AppDial", Uniqueid: "1.4", Linkedid: "1.1", BridgeId: "b2" }),
+  ];
+  const waiting = [ch("PJSIP/skyline-00000003", { Context: "company-line", Application: "Queue", Uniqueid: "2.1", Linkedid: "2.1", CallerIDNum: "+998911111111", Duration: "00:00:10" })];
+  const ringing = [
+    ch("PJSIP/skyline-00000005", { Context: "company-line", Application: "Dial", Uniqueid: "3.1", Linkedid: "3.1", CallerIDNum: "+998922222222", Duration: "00:00:05" }),
+    ch("PJSIP/205-00000006", { Context: "ring-person", Application: "AppDial", Uniqueid: "3.2", Linkedid: "3.1", ChannelState: "5" }),
+  ];
+  const colleagues = [
+    ch("PJSIP/204-00000007", { Context: "colleague", Application: "Dial", Uniqueid: "4.1", Linkedid: "4.1", BridgeId: "x" }),
+    ch("PJSIP/206-00000008", { Context: "ring-person", Application: "AppDial", Uniqueid: "4.2", Linkedid: "4.1", BridgeId: "x" }),
+  ];
+  const out = [
+    ch("PJSIP/207-00000009", { Context: "outbound", Application: "Dial", Exten: "933333333", Uniqueid: "5.1", Linkedid: "5.1", BridgeId: "y", Duration: "00:00:20" }),
+    ch("PJSIP/skyline-0000000a", { Context: "from-trunk", Application: "AppDial", Uniqueid: "5.2", Linkedid: "5.1", BridgeId: "y" }),
+  ];
+  const calls = liveCalls([...talking, ...waiting, ...ringing, ...colleagues, ...out]);
+  assert.deepEqual(
+    calls.map((c) => [c.id, c.direction, c.number, c.state, c.seconds, c.exts.map((e) => `${e.ext}:${e.state}`).join()]),
+    [
+      ["1.1", "in", "+998901234567", "talking", 65, "203:talking"],
+      ["5.1", "out", "+998933333333", "talking", 20, "207:talking"],
+      ["2.1", "in", "+998911111111", "waiting", 10, ""],
+      ["3.1", "in", "+998922222222", "ringing", 5, "205:ringing"],
+    ]
+  );
+  assert.deepEqual(calls[0].recordings, ["1.1"]);
+});
+
+test("only the developer and people switched on hear calls", () => {
+  assert.equal(seconds("01:02:03"), 3723);
+  assert.equal(canHearCalls({ role: "DEVELOPER", active: true }), true);
+  assert.equal(canHearCalls({ role: "BOSS", active: true, hearsCalls: true }), true);
+  assert.equal(canHearCalls({ role: "BOSS", active: true, hearsCalls: false }), false);
+  assert.equal(canHearCalls({ role: "DEVELOPER", active: false }), false);
+  assert.equal(canHearCalls(null), false);
+});

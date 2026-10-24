@@ -37,6 +37,8 @@ function publicMe(user) {
     mustChangePassword: user.mustChangePassword,
     // Sees the money from clients (contract amounts, payments, debts).
     finance: canSeeFinance(user),
+    // Sees the calls going on right now and may listen (services/pbx/live.js).
+    hearsCalls: require("../services/pbx/live").canHearCalls(user),
     employee: e
       ? {
           id: e.id,

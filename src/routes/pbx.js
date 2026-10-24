@@ -13,12 +13,46 @@ const { pbxSettings, savePbxSettings } = require("../services/pbx/settings");
 // Ledger's phone line in the portal (Settings → Phone line):
 //   GET  /api/pbx/status                       managers: is it running, who's on it
 //   PUT  /api/pbx/settings                     developer: company number, outside line
+//   GET  /api/pbx/live                         the developer and accounts with
+//                                              "listens to calls": client calls
+//                                              going on right now
+//   POST /api/pbx/live/:id/listen              -> { url } to listen to one live
+//                                              (live.js; the address is
+//                                              /api/pbx-listen/<token>)
 //   POST /api/pbx/extensions/:employeeId/softphone
 //        developer: a sign-in for a test softphone (MicroSIP, Zoiper) on that
 //        person's phone ID — shown once; their Ledger app is signed out of
 //        the line until it signs in again
 const router = express.Router();
 router.use(requireAuth);
+
+const live = require("../services/pbx/live");
+
+function requireHears(req, res, next) {
+  if (!live.canHearCalls(req.user)) return res.status(403).json({ error: "forbidden" });
+  next();
+}
+
+router.get("/live", requireHears, async (req, res, next) => {
+  try {
+    res.json({ calls: await live.snapshot(req.user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post("/live/:id/listen", requireHears, async (req, res, next) => {
+  try {
+    const token = await live.listenToken(req.user, String(req.params.id).slice(0, 64));
+    if (!token) return res.status(409).json({ error: "not_listenable" });
+    // The portal is on another address in production: the sound comes
+    // straight from this server (env PUBLIC_API_URL), not through the
+    // portal's proxy.
+    res.json({ url: `${env.publicApiUrl || ""}/api/pbx-listen/${token}` });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Which phone IDs have a phone connected right now (Asterisk's view).
 async function onlineExts() {

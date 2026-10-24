@@ -41,6 +41,10 @@ module.exports = {
   // The portal's address, for links in Telegram messages ("open in Ledger").
   // Without it, messages simply have no link.
   portalUrl: (process.env.PORTAL_URL || "").replace(/\/+$/, "") || null,
+  // This server's own public address (https://82.115.51.61.nip.io) when the
+  // portal is elsewhere: what streams straight from here (listening to a
+  // call live). Unset: the portal's address (/api goes to this server).
+  publicApiUrl: (process.env.PUBLIC_API_URL || "").replace(/\/+$/, "") || null,
   telegram: {
     // From @BotFather. Unset: no bot, nothing is sent, the portal says so.
     token: process.env.TELEGRAM_BOT_TOKEN || null,

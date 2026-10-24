@@ -215,7 +215,14 @@ async function resolvePlayableRecording(relativeRecordingPath, resolveOriginalPa
   return { absolutePath: cachedAbsolutePath, contentType: "audio/mpeg" };
 }
 
+// The ffmpeg to run (for streams that don't fit transcodeToMp3).
+function ffmpegPath() {
+  resolveFfmpeg();
+  return ffmpegCommand;
+}
+
 module.exports = {
+  ffmpegPath,
   transcodeToMp3,
   PHONE_LINE_AUDIO,
   resolvePlayableRecording,

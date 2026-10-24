@@ -66,6 +66,7 @@ function publicUser(user) {
     role: user.role,
     active: user.active,
     seesFinance: user.seesFinance,
+    hearsCalls: user.hearsCalls,
     calendar: user.calendar && user.calendar.active ? { id: user.calendar.id, name: user.calendar.name } : null,
     devices: user.devices ?? [],
     createdAt: user.createdAt,
@@ -147,10 +148,11 @@ router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
     const id = parseId(req.params.id);
     if (!(await manageable(id))) return res.status(404).json({ error: "not_found" });
 
-    const { active, hasCalendar, calendarName, role, seesFinance } = req.body || {};
+    const { active, hasCalendar, calendarName, role, seesFinance, hearsCalls } = req.body || {};
     if (role !== undefined && !MANAGEABLE_ROLES.includes(role)) return res.status(400).json({ error: "invalid_role" });
     if (active !== undefined && typeof active !== "boolean") throw badRequest("invalid active");
     if (seesFinance !== undefined && typeof seesFinance !== "boolean") throw badRequest("invalid seesFinance");
+    if (hearsCalls !== undefined && typeof hearsCalls !== "boolean") throw badRequest("invalid hearsCalls");
     const name = cleanName(req.body?.name);
     if (typeof hasCalendar === "boolean") await setCalendar(id, hasCalendar, calendarName);
     const user = await prisma.user.update({
@@ -160,6 +162,7 @@ router.patch("/:id", requireRole("DEVELOPER"), async (req, res, next) => {
         ...(role !== undefined ? { role } : {}),
         ...(name !== undefined ? { name } : {}),
         ...(seesFinance !== undefined ? { seesFinance } : {}),
+        ...(hearsCalls !== undefined ? { hearsCalls } : {}),
       },
       include: WITH_CALENDAR,
     });

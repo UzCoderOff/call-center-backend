@@ -15,7 +15,8 @@ const { myDay, tomorrow } = require("./today");
 // t.me/<bot>?start=<one-time code>, the person presses Start, and the code
 // ties this chat to their account. The bot talks only in private chats and
 // only to connected people, and shows each person what the portal shows
-// them — nothing more.
+// them — nothing more. In the firm's groups it only posts Ledger's release
+// notes (groups.js).
 
 const hashCode = (code) => crypto.createHash("sha256").update(code).digest("hex");
 
@@ -185,6 +186,9 @@ async function onCallback(query) {
 }
 
 async function handleUpdate(update) {
+  // The firm's groups get Ledger's release notes (groups.js).
+  if (update.my_chat_member) return groupsOf().onMemberUpdate(update.my_chat_member);
+  if (update.message?.migrate_to_chat_id) return groupsOf().onMigrated(update.message);
   if (update.message) return onMessage(update.message);
   if (update.callback_query) return onCallback(update.callback_query);
   // The firm's Telegram account, through Telegram Business (services/tgInbox.js).
@@ -196,7 +200,8 @@ async function handleUpdate(update) {
 }
 
 const inbox = () => require("../tgInbox");
-const UPDATES = ["message", "callback_query", "business_connection", "business_message", "edited_business_message", "deleted_business_messages"];
+const groupsOf = () => require("./groups");
+const UPDATES = ["message", "callback_query", "my_chat_member", "business_connection", "business_message", "edited_business_message", "deleted_business_messages"];
 
 // ------------------------------------------------------------------ polling
 
