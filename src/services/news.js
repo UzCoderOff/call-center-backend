@@ -24,6 +24,31 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-24-bell-second-chance-tv",
+    date: "2026-10-24",
+    boss: [
+      "<b>Bildirishnomalar 🔔</b>: asosiy sahifaning yuqori oʻng burchagida qoʻngʻiroqcha — Ledger yuborgan hamma narsa (Telegram, ilova, brauzer) bir joyda, yangilari soni bilan. Bosilsa, oʻsha sahifa ochiladi.",
+      "<b>Yangi raqamlar: nima boʻldi?</b> endi uch guruhda: «Oʻylab koʻradi» — operator qachon yana gaplashishni belgilaydi va oʻsha kuni eslatma oladi; «Yoʻqotildi» (narx, boshqa firma, faqat savol…) — 3 kundan keyin navbatdagi boshqa operatorga «Ikkinchi imkoniyat» vazifasi beriladi; «Mijoz emas». Natijalarda har bir operator uchun: nechtasi keyin konsultatsiyaga yozildi.",
+      "<b>TV ekran</b>: Sozlamalar → TV ekran — havolani ofisdagi televizor brauzerida bir marta oching: bugungi qoʻngʻiroqlar, javobsizlar, yozilganlar va har bir operator. Mijoz ismi va raqami koʻrinmaydi.",
+      "<b>Ledger AI</b> koʻproq narsani biladi: raqam yoki mijoz boʻyicha qoʻngʻiroqlar, «oʻylab koʻradi» va ikkinchi imkoniyatlar, kim dam olishda, ogohlantirishlar, sud va boshqa sanalar, kimda qancha naqd pul (Moliya bilan). Telefon liniyasi yoqilgach — qoʻngʻiroq matni, AI tahlili va operator bahosi ham.",
+      "<b>Ilova 3.2.0</b>: keyingi yangilanishlar ilovaning oʻzida yuklanadi — brauzer kerak emas.",
+    ],
+    staff: [
+      {
+        to: () => true,
+        text: "Asosiy sahifaning yuqori oʻng burchagida qoʻngʻiroqcha 🔔 — Ledger sizga yuborgan barcha bildirishnomalar bir joyda.",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCallCenter(u.employee),
+        text: "«Yangi raqamlar: nima boʻldi?» endi uch guruhda. «Oʻylab koʻradi» ni tanlasangiz, qachon yana gaplashishni belgilaysiz — oʻsha kuni eslatma keladi. «Yoʻqotildi» deganlarni bir necha kundan keyin boshqa operator yana urinib koʻradi; sizga ham «Ikkinchi imkoniyat» vazifasi kelishi mumkin — qoʻngʻiroq qilib, natijasini javobga yozasiz.",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE",
+        text: "Ledger ilovasining yangi versiyasi (3.2.0) chiqdi — ilova taklif qilganda yangilang. Keyingi safar yangilanish ilovaning oʻzida yuklanadi.",
+      },
+    ],
+  },
+  {
     id: "2026-10-17-cancel-new-client",
     date: "2026-10-17",
     boss: [
