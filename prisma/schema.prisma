@@ -665,8 +665,8 @@ model Client {
   name          String
   city          String?
   email         String?
-  // Where they came from: "call" | "telegram" | "instagram" | "referral" |
-  // "walk_in" | "other"
+  // Where they came from: "line" (called the Ledger line, set by itself) |
+  // "call" | "telegram" | "instagram" | "referral" | "walk_in" | "other"
   source        String?
   notes         String?
   // When someone should call them next — shown on the operator's home that day.

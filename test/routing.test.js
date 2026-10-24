@@ -39,3 +39,14 @@ test("the day to talk again is tomorrow up to 30 days ahead", () => {
   assert.equal(cleanFollowUp("2026-12-24", "2026-10-24"), null);
   assert.equal(cleanFollowUp("26.10.2026", "2026-10-24"), null);
 });
+
+test("a client who called the Ledger line gets «Ledger liniyasi» as where they came from", async () => {
+  const { calledTheLine, SOURCES } = require("../src/services/clients");
+  assert.ok(SOURCES.includes("line"));
+  const seen = [];
+  const db = { callLog: { count: async ({ where }) => (seen.push(where), where.phoneKey.in.includes("901234567") ? 1 : 0) } };
+  assert.equal(await calledTheLine(db, ["+998 90 123 45 67"]), true);
+  assert.equal(await calledTheLine(db, ["+998 91 000 00 00"]), false);
+  assert.equal(await calledTheLine(db, []), false);
+  assert.deepEqual(seen[0].deviceCallLogId, { startsWith: "pbx:" });
+});

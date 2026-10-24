@@ -476,7 +476,7 @@ const EXPORT_STAGE = {
   review: "Taftish",
   supreme_review: "Oliy sud taftishi",
 };
-const EXPORT_SOURCE = { call: "Qoʻngʻiroq", telegram: "Telegram", instagram: "Instagram", referral: "Tavsiya", walk_in: "Oʻzi keldi", other: "Boshqa" };
+const EXPORT_SOURCE = { line: "Ledger liniyasi", call: "Qoʻngʻiroq", telegram: "Telegram", instagram: "Instagram", referral: "Tavsiya", walk_in: "Oʻzi keldi", other: "Boshqa" };
 
 clients.get("/export", managersOnly, async (req, res, next) => {
   try {
@@ -601,6 +601,9 @@ clients.post("/", async (req, res, next) => {
   try {
     const b = req.body || {};
     const data = clientFields(b);
+    // Someone who called the Ledger line (78 113-90-01): «Ledger liniyasi»,
+    // unless staff picked something more telling than «Qoʻngʻiroq».
+    if ((!data.source || data.source === "call") && (await cl.calledTheLine(prisma, b.phones || []))) data.source = "line";
     if (!data.name) throw badRequest("name is required");
     // "Is this a new client, or one we already had?" — asked in the form;
     // only new ones count as new clients (older portals don't ask: new).

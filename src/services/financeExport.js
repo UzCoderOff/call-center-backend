@@ -3,7 +3,7 @@
 
 const KIND = { consultation: "Konsultatsiya", contract: "Shartnoma", other: "Boshqa" };
 const METHOD = { cash: "Naqd", card: "Karta", transfer: "Oʻtkazma", none: "Koʻrsatilmagan" };
-const SOURCE = { call: "Qoʻngʻiroq", telegram: "Telegram", instagram: "Instagram", referral: "Tavsiya", walk_in: "Oʻzi keldi", other: "Boshqa", none: "Koʻrsatilmagan" };
+const SOURCE = { line: "Ledger liniyasi", call: "Qoʻngʻiroq", telegram: "Telegram", instagram: "Instagram", referral: "Tavsiya", walk_in: "Oʻzi keldi", other: "Boshqa", none: "Koʻrsatilmagan" };
 const STATUS = { booked: "Belgilanmagan", attended: "Keldi", no_show: "Kelmadi", cancelled: "Bekor" };
 const AWAY = { income: "Tushum", expense: "Xarajat" };
 

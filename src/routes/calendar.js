@@ -477,7 +477,7 @@ calendars.post("/:id/appointments", async (req, res, next) => {
         user: req.user,
         lawyerId: calendar.ownerId,
         clientId,
-        source: walkIn ? "walk_in" : "call",
+        source: walkIn ? "walk_in" : (await require("../services/clients").calledTheLine(tx, clientPhone)) ? "line" : "call",
       });
       if (bookedFor) {
         await tx.appointment.update({ where: { id: appointment.id }, data: { clientId: bookedFor } });

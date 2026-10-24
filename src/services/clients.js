@@ -35,7 +35,7 @@ const CLOSED_STATUSES = ["done", "declined"];
 // it over (and stopped answering), didn't trust us, went to another lawyer,
 // couldn't be reached, no longer needed, not a matter the firm takes.
 const LOST_REASONS = ["price", "thinking", "trust", "other_lawyer", "unreachable", "no_need", "not_our_field", "other"];
-const SOURCES = ["call", "telegram", "instagram", "referral", "walk_in", "other"];
+const SOURCES = ["line", "call", "telegram", "instagram", "referral", "walk_in", "other"];
 const LINK_KINDS = ["family", "referral", "same_case", "work", "other"];
 const PAYMENT_METHODS = ["cash", "card", "transfer"];
 const PAYMENT_KINDS = ["consultation", "contract", "other"];
@@ -225,7 +225,16 @@ function normalizePaymentChange(input) {
   return data;
 }
 
+// Whether any of these numbers ever called the Ledger line (78 113-90-01):
+// such a client's source is «Ledger liniyasi» (SOURCES "line").
+async function calledTheLine(db, phones) {
+  const keys = normalizePhones(Array.isArray(phones) ? phones : [phones].filter(Boolean)).map((p) => p.phoneKey).filter(Boolean);
+  if (!keys.length) return false;
+  return (await db.callLog.count({ where: { phoneKey: { in: keys }, deviceCallLogId: { startsWith: "pbx:" }, callType: { not: "outgoing" } } })) > 0;
+}
+
 module.exports = {
+  calledTheLine,
   LOST_REASONS,
   DATE_KINDS,
   INVESTIGATION_KINDS,
