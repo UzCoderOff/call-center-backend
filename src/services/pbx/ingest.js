@@ -251,7 +251,7 @@ async function processCall(callId, ringFiles, rotation) {
   if (!summary) {
     console.warn(`[pbx] call ${callId} (${call.dir || "?"}, ${call.num || "no number"}) belongs to nobody — no call-center staff and no known phone ID; not kept`);
     if (/^[\w.-]+\.wav$/.test(call.rec || "")) removeQuietly(path.join(env.pbx.monitorDir, call.rec));
-    for (const who of ["client", "staff"]) removeQuietly(path.join(env.pbx.monitorDir, `${callId}.${who}.wav`));
+    for (const who of ["client", "staff"]) for (const ext of ["wav", "wav16"]) removeQuietly(path.join(env.pbx.monitorDir, `${callId}.${who}.${ext}`));
     return null;
   }
 

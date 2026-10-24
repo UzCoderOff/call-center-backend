@@ -25,7 +25,12 @@ const DIR = () => path.join(env.storageRoot, "transcribe");
 const SIDES = ["client", "staff"];
 const STUCK_MS = 60 * 60 * 1000;
 
-const sideFile = (callId, who) => path.join(env.pbx.monitorDir, `${callId}.${who}.wav`);
+// A side as Asterisk wrote it: 16 kHz (.wav16, since HD voice) or, from
+// before, 8 kHz (.wav). Either is a plain WAV file.
+function sideFile(callId, who) {
+  const hd = path.join(env.pbx.monitorDir, `${callId}.${who}.wav16`);
+  return fs.existsSync(hd) ? hd : path.join(env.pbx.monitorDir, `${callId}.${who}.wav`);
+}
 const queuedFile = (callLogId, who) => path.join(DIR(), `${callLogId}.${who}.wav`);
 
 // After a call is taken in: queue it (the side files move along) — or, when
