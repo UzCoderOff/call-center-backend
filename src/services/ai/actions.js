@@ -337,10 +337,10 @@ const ACTIONS = {
       if (!analysis || analysis.status !== "done") throw bad("that call has no AI review");
       const reason = text(a.reason, 500);
       if (a.correct === false && !reason) throw bad("say why the review is wrong (reason)");
-      const correct = Boolean(a.correct);
+      const correct = a.correct === true || a.correct === "true";
       return {
         args: { callLogId: analysis.callLog.id, correct, note: reason },
-        summary: `${correct ? "👍 Toʻgʻri" : "👎 Notoʻgʻri"} — ${analysis.callLog.employee.name}ning qoʻngʻiroq tahlili (${analysis.score}/100)${reason ? `: «${reason}»` : ""}`,
+        summary: `${correct ? "👍 Toʻgʻri" : "👎 Notoʻgʻri"} — ${analysis.callLog.employee.name}ning qoʻngʻiroq tahlili (${analysis.score == null ? "baholanmagan" : `${analysis.score}/100`})${reason ? `: «${reason}»` : ""}`,
       };
     },
     async execute(args, user) {

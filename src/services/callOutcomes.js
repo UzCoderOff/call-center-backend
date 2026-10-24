@@ -229,7 +229,15 @@ async function secondChances({ now = new Date(), db = prisma } = {}) {
   }
   const today = firm.date;
   const rows = await db.callOutcome.findMany({
-    where: { secondAt: null, outcome: { in: [...GROUPS.lost, ...GROUPS.thinking] }, createdAt: { gte: new Date(settings.since) } },
+    where: {
+      secondAt: null,
+      createdAt: { gte: new Date(settings.since) },
+      OR: [
+        { outcome: { in: GROUPS.lost } },
+        // Thinking: only once its day (+ grace + the wait) has passed.
+        { outcome: { in: GROUPS.thinking }, OR: [{ followUpOn: null }, { followUpOn: { lte: shiftDate(today, -(THINKING_GRACE_DAYS + 1 + settings.days)) } }] },
+      ],
+    },
     orderBy: { createdAt: "asc" },
     take: 50,
   });
@@ -331,7 +339,7 @@ async function bookingsAfter(keys, fromMs, db = prisma) {
 async function retryResults(employeeIds, { fromMs, toMs }, db = prisma) {
   const range = { gte: new Date(fromMs), lte: new Date(toMs) };
   const rows = await db.callOutcome.findMany({
-    where: { OR: [{ employeeId: { in: employeeIds }, createdAt: range }, { secondEmployeeId: { in: employeeIds }, secondAt: range }] },
+    where: { OR: [{ employeeId: { in: employeeIds }, createdAt: range }, { employeeId: { in: employeeIds }, secondAt: range }, { secondEmployeeId: { in: employeeIds }, secondAt: range }] },
     select: { phoneKey: true, outcome: true, employeeId: true, createdAt: true, secondEmployeeId: true, secondAt: true },
   });
   const blank = () => ({ thinking: { total: 0, booked: 0 }, lost: { total: 0 }, secondGot: { total: 0, booked: 0 }, secondOut: { total: 0, booked: 0 } });

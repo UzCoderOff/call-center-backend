@@ -1,4 +1,5 @@
 const prisma = require("../lib/prisma");
+const { jobWhere } = require("../lib/jobs");
 const { getSetting } = require("../lib/settings");
 const { claudeFeatureOn } = require("./ai/settings");
 const { isCallCenter } = require("../lib/jobs");
@@ -196,7 +197,7 @@ async function lessons(db = prisma) {
     select: { feedbackCorrect: true, feedbackNote: true, score: true, details: true },
   });
   return rows
-    .map((r) => `- ${r.details?.topic || "Qoʻngʻiroq"}: AI ${r.score}/100 bergan — rahbar: ${r.feedbackCorrect ? "toʻgʻri" : "notoʻgʻri"}. ${r.feedbackNote}`)
+    .map((r) => `- ${r.details?.topic || "Qoʻngʻiroq"}: AI ${r.score == null ? "baholamagan" : `${r.score}/100 bergan`} — rahbar: ${r.feedbackCorrect ? "toʻgʻri" : "notoʻgʻri"}. ${r.feedbackNote}`)
     .join("\n");
 }
 
@@ -277,7 +278,7 @@ async function tellOperator(call, analysis) {
 async function tick() {
   if (!(await claudeFeatureOn("callReview"))) return 0;
   const rows = await prisma.transcript.findMany({
-    where: { status: "done", callLog: { analysis: null, missed: false, durationSeconds: { gte: MIN_TALK_SEC } } },
+    where: { status: "done", text: { not: "" }, callLog: { analysis: null, missed: false, durationSeconds: { gte: MIN_TALK_SEC }, employee: jobWhere(["call_center"]) } },
     orderBy: { updatedAt: "desc" },
     take: 5,
     select: { callLogId: true },

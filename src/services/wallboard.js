@@ -78,8 +78,10 @@ async function revoke(user) {
 
 async function validToken(token) {
   const s = await getSetting(SETTING, {});
-  if (!s.token || typeof token !== "string" || token.length !== s.token.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(s.token));
+  if (!s.token || typeof token !== "string") return false;
+  const given = Buffer.from(token);
+  const wanted = Buffer.from(s.token);
+  return given.length === wanted.length && crypto.timingSafeEqual(given, wanted);
 }
 
 // Who is on a call right now (Ledger's line): ext -> "talking" | "ringing",
@@ -91,7 +93,7 @@ async function lineNow() {
   const channels = (await state.ami.actionList({ Action: "CoreShowChannels" })).filter((e) => e.Event === "CoreShowChannel");
   const calls = live.liveCalls(channels);
   const byExt = new Map();
-  for (const c of calls) for (const e of c.exts) if (byExt.get(e.ext) !== "talking") byExt.set(e.ext, { state: e.state, seconds: c.seconds });
+  for (const c of calls) for (const e of c.exts) if (byExt.get(e.ext)?.state !== "talking") byExt.set(e.ext, { state: e.state, seconds: c.seconds });
   return { on: true, byExt, waiting: calls.filter((c) => c.state === "waiting").length, talking: calls.filter((c) => c.state === "talking").length };
 }
 

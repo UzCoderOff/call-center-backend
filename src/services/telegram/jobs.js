@@ -38,11 +38,12 @@ async function missedCalls(now) {
       callTimestampMs: { gte: oldest, lte: newest },
       // The call center's job (Employee.job): someone else's monitored phone
       // isn't a sales line to call back from.
-      // …and someone a notification reaches (Telegram, the app or a browser).
+      // …with an account (the bell has everything, even without Telegram,
+      // the app or browser notifications).
       employee: {
         active: true,
+        userId: { not: null },
         AND: [hasCallsWhere(), jobWhere(["call_center"])],
-        user: { is: { OR: [{ telegram: { is: { chatId: { not: null } } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }, { webPush: { some: {} } }] } },
       },
     },
     select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { userId: true } } },
@@ -85,6 +86,8 @@ async function digests(now) {
   if (!WORK_DAYS.includes(isoWeekday(now.date)) || now.minutes < at(8, 30) || now.minutes >= at(10)) return;
   for (const user of await linkedUsers()) {
     if (!wants(user, "digest")) continue;
+    // Sent already today: not built again (this runs every minute until 10:00).
+    if (await prisma.telegramNotice.findUnique({ where: { key: `digest:${user.id}:${now.date}` } })) continue;
     const text = await myDay(user, { now, morning: true });
     if (!text) continue;
     await once(`digest:${user.id}:${now.date}`, () => notifyUser(user, "digest", text));

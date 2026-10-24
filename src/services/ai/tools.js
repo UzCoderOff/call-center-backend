@@ -786,7 +786,7 @@ const TOOLS = [
       const results = await co.retryResults(ids, { fromMs: p.fromMs, toMs: p.toMs });
       const range = { gte: new Date(p.fromMs), lte: new Date(p.toMs) };
       const rows = await prisma.callOutcome.findMany({
-        where: { OR: [{ employeeId: { in: ids }, createdAt: range }, { secondEmployeeId: { in: ids }, secondAt: range }] },
+        where: { OR: [{ employeeId: { in: ids }, createdAt: range }, { employeeId: { in: ids }, secondAt: range }, { secondEmployeeId: { in: ids }, secondAt: range }] },
         orderBy: { createdAt: "desc" },
         include: { employee: { select: { name: true } }, secondEmployee: { select: { name: true } } },
       });

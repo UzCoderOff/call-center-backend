@@ -151,7 +151,9 @@ async function checkToken(token) {
   const [payload, mac] = String(token || "").split(".");
   if (!payload || !mac) return null;
   const expected = sign(payload);
-  if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
+  const given = Buffer.from(mac);
+  const wanted = Buffer.from(expected);
+  if (given.length !== wanted.length || !crypto.timingSafeEqual(given, wanted)) return null;
   let data;
   try {
     data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
