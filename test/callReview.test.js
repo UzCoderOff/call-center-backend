@@ -115,3 +115,9 @@ test("the Monday tip: last week's score and change, best parts, one thing to wor
   assert.match(team, /Aziz — 70\/100 \(3 ta\) ↓5 · ustida ishlash: Xulosa/);
   assert.doesNotMatch(team, /Yangi/);
 });
+
+test("call text is written with the proper Uzbek letters", () => {
+  const { uzLetters } = require("../src/services/pbx/transcribe");
+  assert.equal(uzLetters("O'tdi, bo'ldi, g'alaba, ma'lum, qo`ydim"), "Oʻtdi, boʻldi, gʻalaba, maʼlum, qoʻydim");
+  assert.equal(uzLetters("'Salom' dedi"), "'Salom' dedi");
+});

@@ -89,9 +89,17 @@ async function next() {
   return {};
 }
 
+// The proper Uzbek letters: models write oʻ / gʻ and the tutuq belgisi with a
+// plain apostrophe (o'tdi, ma'lum) — Ledger writes oʻ, gʻ and ʼ.
+function uzLetters(text) {
+  return text
+    .replace(/([OoGg])['‘’`ʼ]/g, "$1ʻ")
+    .replace(/([A-Za-zʻ])['’`](?=[A-Za-z])/g, "$1ʼ");
+}
+
 const cleanSegments = (list) =>
   (Array.isArray(list) ? list : [])
-    .map((s) => ({ who: ["client", "staff", "mix"].includes(s?.who) ? s.who : "mix", start: Number(s?.start) || 0, end: Number(s?.end) || 0, text: String(s?.text || "").trim().slice(0, 2000) }))
+    .map((s) => ({ who: ["client", "staff", "mix"].includes(s?.who) ? s.who : "mix", start: Number(s?.start) || 0, end: Number(s?.end) || 0, text: uzLetters(String(s?.text || "").trim()).slice(0, 2000) }))
     .filter((s) => s.text)
     .sort((a, b) => a.start - b.start)
     .slice(0, 2000);
@@ -136,4 +144,4 @@ async function busy() {
   return value;
 }
 
-module.exports = { queueOrDrop, next, done, failed, busy, cleanSegments, filesFor, DIR };
+module.exports = { queueOrDrop, next, done, failed, busy, cleanSegments, uzLetters, filesFor, DIR };

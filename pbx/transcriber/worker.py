@@ -26,7 +26,11 @@ import numpy as np
 
 HOOK = os.environ.get("LEDGER_HOOK", "http://127.0.0.1:4001").rstrip("/")
 SECRET = os.environ.get("PBX_HOOK_SECRET", "")
-MODEL_DIR = os.environ.get("MODEL_DIR", os.path.expanduser("~/uz-asr-server/models/qirol-ct2"))
+# The call-center Uzbek model (Abduqayum/whisper-uzbek-medium-callcenter, trained
+# on telephone-band audio) — chosen 2026-10-24 over qirol-turbo, which garbled
+# real line calls.
+MODEL_DIR = os.environ.get("MODEL_DIR", os.path.expanduser("~/uz-asr-server/models/callcenter-ct2"))
+BEAM = int(os.environ.get("BEAM_SIZE", "5"))
 THREADS = int(os.environ.get("THREADS", "4"))
 ASK_EVERY = 20  # seconds between asking for work when there's none
 UNLOAD_AFTER = 300  # seconds without work: free the model's memory
@@ -83,7 +87,7 @@ def transcribe(model, audio):
     segments, _ = model.transcribe(
         audio,
         language="uz",
-        beam_size=1,
+        beam_size=BEAM,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
         condition_on_previous_text=False,
