@@ -19,9 +19,27 @@ test("what's new: the boss gets the summary, staff only what touches their work,
   assert.equal(messageFor(news, developer), null);
 });
 
+test("what's new 2026-10-24: everyone hears about the bell, operators about second chances, staff about the app", () => {
+  const news = NEWS.find((n) => n.id === "2026-10-24-bell-second-chance-tv");
+  assert.equal(NEWS[0], news);
+  const operator = { role: "EMPLOYEE", employee: { job: "call_center" } };
+  const office = { role: "EMPLOYEE", employee: { job: "office" } };
+  const lawyer = { role: "LAWYER", employee: null };
+  const boss = messageFor(news, { role: "BOSS" });
+  assert.match(boss, /TV ekran/);
+  assert.match(boss, /Ledger AI/);
+  assert.match(messageFor(news, operator), /Ikkinchi imkoniyat/);
+  assert.match(messageFor(news, operator), /3\.2\.0/);
+  assert.doesNotMatch(messageFor(news, office), /Ikkinchi imkoniyat/);
+  assert.match(messageFor(news, office), /qoʻngʻiroqcha/);
+  assert.match(messageFor(news, lawyer), /qoʻngʻiroqcha/);
+  assert.doesNotMatch(messageFor(news, lawyer), /3\.2\.0/);
+  assert.equal(messageFor(news, { role: "DEVELOPER" }), null);
+});
+
 test("what's new 2026-10-17 (second): cancelling, the new-client question, calls by direction", () => {
   const news = NEWS.find((n) => n.id === "2026-10-17-cancel-new-client");
-  assert.equal(NEWS[0], news);
+  assert.equal(NEWS[1], news);
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", calendarAccess: "book" } };
   const office = { role: "EMPLOYEE", employee: { job: "office" } };
   const boss = messageFor(news, { role: "BOSS" });
@@ -36,7 +54,7 @@ test("what's new 2026-10-17 (second): cancelling, the new-client question, calls
 
 test("what's new 2026-10-17: one consultation count, task answers, new callers, walk-ins", () => {
   const news = NEWS.find((n) => n.id === "2026-10-17-consultations-answers");
-  assert.equal(NEWS[1], news);
+  assert.equal(NEWS[2], news);
   const operator = { role: "EMPLOYEE", employee: { job: "call_center" } };
   const office = { role: "EMPLOYEE", employee: { job: "office" } };
   const lawyer = { role: "LAWYER" };
@@ -50,7 +68,7 @@ test("what's new 2026-10-17: one consultation count, task answers, new callers, 
 
 test("what's new 2026-10-15: the clients' Telegram — the boss and the call center", () => {
   const news = NEWS.find((n) => n.id === "2026-10-15-telegram-inbox");
-  assert.equal(NEWS[2], news);
+  assert.equal(NEWS[3], news);
   const boss = { role: "BOSS" };
   const operator = { role: "EMPLOYEE", employee: { job: "call_center" } };
   const lawyer = { role: "LAWYER" };
@@ -64,7 +82,7 @@ test("what's new 2026-10-15: the clients' Telegram — the boss and the call cen
 
 test("what's new 2026-10-15: office calls back, who took the cash", () => {
   const news = NEWS.find((n) => n.id === "2026-10-15-office-calls-cash");
-  assert.equal(NEWS[3], news);
+  assert.equal(NEWS[4], news);
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", extraJobs: "" }, calendar: null };
   const office = { role: "EMPLOYEE", employee: { job: "office", collectCalls: true, calendarAccess: "none", extraJobs: "" }, calendar: null };
   const quiet = { role: "EMPLOYEE", employee: { job: "office", collectCalls: false, calendarAccess: "none", extraJobs: "" }, calendar: null };
