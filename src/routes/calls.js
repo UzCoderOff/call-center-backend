@@ -185,6 +185,22 @@ router.get("/:id", async (req, res, next) => {
   }
 });
 
+// A manager's check of a call's AI review (services/callReview.js, beta):
+// { correct: true | false | null, note } — corrections teach the AI.
+router.put("/:id/review-feedback", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) return res.status(403).json({ error: "forbidden" });
+    const id = parseId(req.params.id);
+    const { correct, note } = req.body || {};
+    if (correct !== null && typeof correct !== "boolean") throw badRequest("correct must be true, false or null");
+    const exists = await prisma.callAnalysis.findUnique({ where: { callLogId: id }, select: { id: true } });
+    if (!exists) return res.status(404).json({ error: "not_found" });
+    res.json(await require("../services/callReview").setFeedback(id, req.user, { correct, note: typeof note === "string" ? note.trim() : null }));
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Manually mark a missed call as handled (the caller was reached some
 // other way — Telegram, in person, a personal phone) or undo that.
 // Employees can do this for their own calls; managers for anyone's.

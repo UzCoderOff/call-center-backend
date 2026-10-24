@@ -7,7 +7,7 @@ const f = require("../src/services/telegram/format");
 
 test("each person gets the notification kinds that fit their job", () => {
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", autoReport: true, reportTemplateId: 3 }, calendar: null };
-  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "chat", "news"]);
+  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "callReviews", "chat", "news"]);
 
   const clerk = { role: "EMPLOYEE", employee: { collectCalls: false, calendarAccess: "none", autoReport: false, reportTemplateId: 3 }, calendar: null };
   assert.deepEqual(applicableKinds(clerk), ["digest", "reportReminder", "materials", "tasks", "targets", "chat", "news"]);

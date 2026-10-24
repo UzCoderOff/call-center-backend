@@ -251,6 +251,7 @@ async function processCall(callId, ringFiles, rotation) {
   if (!summary) {
     console.warn(`[pbx] call ${callId} (${call.dir || "?"}, ${call.num || "no number"}) belongs to nobody — no call-center staff and no known phone ID; not kept`);
     if (/^[\w.-]+\.wav$/.test(call.rec || "")) removeQuietly(path.join(env.pbx.monitorDir, call.rec));
+    for (const who of ["client", "staff"]) removeQuietly(path.join(env.pbx.monitorDir, `${callId}.${who}.wav`));
     return null;
   }
 
@@ -282,6 +283,15 @@ async function processCall(callId, ringFiles, rotation) {
     select: { id: true },
   });
   await rotation.save();
+  // Each side of the call, kept apart for the transcriber: queued when the
+  // call is one the AI reviews (an operator's, long enough), else dropped.
+  try {
+    const { reviewable } = require("../callReview");
+    const employee = await prisma.employee.findUnique({ where: { id: summary.employeeId } });
+    await require("./transcribe").queueOrDrop(callId, row, { review: reviewable({ ...summary, employee }) && Boolean(recording.recordingPath) });
+  } catch (err) {
+    console.error(`[pbx] call ${callId}: queueing it for text failed:`, err.message);
+  }
   if (key) {
     try {
       await reconcileFollowUps([key]);

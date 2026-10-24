@@ -22,6 +22,7 @@ const KINDS = [
   { key: "hearings", label: "Sud va tergov sanalari", hint: "bir kun oldin kechqurun, oʻsha kuni ertalab va natija yozilmaganda" },
   { key: "followUps", label: "Eslatmalar", hint: "mijozga qoʻngʻiroq yoki qaror muddati kelganda" },
   { key: "strikes", label: "Ogohlantirishlar", hint: "javobsiz qoʻngʻiroqqa oʻz vaqtida qayta qoʻngʻiroq qilinmaganda" },
+  { key: "callReviews", label: "Qoʻngʻiroq tahlili (Beta)", hint: "qoʻngʻiroqingiz matnga aylantirilib, AI baholaganda" },
   { key: "summaries", label: "Suhbat yakunlari", hint: "konsultatsiyadan keyin yakun yozilmagan boʻlsa" },
   { key: "aiReports", label: "AI hisobotlari", hint: "dushanba kungi haftalik hisobot va oylik tahlil" },
   { key: "chat", label: "Chat", hint: "yangi xabarlar — Ledger ilovasi boʻlmasa" },
@@ -65,6 +66,8 @@ function applicableKinds(user) {
   if (isManagerUser(user) || user.role === "LAWYER" || countsCalls(e) || e?.calendarAccess === "book" || isCoordinator(e)) out.push("followUps");
   // Late call-back strikes: the call center, and the managers (over the limit).
   if (isManagerUser(user) || isCallCenter(e)) out.push("strikes");
+  // Their calls reviewed by the AI (services/callReview.js): the call center.
+  if (isCallCenter(e)) out.push("callReviews");
   // Ledger AI's weekly report and monthly analysis: the managers.
   if (isManagerUser(user)) out.push("aiReports");
   // Chat messages (services/chat.js): here only for people without the app.

@@ -16,6 +16,10 @@ const env = require("../../config/env");
 //           coordinator first (route.js); "" — the call-center line
 //   POST /pbx/test-call  s=<secret>&ext=203&kind=client|unknown
 //        -> "1": a test call rings that phone in a few seconds (testCall.js)
+//
+// And the server's transcriber (pbx/transcriber, transcribe.js) — JSON, the
+// secret in the X-Ledger-Secret header:
+//   POST /pbx/busy, /pbx/transcribe/next, /pbx/transcribe/done, /pbx/transcribe/failed
 
 function readBody(req) {
   return new Promise((resolve) => {
@@ -28,6 +32,26 @@ function readBody(req) {
   });
 }
 
+// A JSON body (the transcriber's text can be long).
+function readJson(req, limit = 4 * 1024 * 1024) {
+  return new Promise((resolve) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > limit) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        resolve(JSON.parse(body || "{}"));
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
+const TRANSCRIBE = { "/pbx/busy": "busy", "/pbx/transcribe/next": "next", "/pbx/transcribe/done": "done", "/pbx/transcribe/failed": "failed" };
+
 async function handle(req, res, handlers) {
   const reply = (status, text) => {
     res.writeHead(status, { "Content-Type": "text/plain" });
@@ -36,6 +60,14 @@ async function handle(req, res, handlers) {
   try {
     if (req.method === "GET" && req.url === "/pbx/health") return reply(200, "ok");
     if (req.method !== "POST") return reply(404, "not found");
+    if (TRANSCRIBE[req.url]) {
+      if (!env.pbx.hookSecret || req.headers["x-ledger-secret"] !== env.pbx.hookSecret) return reply(403, "forbidden");
+      const t = require("./transcribe");
+      const body = await readJson(req);
+      const out = await t[TRANSCRIBE[req.url]](body);
+      res.writeHead(200, { "Content-Type": typeof out === "string" ? "text/plain" : "application/json" });
+      return res.end(typeof out === "string" ? out : JSON.stringify(out));
+    }
     const params = await readBody(req);
     if (!env.pbx.hookSecret || params.get("s") !== env.pbx.hookSecret) return reply(403, "forbidden");
     if (req.url === "/pbx/wake") return reply(200, await handlers.wake({ ext: params.get("ext"), call: params.get("call"), from: params.get("from") }));

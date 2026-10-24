@@ -504,6 +504,9 @@ model Transcript {
   callLog   CallLog @relation(fields: [callLogId], references: [id], onDelete: Cascade)
 
   text         String?
+  // Who said what, when (calls on Ledger's line, transcribed on the server
+  // by pbx/transcriber): [{ who: "client" | "staff" | "mix", start, end, text }].
+  segments     Json?
   language     String?
   provider     String? // e.g. "elevenlabs"
   status       String  @default("pending") // "pending" | "processing" | "done" | "failed"
@@ -528,6 +531,18 @@ model CallAnalysis {
   model            String? // which LLM produced this review
   status           String  @default("pending") // "pending" | "processing" | "done" | "failed"
   errorMessage     String?
+  // The AI review against the firm's call standard (services/callReview.js,
+  // beta): { kind, topic, outcome, criteria [{ key, points, max, note }],
+  // good [], improve [], betterLines [{ said, better }] }.
+  details          Json?
+  costUsd          Float?
+  // When the operator was told the review is ready.
+  notifiedAt       DateTime?
+  // A manager's check of the review (Toʻgʻri / Notoʻgʻri, a word why).
+  feedbackCorrect  Boolean?
+  feedbackNote     String?
+  feedbackById     Int?
+  feedbackAt       DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

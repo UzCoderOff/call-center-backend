@@ -115,7 +115,24 @@ async function tgReviewTick() {
   }
 }
 
+// Operators' calls turned into text but not reviewed yet (services/callReview.js).
+const CALL_REVIEW_EVERY_MS = 5 * 60 * 1000;
+let callReviewing = false;
+async function callReviewTick() {
+  if (callReviewing) return;
+  callReviewing = true;
+  try {
+    await require("./callReview").tick();
+  } catch (err) {
+    console.error("[call-review] failed:", err.message);
+  } finally {
+    callReviewing = false;
+  }
+}
+
 function start() {
+  setTimeout(callReviewTick, 3 * 60 * 1000).unref();
+  setInterval(callReviewTick, CALL_REVIEW_EVERY_MS).unref();
   setTimeout(tgReviewTick, 2 * 60 * 1000).unref();
   setInterval(tgReviewTick, TG_REVIEW_EVERY_MS).unref();
   setTimeout(coversTick, 40 * 1000).unref();
@@ -130,4 +147,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick };
+module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick };

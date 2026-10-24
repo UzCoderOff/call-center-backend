@@ -1,0 +1,26 @@
+# Ledger's transcriber (pbx/transcriber/worker.py): calls to text with the
+# firm's Uzbek model, only when the server is free. Installed by
+# pbx/transcriber/install.sh.
+[Unit]
+Description=Ledger transcriber (calls to text, only when the server is free)
+After=network.target asterisk.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+# Reads the calls' side recordings (asterisk-owned, group ledgerpbx).
+SupplementaryGroups=ledgerpbx
+EnvironmentFile=/etc/ledger-transcriber.env
+ExecStart=/home/ubuntu/uz-asr-server/.venv/bin/python /home/ubuntu/uz-asr-server/worker.py
+# Only when nothing else wants the processor or the disk.
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+# Never more than 2 GB: stopped rather than squeezing Ledger or the calls.
+MemoryMax=2G
+MemorySwapMax=0
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

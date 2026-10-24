@@ -152,6 +152,31 @@ Only Uzbek numbers can be dialled out (`[staff-out]`). Anything abroad,
 emergency or short numbers get refused. The outside line can only reach
 `[company-line]`.
 
+## Calls to text, and the AI review (beta)
+
+Operators' calls are turned into text on this server with the firm's own Uzbek
+speech model, then reviewed by Claude Haiku against the firm's call standard
+(«Qoʻngʻiroq standarti», 2-versiya).
+
+- **Recording:** each side of a call is recorded on its own (`<call>.client.wav`,
+  `<call>.staff.wav`, `MixMonitor r()/t()`), so the text says who said what.
+- **Which calls:** an operator's (call center) answered calls of 20 s or more go
+  in the queue (`src/services/pbx/transcribe.js`). The rest are dropped.
+- **The transcriber:** `pbx/transcriber/worker.py`, a systemd service
+  (`ledger-transcriber`). It asks Ledger for work on the hooks listener.
+  - It runs at idle priority, waits while anyone is on a call, and holds the
+    model (about 1.6 GB) only while there is work. It's capped at 2 GB.
+  - On this server it measured about 2× faster than the call itself.
+- **The review:** `src/services/callReview.js`. It gives points for the nine
+  criteria, what was good, what to improve, and "said → better".
+  - The operator is told (notification kind `callReviews`).
+  - A manager can mark a review right or wrong; those corrections teach it.
+  - The Sozlamalar → AI switch "callReview" turns it off.
+- **Installing:** copy the converted model to `~/uz-asr-server/models/qirol-ct2`,
+  then run `bash pbx/transcriber/install.sh`.
+- **Checking:** `systemctl status ledger-transcriber` and
+  `journalctl -u ledger-transcriber -n 30`.
+
 ## Checking on it
 
 ```bash
