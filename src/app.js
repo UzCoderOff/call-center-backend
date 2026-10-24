@@ -137,6 +137,7 @@ app.use("/api/reminders", require("./routes/reminders"));
 app.use("/api/chat", require("./routes/chat"));
 app.use("/api/push", require("./routes/push"));
 app.use("/api/live", require("./routes/live"));
+app.use("/api/notices", require("./routes/notices"));
 app.use("/api/performance", performanceRoutes);
 app.use("/api/holidays", daysOffRoutes.holidays);
 app.use("/api/absences", daysOffRoutes.absences);

@@ -6,6 +6,7 @@ const { firmDate } = require("../lib/firmTime");
 const { canSeeFinance } = require("../lib/finance");
 const { monthPerformance, history } = require("../services/performance");
 const { cashBalances } = require("../services/cash");
+const { ratings } = require("../services/callRating");
 const { buildWorkbook } = require("../lib/xlsx");
 const { events } = require("../lib/events");
 const { BUILTIN_NAMES, FINANCE_ONLY, parseKey, formMeasures, catalogFor, targetsFor } = require("../services/performanceMetrics");
@@ -14,6 +15,7 @@ const { BUILTIN_NAMES, FINANCE_ONLY, parseKey, formMeasures, catalogFor, targets
 //
 //   GET    /api/performance?month=YYYY-MM          everyone (managers) — or just yourself
 //   GET    /api/performance/:employeeId?month=     one person: + day by day, six months
+//   GET    /api/performance/:employeeId/call-rating  stars from the AI call reviews (beta)
 //   GET    /api/performance/:employeeId/costs      what they cost per month (Moliya)
 //   PUT    /api/performance/:employeeId/costs      { fromMonth, amount, note? } (Moliya)
 //   DELETE /api/performance/:employeeId/costs/:id  (Moliya)
@@ -77,6 +79,8 @@ router.get("/", async (req, res, next) => {
       orderBy: { name: "asc" },
     });
     const data = await monthPerformance({ month, employees, finance: withMoney(req.user), selfId: req.user.employee?.id ?? null });
+    const rated = await ratings(employees.map((e) => e.id));
+    for (const row of data.rows) row.callRating = rated.get(row.employee.id) ?? null;
     res.json({ ...data, current: firmDate().slice(0, 7), finance: withMoney(req.user), mineOnly: !isManager(req.user) });
   } catch (err) {
     next(err);
@@ -216,6 +220,7 @@ router.get("/:employeeId", async (req, res, next) => {
     // Strikes: the person sees theirs, the fine only managers.
     const row = data.rows[0];
     if (row.strikes && !isManager(req.user)) row.strikes = { ...row.strikes, fine: undefined };
+    row.callRating = (await ratings([employee.id])).get(employee.id) ?? null;
     res.json({
       month,
       current: firmDate().slice(0, 7),
@@ -229,6 +234,17 @@ router.get("/:employeeId", async (req, res, next) => {
       // Cash in their hands now (Kassa).
       cash: employee.userId ? ((await cashBalances({ userIds: [employee.userId] }))[0] ?? { taken: 0, handed: 0, holding: 0 }) : null,
     });
+  } catch (err) {
+    sendError(err, res, next);
+  }
+});
+
+// Their rating from the AI call reviews (services/callRating.js): the
+// profile page (Team → person) shows it without the whole month.
+router.get("/:employeeId/call-rating", async (req, res, next) => {
+  try {
+    const employee = await loadEmployee(req);
+    res.json({ rating: (await ratings([employee.id])).get(employee.id) ?? null });
   } catch (err) {
     sendError(err, res, next);
   }

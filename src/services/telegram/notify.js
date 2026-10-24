@@ -12,8 +12,6 @@ const app = require("../notify");
 const USER_CONTEXT = { employee: true, calendar: true, telegram: true };
 
 const enabled = () => Boolean(env.telegram.token);
-// Notifications go somewhere at all: the bot, the app, or both.
-const anyChannel = () => enabled() || app.configured();
 
 function active(user) {
   if (!user?.active) return false;
@@ -44,7 +42,6 @@ async function sendTo(user, text, extra) {
 // `app: false`: Telegram only (e.g. the Telegram test message); `appExtra`:
 // what only the app shows ({ kind, phone, tag }, services/notify.js).
 async function notifyUser(userOrId, kind, text, extra, { app: toApp = true, appExtra = {} } = {}) {
-  if (!anyChannel()) return false;
   const user =
     typeof userOrId === "object" && userOrId.telegram !== undefined
       ? userOrId
@@ -63,16 +60,11 @@ async function notifyUser(userOrId, kind, text, extra, { app: toApp = true, appE
   return delivered;
 }
 
-// Everyone notifications can reach — Telegram connected, the Ledger app
-// with push, or a browser with notifications on — with what notify needs.
+// Everyone notifications are for, with what notify needs. Not only those
+// with Telegram, the app or browser notifications: everything also goes to
+// the bell on the home page (services/notify.js).
 function linkedUsers(where = {}) {
-  return prisma.user.findMany({
-    where: {
-      active: true,
-      AND: [where, { OR: [{ telegram: { chatId: { not: null } } }, { devices: { some: { revokedAt: null, fcmToken: { not: null } } } }, { webPush: { some: {} } }] }],
-    },
-    include: USER_CONTEXT,
-  });
+  return prisma.user.findMany({ where: { active: true, AND: [where] }, include: USER_CONTEXT });
 }
 
 // Runs `send` only if nothing was sent under `key` before — so a restart,
@@ -89,4 +81,4 @@ async function once(key, send) {
   return send();
 }
 
-module.exports = { notifyUser, linkedUsers, once, enabled, anyChannel, reachable, disconnect, USER_CONTEXT };
+module.exports = { notifyUser, linkedUsers, once, enabled, reachable, disconnect, USER_CONTEXT };

@@ -1449,6 +1449,8 @@ model Notice {
   // Notifications with the same tag replace each other on the phone (one
   // per chat).
   tag       String?
+  // Seen in the bell on the home page (routes/notices.js); null = new.
+  readAt    DateTime?
   createdAt DateTime @default(now())
 
   @@index([userId, createdAt])

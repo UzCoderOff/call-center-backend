@@ -13,6 +13,10 @@ const web = require("./push/web");
 // Everything the staff bot sends on Telegram comes here too
 // (services/telegram/notify.js), and things only the app and browsers get
 // (chat, services/chat.js).
+//
+// Every notification is kept (KEEP_DAYS), whether or not it reached a
+// phone or browser: the bell on the home page lists them
+// (routes/notices.js) — all but chat messages, which the chat has.
 
 const KEEP_DAYS = 45;
 // Still worth showing if the phone was off for a while.
@@ -42,13 +46,9 @@ async function hasApp(userId) {
   return web.hasBrowser(userId);
 }
 
-// { title, body?, link?, phone?, tag?, kind? } -> the person's phones and
-// browsers. Whether at least one took it.
+// { title, body?, link?, phone?, tag?, kind? } -> the bell, and the
+// person's phones and browsers. Whether at least one of those took it.
 async function notifyPush(userId, notice) {
-  if (!configured()) return false;
-  const devices = push.configured() ? await appDevices(userId) : [];
-  const browsers = await web.hasBrowser(userId);
-  if (devices.length === 0 && !browsers) return false;
   const row = await prisma.notice.create({
     data: {
       userId,
@@ -60,6 +60,10 @@ async function notifyPush(userId, notice) {
       tag: clip(notice.tag, 60),
     },
   });
+  if (!IN_BELL_HIDDEN.has(row.kind)) require("./live").bump([userId]);
+  if (!configured()) return false;
+  const devices = push.configured() ? await appDevices(userId) : [];
+  const browsers = await web.hasBrowser(userId);
   let sent = false;
   for (const device of devices) {
     if ((await push.sendToDevice(device, { t: "notice", n: row.id }, { ttlSec: TTL_SEC })) === "sent") sent = true;
@@ -101,8 +105,35 @@ function publicNotice(n) {
   return { id: n.id, kind: n.kind, title: n.title, body: n.body, link: n.link, phone: n.phone, tag: n.tag, createdAt: n.createdAt };
 }
 
+// The bell: newest first, `limit` at a time, older than notice `before`.
+const IN_BELL_HIDDEN = new Set(["chat"]);
+const bellWhere = (userId) => ({ userId, OR: [{ kind: null }, { kind: { notIn: [...IN_BELL_HIDDEN] } }] });
+
+async function bell(userId, { before, limit = 30 } = {}) {
+  const take = Math.min(Math.max(Number(limit) || 30, 1), 100);
+  const where = bellWhere(userId);
+  if (Number.isInteger(before)) where.id = { lt: before };
+  const rows = await prisma.notice.findMany({ where, orderBy: { id: "desc" }, take: take + 1 });
+  const unread = await prisma.notice.count({ where: { ...bellWhere(userId), readAt: null } });
+  return { items: rows.slice(0, take).map((n) => ({ ...publicNotice(n), readAt: n.readAt })), more: rows.length > take, unread };
+}
+
+const bellUnread = (userId) => prisma.notice.count({ where: { ...bellWhere(userId), readAt: null } });
+
+// Seen: these ids, or everything up to notice `upTo`.
+async function markSeen(userId, { ids, upTo } = {}) {
+  const where = { userId, readAt: null };
+  if (Array.isArray(ids)) where.id = { in: ids.filter(Number.isInteger).slice(0, 200) };
+  else if (Number.isInteger(upTo)) where.id = { lte: upTo };
+  else return 0;
+  const { count } = await prisma.notice.updateMany({ where, data: { readAt: new Date() } });
+  // The bell's number on the person's other screens.
+  if (count) require("./live").bump([userId]);
+  return count;
+}
+
 async function cleanup() {
   await prisma.notice.deleteMany({ where: { createdAt: { lt: new Date(Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000) } } });
 }
 
-module.exports = { configured, notifyPush, hasApp, fromTelegram, publicNotice, cleanLink, cleanup };
+module.exports = { configured, notifyPush, hasApp, fromTelegram, publicNotice, cleanLink, cleanup, bell, bellUnread, markSeen, IN_BELL_HIDDEN };

@@ -63,3 +63,30 @@ test("only an operator's answered, long enough call is reviewed", () => {
   assert.equal(reviewable({ missed: true, durationSeconds: 0, employee: operator }), false);
   assert.equal(reviewable({ missed: false, durationSeconds: 60, employee: { job: "coordinator", extraJobs: "" } }), false);
 });
+
+test("an operator's rating: stars from the average, a word, the trend, best and worst parts", () => {
+  const { rate, MIN_REVIEWS } = require("../src/services/callRating");
+  const review = (score, shares) => ({
+    score,
+    details: { criteria: CRITERIA.map((key) => ({ key, points: Math.round((shares[key] ?? 0.65) * MAX[key]) })), grossErrors: score < 50 ? ["x"] : [] },
+    at: "2026-10-20T10:00:00.000Z",
+  });
+  assert.deepEqual(rate([review(90, {}), review(80, {})]), { count: 2, enough: false, needed: MIN_REVIEWS });
+  // Newest first: the newer five ~84, the older five ~44 — going up.
+  const list = [
+    ...[86, 84, 82, 85, 83].map((s) => review(s, { greeting: 1, manner: 0.9, summary: 0.2 })),
+    ...[44, 46, 42, 45, 43].map((s) => review(s, { greeting: 1, manner: 0.9, summary: 0.2 })),
+  ];
+  const r = rate(list);
+  assert.equal(r.enough, true);
+  assert.equal(r.score, 64);
+  assert.equal(r.stars, 3.2);
+  assert.equal(r.level, "fair");
+  assert.equal(r.trend, "up");
+  assert.deepEqual(
+    r.best.map((p) => p.key),
+    ["greeting", "manner"]
+  );
+  assert.equal(r.worst[0].key, "summary");
+  assert.equal(r.gross, 5);
+});
