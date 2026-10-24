@@ -2,11 +2,13 @@ const crypto = require("crypto");
 const prisma = require("../lib/prisma");
 const { getSetting, setSetting } = require("../lib/settings");
 const { firmNow, firmDayRange } = require("../lib/firmTime");
-const { jobWhere, isCallCenter } = require("../lib/jobs");
+const { jobWhere } = require("../lib/jobs");
+const { CALL_JOBS, callsMatter } = require("../lib/calling");
 const { computeCallStats } = require("./stats");
 const { workingDates } = require("./workdays");
 
-// The call center on the office TV (the user's pick, 2026-10-24): a page
+// The call center (and the coordinators, who are on the line too) on the
+// office TV (the user's pick, 2026-10-24): a page
 // that needs no login — a long secret link a manager makes in Settings and
 // can replace or switch off — showing the day as it goes: who is talking
 // right now, how many are waiting, today's calls, missed ones not called
@@ -57,11 +59,11 @@ async function data(now = new Date()) {
   const day = firmDayRange(firm.date);
   const people = (
     await prisma.employee.findMany({
-      where: { active: true, ...jobWhere(["call_center"]) },
+      where: { active: true, ...jobWhere(CALL_JOBS) },
       select: { id: true, name: true, userId: true, job: true, extraJobs: true, workDays: true, holidaysOff: true, pbx: { select: { ext: true } } },
       orderBy: { name: "asc" },
     })
-  ).filter(isCallCenter);
+  ).filter(callsMatter);
   const ids = people.map((e) => e.id);
   const userIds = people.map((e) => e.userId).filter(Boolean);
   const [stats, line, days, booked, bookedByUser, consultsToday, rated] = await Promise.all([
