@@ -73,7 +73,7 @@ const SCHEMA = {
     kind: {
       type: "string",
       enum: KINDS,
-      description: "lead = a new person asking for legal help; existing = someone the firm already works with (asking about their case, sending documents); not_relevant = a wrong number, an ad, a job seeker, a personal call",
+      description: "lead = a new person asking for legal help; existing = someone the firm already works with (asking about their case, sending documents); not_relevant = a wrong number, an ad, a job seeker, a personal call, a colleague or a test call, or a transcript too garbled to tell what the call was about (such calls are not scored)",
     },
     topic: { type: "string", description: "The legal area in a few Uzbek words («Jinoyat — chaqiruv», «Oila — ajrashish»), or what the call was if not relevant" },
     outcome: { type: "string", enum: OUTCOMES, description: "booked = the client was booked for a consultation in this call; not_booked = a lead that wasn't booked; existing / not_client as the kind" },
@@ -130,7 +130,7 @@ The call is a transcript made automatically from the recording (Uzbek speech rec
 Decide the kind of call first:
 - lead: a new person with a legal question — judge all nine criteria by the standard.
 - existing: someone the firm already works with — they aren't sold to: give full points for criteria that don't apply (listening and questions still count as relevant to helping them; "routing" is whether the operator connected them to their coordinator instead of discussing the case).
-- not_relevant: a wrong number, an ad, a personal call — full points for criteria that don't apply; judge only greeting and manner.
+- not_relevant: a wrong number, an ad, a personal call, a colleague or a test call, or a transcript too garbled to tell what the call was about — it is not scored; still fill the fields briefly.
 Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they clearly happened, quoting the operator; when in doubt, it is not a gross error — leave the list empty. Recommending a consultation with the firm's lawyer is the operator's job, never "legal advice". Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
 Advice only where it's earned: "improve" and "betterLines" are for real gaps; never suggest a line that isn't clearly better than what was said. Quote "said" from the transcript.
 Don't decide what should happen with the client next, and don't give legal opinions yourself.${lessons ? `
@@ -237,11 +237,15 @@ async function reviewCall(callLogId) {
     if (!used?.input) throw new Error("no review in the answer");
     const r = clean(used.input);
     const { score, about, ...details } = r;
+    // Not a client call (a colleague, a test, a wrong number) or text too
+    // garbled to judge: kept, but not scored — no number to the operator
+    // and nothing toward their stars (2026-10-24: a test call got 86).
+    const scored = details.kind !== "not_relevant";
     const row = await prisma.callAnalysis.update({
       where: { callLogId },
-      data: { status: "done", score, summary: about, details, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
+      data: { status: "done", score: scored ? score : null, summary: about, details: { ...details, unscored: !scored }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
     });
-    await tellOperator(call, row).catch((err) => console.error("[call-review] telling the operator failed:", err.message));
+    if (scored) await tellOperator(call, row).catch((err) => console.error("[call-review] telling the operator failed:", err.message));
     return row;
   } catch (err) {
     await prisma.callAnalysis.update({ where: { callLogId }, data: { status: "failed", errorMessage: String(err.message || err).slice(0, 300) } });
