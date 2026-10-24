@@ -15,7 +15,48 @@ const { workingDates } = require("./workdays");
 // back, consultations booked, and each operator's numbers and stars.
 //
 // It's on a screen anyone in the office can see, so no client names or
-// numbers: only staff names and counts.
+// numbers: only staff names and counts — the next consultation shows its
+// time, the lawyer, office or video, and who booked it.
+
+const nameOf = (u) => u?.employee?.name || u?.name || u?.username || null;
+
+// The consultation going on now or coming next (today, else the next day
+// with one), and how many more today after it.
+async function nextConsultation(firm) {
+  const rows = await prisma.appointment.findMany({
+    where: {
+      status: { not: "cancelled" },
+      OR: [{ date: firm.date, end: { gt: firm.minutes }, status: "booked" }, { date: { gt: firm.date }, status: "booked" }],
+    },
+    orderBy: [{ date: "asc" }, { start: "asc" }],
+    take: 30,
+    select: {
+      date: true,
+      start: true,
+      end: true,
+      format: true,
+      calendar: { select: { name: true, owner: { select: { name: true, username: true, employee: { select: { name: true } } } } } },
+      bookedBy: { select: { name: true, username: true, employee: { select: { name: true } } } },
+    },
+  });
+  const first = rows[0];
+  if (!first) return { next: null, moreToday: 0 };
+  const sameDay = rows.filter((a) => a.date === firm.date);
+  return {
+    next: {
+      date: first.date,
+      start: first.start,
+      end: first.end,
+      today: first.date === firm.date,
+      now: first.date === firm.date && first.start <= firm.minutes,
+      inMinutes: first.date === firm.date ? Math.max(0, first.start - firm.minutes) : null,
+      online: first.format === "online",
+      lawyer: first.calendar?.name || nameOf(first.calendar?.owner) || null,
+      bookedBy: nameOf(first.bookedBy),
+    },
+    moreToday: Math.max(0, sameDay.length - (first.date === firm.date ? 1 : 0)),
+  };
+}
 
 const SETTING = "wallboard";
 
@@ -66,7 +107,7 @@ async function data(now = new Date()) {
   ).filter(callsMatter);
   const ids = people.map((e) => e.id);
   const userIds = people.map((e) => e.userId).filter(Boolean);
-  const [stats, line, days, booked, bookedByUser, consultsToday, rated] = await Promise.all([
+  const [stats, line, days, booked, bookedByUser, consultsToday, rated, upcoming] = await Promise.all([
     computeCallStats({ employeeIds: ids, from: day.from, to: day.to }),
     lineNow().catch(() => ({ on: false, byExt: new Map(), waiting: 0, talking: 0 })),
     workingDates(people, firm.date, firm.date),
@@ -74,6 +115,7 @@ async function data(now = new Date()) {
     prisma.appointment.groupBy({ by: ["bookedById"], where: { bookedById: { in: userIds }, createdAt: { gte: new Date(day.from), lte: new Date(day.to) }, status: { not: "cancelled" } }, _count: { _all: true } }),
     prisma.appointment.count({ where: { date: firm.date, status: { not: "cancelled" } } }),
     require("./callRating").ratings(ids, now),
+    nextConsultation(firm),
   ]);
   const bookedBy = new Map(bookedByUser.map((r) => [r.bookedById, r._count._all]));
   const t = stats.totals;
@@ -109,6 +151,8 @@ async function data(now = new Date()) {
       consultationsToday: consultsToday,
     },
     operators: operators.sort((a, b) => b.booked - a.booked || b.calls - a.calls),
+    nextConsultation: upcoming.next,
+    moreConsultationsToday: upcoming.moreToday,
   };
 }
 
