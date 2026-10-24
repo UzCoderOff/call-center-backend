@@ -604,6 +604,326 @@ const TOOLS = [
       };
     },
   },
+  // ----------------------------------------- the phone line and its reviews (2026-10-24)
+  {
+    name: "call_reviews",
+    description:
+      "The AI reviews (beta) of operators' calls on Ledger's phone line, against the firm's call standard: score out of 100 over 9 parts (greeting, routing, listening, questions, summary, offer, priceTime, closing, manner) minus 20 per gross error. Gives each operator's rating (stars out of 5 = average score of their last 30 reviewed calls in 60 days, shown from 5 reviews; a word, the trend, best and weakest parts) and the reviewed calls in a period (default: last 7 days), lowest score first unless order says otherwise. Reviews a manager marked wrong don't count in the rating.",
+    parameters: {
+      type: "object",
+      properties: {
+        employee: { type: "string", description: "part of an operator's name" },
+        from: { type: "string", description: "YYYY-MM-DD" },
+        to: { type: "string", description: "YYYY-MM-DD" },
+        order: { type: "string", enum: ["lowest", "highest", "newest"] },
+        with_gross_errors: { type: "boolean", description: "only calls with a gross error" },
+      },
+    },
+    async run(args) {
+      const { ratings } = require("../callRating");
+      const { LABELS, MAX } = require("../callReview");
+      const today = firmNow().date;
+      const p = period({ from: args.from || shiftDate(today, -6), to: args.to || today });
+      const people = args.employee ? await employeesNamed(args.employee) : null;
+      const operators = people || (await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true, extraJobs: true } })).filter(isCallCenter);
+      const rated = await ratings(operators.map((e) => e.id));
+      const rows = await prisma.callAnalysis.findMany({
+        where: { status: "done", score: { not: null }, callLog: { employeeId: { in: operators.map((e) => e.id) }, callTimestampMs: { gte: BigInt(p.fromMs), lte: BigInt(p.toMs) } } },
+        select: { score: true, summary: true, details: true, feedbackCorrect: true, feedbackNote: true, callLog: { select: { id: true, phoneNumber: true, phoneKey: true, durationSeconds: true, callTimestampMs: true, employee: { select: { name: true } } } } },
+      });
+      let list = rows.filter((r) => r.details && (!args.with_gross_errors || r.details.grossErrors?.length));
+      const order = args.order || "lowest";
+      list.sort((a, b) => (order === "highest" ? b.score - a.score : order === "newest" ? Number(b.callLog.callTimestampMs - a.callLog.callTimestampMs) : a.score - b.score));
+      const clients = await clientIndex(prisma, list.map((r) => r.callLog.phoneKey).filter(Boolean));
+      return {
+        period: { from: p.from, to: p.to },
+        ratings: operators.map((e) => {
+          const r = rated.get(e.id);
+          if (!r) return { operator: e.name, reviewed: 0 };
+          if (!r.enough) return { operator: e.name, reviewed: r.count, rating: `not yet (needs ${r.needed})` };
+          return { operator: e.name, stars: r.stars, averageScore: r.score, word: r.level, trend: r.trend, reviewed: r.count, best: r.best.map((x) => x.label), weakest: r.worst.map((x) => x.label), grossErrors: r.gross };
+        }),
+        reviewedCalls: list.length,
+        calls: list.slice(0, MAX_LIST).map((r) => {
+          const parts = (r.details.criteria || []).map((c) => ({ label: LABELS[c.key] || c.key, share: MAX[c.key] ? c.points / MAX[c.key] : 0 }));
+          return {
+            callId: r.callLog.id,
+            when: when(r.callLog.callTimestampMs),
+            operator: r.callLog.employee.name,
+            number: r.callLog.phoneNumber,
+            client: r.callLog.phoneKey ? clients.get(r.callLog.phoneKey)?.name || null : null,
+            minutes: Math.round(r.callLog.durationSeconds / 6) / 10,
+            score: r.score,
+            about: r.summary,
+            grossErrors: r.details.grossErrors || [],
+            weakest: parts.sort((a, b) => a.share - b.share).slice(0, 2).map((x) => x.label),
+            managerCheck: r.feedbackCorrect == null ? null : r.feedbackCorrect ? "correct" : `wrong${r.feedbackNote ? `: ${r.feedbackNote}` : ""}`,
+          };
+        }),
+      };
+    },
+  },
+  {
+    name: "call_text",
+    description:
+      "One call in full: who said what (the text made from the recording — calls on Ledger's phone line only; automatic, names and numbers can be garbled) and its whole AI review (each part with points and a note, gross errors, what was good, what to improve, better lines to say). By callId from call_reviews or find_calls.",
+    parameters: { type: "object", properties: { call_id: { type: "integer" } }, required: ["call_id"] },
+    async run(args) {
+      const { transcriptText, LABELS } = require("../callReview");
+      const call = await prisma.callLog.findUnique({
+        where: { id: Number(args.call_id) },
+        select: { id: true, phoneNumber: true, phoneKey: true, callType: true, missed: true, durationSeconds: true, callTimestampMs: true, employee: { select: { name: true } }, transcript: { select: { status: true, segments: true, text: true } }, analysis: { select: { status: true, score: true, summary: true, details: true, feedbackCorrect: true, feedbackNote: true } } },
+      });
+      if (!call) throw bad("no such call");
+      const client = call.phoneKey ? (await clientIndex(prisma, [call.phoneKey])).get(call.phoneKey) : null;
+      const t = call.transcript;
+      const text = t?.status === "done" ? (Array.isArray(t.segments) && t.segments.length ? transcriptText(t.segments) : t.text || "") : null;
+      const a = call.analysis?.status === "done" ? call.analysis : null;
+      return {
+        callId: call.id,
+        when: when(call.callTimestampMs),
+        who: call.employee.name,
+        number: call.phoneNumber,
+        client: client?.name || null,
+        direction: call.callType,
+        missed: call.missed,
+        minutes: Math.round(call.durationSeconds / 6) / 10,
+        text: text ? text.slice(0, 9000) : t ? `text: ${t.status}` : "no text (only answered calls on Ledger's phone line get one)",
+        review: a
+          ? {
+              score: a.score,
+              about: a.summary,
+              kind: a.details?.kind,
+              outcome: a.details?.outcome,
+              parts: (a.details?.criteria || []).map((c) => ({ part: LABELS[c.key] || c.key, points: `${c.points}/${c.max}`, note: c.note })),
+              grossErrors: a.details?.grossErrors || [],
+              good: a.details?.good || [],
+              improve: a.details?.improve || [],
+              betterLines: a.details?.betterLines || [],
+              managerCheck: a.feedbackCorrect == null ? null : a.feedbackCorrect ? "correct" : `wrong${a.feedbackNote ? `: ${a.feedbackNote}` : ""}`,
+            }
+          : null,
+      };
+    },
+  },
+  {
+    name: "find_calls",
+    description:
+      "Calls by number, client or person in a period (default: last 30 days), newest first: when, which way, who, how long, missed and whether it was called back, and whether there is a text and an AI review (callId for call_text). Use it for 'did anyone call this number back', 'how many times did this client call', 'who talked to him'.",
+    parameters: {
+      type: "object",
+      properties: {
+        number: { type: "string", description: "a phone number, any format" },
+        client_id: { type: "integer", description: "from search_clients" },
+        employee: { type: "string", description: "part of a staff member's name" },
+        from: { type: "string", description: "YYYY-MM-DD" },
+        to: { type: "string", description: "YYYY-MM-DD" },
+        missed_only: { type: "boolean" },
+      },
+    },
+    async run(args, user) {
+      const { phoneKey } = require("../../lib/phone");
+      const today = firmNow().date;
+      const p = period({ from: args.from || shiftDate(today, -29), to: args.to || today });
+      const where = { callTimestampMs: { gte: BigInt(p.fromMs), lte: BigInt(p.toMs) }, ...countedCallsWhere() };
+      if (args.number) {
+        const key = phoneKey(args.number);
+        if (!key) throw bad("not a phone number");
+        where.phoneKey = key;
+      }
+      if (args.client_id) {
+        const client = await prisma.client.findFirst({ where: { AND: [{ id: Number(args.client_id) }, clientScope(user)] }, select: { phones: { select: { phoneKey: true } } } });
+        if (!client) throw bad("no such client");
+        const keys = client.phones.map((x) => x.phoneKey).filter(Boolean);
+        where.phoneKey = where.phoneKey ? where.phoneKey : { in: keys };
+      }
+      if (args.employee) where.employeeId = { in: (await employeesNamed(args.employee)).map((e) => e.id) };
+      if (args.missed_only) where.missed = true;
+      if (!args.number && !args.client_id && !args.employee) throw bad("give a number, a client_id or an employee");
+      const [total, calls] = await Promise.all([
+        prisma.callLog.count({ where }),
+        prisma.callLog.findMany({
+          where,
+          orderBy: { callTimestampMs: "desc" },
+          take: MAX_LIST,
+          select: { id: true, phoneNumber: true, phoneKey: true, callType: true, missed: true, followUp: true, durationSeconds: true, callTimestampMs: true, employee: { select: { name: true } }, transcript: { select: { status: true } }, analysis: { select: { status: true, score: true } } },
+        }),
+      ]);
+      const clients = await clientIndex(prisma, calls.map((c) => c.phoneKey).filter(Boolean));
+      return {
+        period: { from: p.from, to: p.to },
+        total,
+        calls: calls.map((c) => ({
+          callId: c.id,
+          when: when(c.callTimestampMs),
+          direction: c.callType,
+          who: c.employee.name,
+          number: c.phoneNumber,
+          client: c.phoneKey ? clients.get(c.phoneKey)?.name || null : null,
+          minutes: Math.round(c.durationSeconds / 6) / 10,
+          missed: c.missed,
+          followUp: c.missed ? c.followUp : undefined,
+          hasText: c.transcript?.status === "done",
+          reviewScore: c.analysis?.status === "done" ? c.analysis.score : null,
+        })),
+      };
+    },
+  },
+  {
+    name: "new_callers",
+    description:
+      "What came of new callers the call center talked to who didn't book, by the operators' answers (default: last 30 days): thinking it over (with the day to talk again — their calls ring that operator first until 2 days after it), lost (price, only a question, another firm, other — after a few days the next operator in turn gets a 'second chance' task and their calls ring them) and not a client (wrong number, not our field). Per operator: how many thinking and how many of those booked since, lost, second chances they were given and how many booked. Plus the lists.",
+    parameters: {
+      type: "object",
+      properties: { employee: { type: "string", description: "part of an operator's name" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } },
+    },
+    async run(args) {
+      const co = require("../callOutcomes");
+      const today = firmNow().date;
+      const p = period({ from: args.from || shiftDate(today, -29), to: args.to || today });
+      const people = args.employee ? await employeesNamed(args.employee) : (await prisma.employee.findMany({ where: { active: true }, select: { id: true, name: true, job: true, extraJobs: true } })).filter(isCallCenter);
+      const ids = people.map((e) => e.id);
+      const results = await co.retryResults(ids, { fromMs: p.fromMs, toMs: p.toMs });
+      const range = { gte: new Date(p.fromMs), lte: new Date(p.toMs) };
+      const rows = await prisma.callOutcome.findMany({
+        where: { OR: [{ employeeId: { in: ids }, createdAt: range }, { secondEmployeeId: { in: ids }, secondAt: range }] },
+        orderBy: { createdAt: "desc" },
+        include: { employee: { select: { name: true } }, secondEmployee: { select: { name: true } } },
+      });
+      const booked = await co.bookingsAfter([...new Set(rows.map((r) => r.phoneKey))], p.fromMs);
+      const bookedAfter = (r, d) => (booked.get(r.phoneKey) || []).some((t) => t >= d.getTime() - 3600 * 1000);
+      const group = (o) => Object.keys(co.GROUPS).find((g) => co.GROUPS[g].includes(o));
+      return {
+        period: { from: p.from, to: p.to },
+        byOperator: people.map((e) => ({ operator: e.name, ...results.get(e.id) })),
+        callers: cap(
+          rows.map((r) => ({
+            number: r.phoneKey,
+            group: group(r.outcome),
+            reason: co.LABELS[r.outcome],
+            note: r.note,
+            operator: r.employee?.name || null,
+            answered: when(r.createdAt),
+            talkAgainOn: r.followUpOn,
+            bookedSince: bookedAfter(r, r.createdAt),
+            secondChance: r.secondAt ? { to: r.secondEmployee?.name || null, at: when(r.secondAt), bookedSince: bookedAfter(r, r.secondAt) } : null,
+          })),
+          MAX_LIST
+        ),
+      };
+    },
+  },
+  {
+    name: "live_now",
+    description:
+      "Ledger's phone line right now: client calls going on (who is talking to which number or client, how long, ringing or waiting in line). Only for people allowed to listen to calls; empty when the line is off.",
+    parameters: { type: "object", properties: {} },
+    async run(args, user) {
+      const live = require("../pbx/live");
+      if (!live.canHearCalls(user)) throw bad("this account may not see live calls (the developer turns on 'listens to calls')");
+      const state = require("../pbx/state");
+      const calls = await live.snapshot(user);
+      return {
+        lineOn: Boolean(state.enabled && state.ami?.ready),
+        calls: calls.map((c) => ({ direction: c.direction, number: c.number, client: c.client?.name || null, state: c.state, minutes: Math.round(c.seconds / 6) / 10, people: c.people.map((x) => `${x.name} (${x.state})`) })),
+      };
+    },
+  },
+  {
+    name: "days_off",
+    description: "Who is away in a date range (default: today and the next 7 days): approved days off, sick days, vacations — and requests still waiting for a decision — plus the public holidays in it.",
+    parameters: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" } } },
+    async run(args) {
+      const today = firmNow().date;
+      const from = args.from || today;
+      const to = args.to || shiftDate(today, 7);
+      if (!isValidDate(from) || !isValidDate(to) || from > to) throw bad("from/to must be YYYY-MM-DD, from before to");
+      const [absences, holidays] = await Promise.all([
+        prisma.absence.findMany({ where: { from: { lte: to }, to: { gte: from }, status: { in: ["approved", "pending"] } }, orderBy: { from: "asc" }, include: { employee: { select: { name: true, active: true } } } }),
+        prisma.holiday.findMany({ where: { date: { gte: from, lte: to }, status: { not: "rejected" } }, orderBy: { date: "asc" } }),
+      ]);
+      return {
+        from,
+        to,
+        away: absences.filter((a) => a.employee.active).map((a) => ({ who: a.employee.name, from: a.from, to: a.to, kind: a.kind, note: a.note, status: a.status })),
+        holidays: holidays.map((h) => ({ date: h.date, name: h.name, confirmed: h.status === "confirmed" })),
+      };
+    },
+  },
+  {
+    name: "strikes",
+    description: "Late call-back strikes in a month (default: this month): a call-center phone missed a call and nobody called the number back in time. Each with who, when it was missed, the deadline, whether it was called back late, and cancelled ones with the reason.",
+    parameters: { type: "object", properties: { month: { type: "string", description: "YYYY-MM" }, employee: { type: "string", description: "part of a name" } } },
+    async run(args) {
+      const m = month(args);
+      const people = args.employee ? await employeesNamed(args.employee) : null;
+      const rows = await prisma.strike.findMany({
+        where: { month: m, ...(people ? { employeeId: { in: people.map((e) => e.id) } } : {}) },
+        orderBy: { missedAt: "desc" },
+        include: { employee: { select: { name: true } }, callLog: { select: { phoneNumber: true } } },
+      });
+      const counted = rows.filter((r) => !r.cancelledAt);
+      const per = new Map();
+      for (const r of counted) per.set(r.employee.name, (per.get(r.employee.name) || 0) + 1);
+      return {
+        month: m,
+        counted: counted.length,
+        perPerson: [...per].map(([who, n]) => ({ who, strikes: n })).sort((a, b) => b.strikes - a.strikes),
+        strikes: cap(rows.map((r) => ({ who: r.employee.name, number: r.callLog?.phoneNumber, missed: when(r.missedAt), deadline: when(r.deadlineAt), calledBackLate: r.answeredAt ? when(r.answeredAt) : null, cancelled: r.cancelledAt ? r.cancelReason || true : false })), MAX_LIST),
+      };
+    },
+  },
+  {
+    name: "case_dates",
+    description: "Court hearings, summons, deadlines and meetings on clients' cases in a range (default: today and the next 7 days): date, time, kind, place, the client and matter, the lawyer and coordinator, and the outcome if it's written. With past dates: which outcomes are still not written.",
+    parameters: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, kind: { type: "string", enum: ["hearing", "summons", "deadline", "meeting", "other"] } } },
+    async run(args, user) {
+      const today = firmNow().date;
+      const from = args.from || today;
+      const to = args.to || shiftDate(today, 7);
+      if (!isValidDate(from) || !isValidDate(to) || from > to) throw bad("from/to must be YYYY-MM-DD, from before to");
+      const rows = await prisma.caseDate.findMany({
+        where: { deletedAt: null, date: { gte: from, lte: to }, ...(args.kind ? { kind: args.kind } : {}), case: { client: clientScope(user) } },
+        orderBy: [{ date: "asc" }, { time: "asc" }],
+        take: 60,
+        include: { case: { select: { id: true, matter: true, lawyer: true, lawyerAccount: { select: { name: true, username: true, employee: { select: { name: true } } } }, coordinator: { select: { name: true } }, client: { select: { id: true, name: true } } } } },
+      });
+      return {
+        from,
+        to,
+        dates: cap(
+          rows.map((d) => ({
+            date: d.date,
+            time: d.time == null ? null : hhmm(d.time),
+            kind: d.kind,
+            title: d.title,
+            place: d.place,
+            client: d.case.client.name,
+            clientId: d.case.client.id,
+            matter: d.case.matter,
+            lawyer: nameOf(d.case.lawyerAccount) || d.case.lawyer,
+            coordinator: d.case.coordinator?.name || null,
+            outcome: d.outcome || (d.date < today ? "NOT WRITTEN YET" : null),
+          })),
+          40
+        ),
+      };
+    },
+  },
+  {
+    name: "cash_holders",
+    finance: true,
+    description: "Client cash in staff hands now (Kassa): who took cash payments from clients and how much they still hold (not handed over yet).",
+    parameters: { type: "object", properties: {} },
+    async run() {
+      const { cashBalances } = require("../cash");
+      const holding = (await cashBalances({})).filter((r) => r.holding > 0).sort((a, b) => b.holding - a.holding);
+      return {
+        totalHolding: holding.reduce((sum, r) => sum + r.holding, 0),
+        people: holding.map((r) => ({ who: r.user.name, holding: r.holding, taken: r.taken, handed: r.handed, lastHandover: r.lastHandover })),
+      };
+    },
+  },
 ];
 
 // One case, as the tools show it — money only with Moliya.

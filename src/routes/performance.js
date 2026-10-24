@@ -2,11 +2,19 @@ const express = require("express");
 const prisma = require("../lib/prisma");
 const { requireAuth, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
-const { firmDate } = require("../lib/firmTime");
+const { firmDate, firmDayRange } = require("../lib/firmTime");
 const { canSeeFinance } = require("../lib/finance");
 const { monthPerformance, history } = require("../services/performance");
 const { cashBalances } = require("../services/cash");
 const { ratings } = require("../services/callRating");
+const { retryResults } = require("../services/callOutcomes");
+
+// A month "YYYY-MM" as epoch-ms bounds in firm time.
+function monthMs(month) {
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { fromMs: firmDayRange(`${month}-01`).from, toMs: firmDayRange(`${month}-${String(last).padStart(2, "0")}`).to };
+}
 const { buildWorkbook } = require("../lib/xlsx");
 const { events } = require("../lib/events");
 const { BUILTIN_NAMES, FINANCE_ONLY, parseKey, formMeasures, catalogFor, targetsFor } = require("../services/performanceMetrics");
@@ -80,7 +88,11 @@ router.get("/", async (req, res, next) => {
     });
     const data = await monthPerformance({ month, employees, finance: withMoney(req.user), selfId: req.user.employee?.id ?? null });
     const rated = await ratings(employees.map((e) => e.id));
-    for (const row of data.rows) row.callRating = rated.get(row.employee.id) ?? null;
+    const retries = await retryResults(employees.map((e) => e.id), monthMs(month));
+    for (const row of data.rows) {
+      row.callRating = rated.get(row.employee.id) ?? null;
+      row.retries = retries.get(row.employee.id) ?? null;
+    }
     res.json({ ...data, current: firmDate().slice(0, 7), finance: withMoney(req.user), mineOnly: !isManager(req.user) });
   } catch (err) {
     next(err);
@@ -221,6 +233,7 @@ router.get("/:employeeId", async (req, res, next) => {
     const row = data.rows[0];
     if (row.strikes && !isManager(req.user)) row.strikes = { ...row.strikes, fine: undefined };
     row.callRating = (await ratings([employee.id])).get(employee.id) ?? null;
+    row.retries = (await retryResults([employee.id], monthMs(month))).get(employee.id) ?? null;
     res.json({
       month,
       current: firmDate().slice(0, 7),

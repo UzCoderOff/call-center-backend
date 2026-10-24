@@ -301,7 +301,74 @@ async function secondChanceTask(row, operator, now, db) {
   };
 }
 
+// When each number (or its client) booked a consultation after `fromMs`:
+// phoneKey -> [epoch ms of bookings], for many outcome rows at once.
+async function bookingsAfter(keys, fromMs, db = prisma) {
+  const out = new Map(keys.map((k) => [k, []]));
+  if (!keys.length) return out;
+  const since = new Date(fromMs - 60 * 60 * 1000);
+  const phones = await db.clientPhone.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, clientId: true } });
+  const clientIds = [...new Set(phones.map((p) => p.clientId))];
+  const bookings = await db.appointment.findMany({
+    where: { status: { not: "cancelled" }, createdAt: { gte: since }, OR: [{ phoneKey: { in: keys } }, ...(clientIds.length ? [{ clientId: { in: clientIds } }] : [])] },
+    select: { phoneKey: true, clientId: true, createdAt: true },
+  });
+  for (const b of bookings) {
+    const ks = new Set([b.phoneKey, ...phones.filter((p) => p.clientId === b.clientId).map((p) => p.phoneKey)].filter((k) => out.has(k)));
+    for (const k of ks) out.get(k).push(b.createdAt.getTime());
+  }
+  return out;
+}
+
+// What came of the retries, per operator, for outcomes recorded (thinking,
+// lost) or second chances given in [fromMs, toMs]: Map employeeId -> {
+//   thinking:   { total, booked }   their callers who said they'd think
+//   lost:       { total }           their callers lost (price, other firm…)
+//   secondGot:  { total, booked }   lost callers handed to them, booked since
+//   secondOut:  { total, booked }   their lost callers handed to someone else
+// }. Booked: a consultation for the number (or its client) after the answer
+// (for a second chance: after it was handed over).
+async function retryResults(employeeIds, { fromMs, toMs }, db = prisma) {
+  const range = { gte: new Date(fromMs), lte: new Date(toMs) };
+  const rows = await db.callOutcome.findMany({
+    where: { OR: [{ employeeId: { in: employeeIds }, createdAt: range }, { secondEmployeeId: { in: employeeIds }, secondAt: range }] },
+    select: { phoneKey: true, outcome: true, employeeId: true, createdAt: true, secondEmployeeId: true, secondAt: true },
+  });
+  const blank = () => ({ thinking: { total: 0, booked: 0 }, lost: { total: 0 }, secondGot: { total: 0, booked: 0 }, secondOut: { total: 0, booked: 0 } });
+  const out = new Map(employeeIds.map((id) => [id, blank()]));
+  if (!rows.length) return out;
+  const booked = await bookingsAfter([...new Set(rows.map((r) => r.phoneKey))], Math.min(...rows.map((r) => r.createdAt.getTime())), db);
+  const after = (key, ms) => (booked.get(key) || []).some((t) => t >= ms - 60 * 60 * 1000);
+  for (const r of rows) {
+    const created = r.createdAt.getTime();
+    const mine = out.get(r.employeeId);
+    if (mine && created >= fromMs && created <= toMs) {
+      if (GROUPS.thinking.includes(r.outcome)) {
+        mine.thinking.total += 1;
+        if (after(r.phoneKey, created)) mine.thinking.booked += 1;
+      } else if (GROUPS.lost.includes(r.outcome)) mine.lost.total += 1;
+    }
+    if (r.secondEmployeeId && r.secondAt) {
+      const at = r.secondAt.getTime();
+      if (at < fromMs || at > toMs) continue;
+      const won = after(r.phoneKey, at);
+      const got = out.get(r.secondEmployeeId);
+      if (got) {
+        got.secondGot.total += 1;
+        if (won) got.secondGot.booked += 1;
+      }
+      if (mine && r.secondEmployeeId !== r.employeeId) {
+        mine.secondOut.total += 1;
+        if (won) mine.secondOut.booked += 1;
+      }
+    }
+  }
+  return out;
+}
+
 module.exports = {
+  bookingsAfter,
+  retryResults,
   OUTCOMES,
   GROUPS,
   LABELS,

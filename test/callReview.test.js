@@ -90,3 +90,28 @@ test("an operator's rating: stars from the average, a word, the trend, best and 
   assert.equal(r.worst[0].key, "summary");
   assert.equal(r.gross, 5);
 });
+
+test("the Monday tip: last week's score and change, best parts, one thing to work on, a line said better", () => {
+  const { operatorMessage, teamMessage, summarize, weekLabel } = require("../src/services/coaching");
+  const f = require("../src/services/telegram/format");
+  const review = (score, summaryShare, betterLines = []) => ({
+    score,
+    details: {
+      criteria: CRITERIA.map((key) => ({ key, points: Math.round(MAX[key] * (key === "summary" ? summaryShare : key === "greeting" ? 1 : 0.75)), note: key === "summary" ? "Vaziyat qaytarilmadi" : "" })),
+      betterLines,
+    },
+  });
+  const week = [review(70, 0.2, [{ said: "Qachon qulay?", better: "Bugun 17:00 yoki 18:00?" }]), review(74, 0.3), review(66, 0.1)];
+  const text = operatorMessage({ week, before: [review(60, 0.2)], label: weekLabel("2026-10-19", "2026-10-25"), link: "", f });
+  assert.match(text, /19–25-oktabr/);
+  assert.match(text, /oʻrtacha <b>70\/100<\/b> \(oldingi hafta 60, ↑ 10\)/);
+  assert.match(text, /Eng yaxshisi: Salomlashish \(100%\)/);
+  assert.match(text, /ustida ishlang: Xulosa/);
+  assert.match(text, /Vaziyat qaytarilmadi/);
+  assert.match(text, /«Qachon qulay\?» oʻrniga/);
+  // Too few calls: nothing.
+  assert.equal(operatorMessage({ week: week.slice(0, 2), before: [], label: "", link: "", f }), null);
+  const team = teamMessage({ rows: [{ name: "Aziz", week: summarize(week), before: summarize([review(75, 0.2)]) }, { name: "Yangi", week: null }], label: "x", link: "", f });
+  assert.match(team, /Aziz — 70\/100 \(3 ta\) ↓5 · ustida ishlash: Xulosa/);
+  assert.doesNotMatch(team, /Yangi/);
+});

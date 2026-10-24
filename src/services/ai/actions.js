@@ -26,6 +26,9 @@ const { BUILTIN, BUILTIN_NAMES, FINANCE_ONLY } = require("../performanceMetrics"
 //                    for the client's operator unless someone else is named
 //   set_target       a person's monthly target on one measure
 //   add_client_note  a note on a client's timeline
+//   review_feedback  a manager's check of an AI call review: right or wrong,
+//                    with a word why (wrong ones leave the operator's
+//                    rating, and the reviewer learns from them) — 2026-10-24
 //
 // What it creates shows "Ledger AI" as its author (viaAi; the person who
 // confirmed it stays in createdById / authorId) — the firm may later let it
@@ -317,6 +320,31 @@ const ACTIONS = {
     async execute(args, user) {
       await prisma.clientEvent.create({ data: { clientId: args.clientId, kind: "note", text: args.text, data: { viaAi: true }, authorId: user.id } });
       await prisma.client.update({ where: { id: args.clientId }, data: { updatedAt: new Date() } });
+      return { ok: true };
+    },
+  },
+
+  review_feedback: {
+    description:
+      "Prepare a manager's check of an AI call review (shown to the user to confirm first): correct, or wrong with a short reason. A wrong review no longer counts in the operator's rating, and future reviews learn from the reason. call_id from call_reviews.",
+    parameters: {
+      type: "object",
+      properties: { call_id: { type: "integer" }, correct: { type: "boolean" }, reason: { type: "string", description: "why it's wrong (or a word on a correct one)" } },
+      required: ["call_id", "correct"],
+    },
+    async prepare(a) {
+      const analysis = await prisma.callAnalysis.findUnique({ where: { callLogId: Number(a.call_id) }, select: { status: true, score: true, callLog: { select: { id: true, employee: { select: { name: true } } } } } });
+      if (!analysis || analysis.status !== "done") throw bad("that call has no AI review");
+      const reason = text(a.reason, 500);
+      if (a.correct === false && !reason) throw bad("say why the review is wrong (reason)");
+      const correct = Boolean(a.correct);
+      return {
+        args: { callLogId: analysis.callLog.id, correct, note: reason },
+        summary: `${correct ? "👍 Toʻgʻri" : "👎 Notoʻgʻri"} — ${analysis.callLog.employee.name}ning qoʻngʻiroq tahlili (${analysis.score}/100)${reason ? `: «${reason}»` : ""}`,
+      };
+    },
+    async execute(args, user) {
+      await require("../callReview").setFeedback(args.callLogId, user, { correct: args.correct, note: args.note });
       return { ok: true };
     },
   },

@@ -301,8 +301,11 @@ const chatEvents = () => require("../chat").eventReminders();
 // Hearings and other case dates (services/outcomes.js): the evening before,
 // the morning of, and "how did it go?" when nobody has written it.
 const hearings = (now) => require("../outcomes").hearingReminders(now);
+// Monday: last week's AI call reviews as one tip per operator, and the team
+// for the boss (services/coaching.js).
+const coaching = (now) => require("../coaching").weeklyCoaching(now);
 
-const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, summaryReminders, reminders, chatEvents, hearings, recordingAlerts, diskAlerts, cleanup };
+const JOBS = { missedCalls, digests, reportReminders, planningReminders, taskReminders, followUpReminders, summaryReminders, reminders, chatEvents, hearings, coaching, recordingAlerts, diskAlerts, cleanup };
 
 let running = false;
 async function tick() {
