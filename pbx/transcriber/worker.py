@@ -73,16 +73,33 @@ def decode(path):
     return np.frombuffer(pcm, np.int16).astype(np.float32) / 32768.0
 
 
+TURN_GAP = 1.0  # seconds of silence that end a turn
+
+
 def transcribe(model, audio):
-    segments, _ = model.transcribe(audio, language="uz", beam_size=1, vad_filter=True, condition_on_previous_text=False)
+    """One side of a call as turns: one fast pass (speech only, timed word by
+    word), then split where the speaker paused — so the two sides interleave
+    in the right order. Between pieces, step aside for calls."""
+    segments, _ = model.transcribe(
+        audio,
+        language="uz",
+        beam_size=1,
+        vad_filter=True,
+        vad_parameters={"min_silence_duration_ms": 500},
+        condition_on_previous_text=False,
+        word_timestamps=True,
+    )
     out = []
-    # The text comes piece by piece; between pieces, step aside for calls.
     for s in segments:
-        text = s.text.strip()
-        if text:
-            out.append({"start": round(s.start, 2), "end": round(s.end, 2), "text": text})
+        for w in s.words or []:
+            if out and w.start - out[-1]["end"] <= TURN_GAP:
+                # A new piece's first word can come without its space.
+                out[-1]["text"] += w.word if w.word[:1].isspace() else " " + w.word
+                out[-1]["end"] = w.end
+            else:
+                out.append({"start": w.start, "end": w.end, "text": w.word})
         wait_until_free()
-    return out
+    return [{"start": round(t["start"], 2), "end": round(t["end"], 2), "text": t["text"].strip()} for t in out if t["text"].strip()]
 
 
 def main():
