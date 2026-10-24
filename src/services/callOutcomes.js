@@ -83,11 +83,21 @@ async function pending({ employeeIds, now = Date.now(), db = prisma }) {
   const [before, phones, outcomes, booked] = await Promise.all([
     // Called (any phone) before the window: not new.
     db.callLog.findMany({ where: { phoneKey: { in: keys }, callTimestampMs: { lt: BigInt(from) } }, select: { phoneKey: true }, distinct: ["phoneKey"] }),
-    db.clientPhone.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, client: { select: { createdAt: true, cases: { select: { status: true } } } } } }),
+    db.clientPhone.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true, clientId: true, client: { select: { createdAt: true, cases: { select: { status: true } } } } } }),
     db.callOutcome.findMany({ where: { phoneKey: { in: keys } }, select: { phoneKey: true } }),
     db.appointment.findMany({ where: { phoneKey: { in: keys }, status: { not: "cancelled" }, createdAt: { gte: new Date(from - 60 * 60 * 1000) } }, select: { phoneKey: true } }),
   ]);
   const skip = new Set([...before.map((r) => r.phoneKey), ...outcomes.map((r) => r.phoneKey), ...booked.map((r) => r.phoneKey)]);
+  // Booked for the client the number belongs to — from the client's card,
+  // with another of their numbers or none on the booking (2026-10-24: a
+  // caller added as a client and booked was still asked why they didn't book).
+  const clientIds = [...new Set(phones.map((p) => p.clientId))];
+  if (clientIds.length) {
+    const bookedClients = new Set(
+      (await db.appointment.findMany({ where: { clientId: { in: clientIds }, status: { not: "cancelled" }, createdAt: { gte: new Date(from - 60 * 60 * 1000) } }, select: { clientId: true } })).map((a) => a.clientId)
+    );
+    for (const p of phones) if (bookedClients.has(p.clientId)) skip.add(p.phoneKey);
+  }
   for (const p of phones) {
     const row = byKey.get(p.phoneKey);
     // A client before they first called this week: not new. One added since

@@ -53,7 +53,7 @@ test("Telegram: a task that asks for an answer has no tick button and says where
 });
 
 // A database stand-in for the new-callers list.
-function fakeDb({ calls, before = [], phones = [], outcomes = [], booked = [], staff = [], since = 0 }) {
+function fakeDb({ calls, before = [], phones = [], outcomes = [], booked = [], bookedClients = [], staff = [], since = 0 }) {
   return {
     setting: { findUnique: async () => ({ value: { since } }), upsert: async () => ({}) },
     employee: { findMany: async () => staff.map((p) => ({ phoneNumber: p })) },
@@ -65,7 +65,9 @@ function fakeDb({ calls, before = [], phones = [], outcomes = [], booked = [], s
     },
     clientPhone: { findMany: async () => phones },
     callOutcome: { findMany: async () => outcomes.map((phoneKey) => ({ phoneKey })) },
-    appointment: { findMany: async () => booked.map((phoneKey) => ({ phoneKey })) },
+    appointment: {
+      findMany: async ({ where }) => (where.clientId ? bookedClients.filter((id) => where.clientId.in.includes(id)).map((clientId) => ({ clientId })) : booked.map((phoneKey) => ({ phoneKey }))),
+    },
   };
 }
 
@@ -85,16 +87,19 @@ test("new callers to ask about: new numbers they talked to, not booked, not answ
     talk("907777777", t(1)), // a staff phone
     talk("908888888", t(1)), // a client from before
     talk("901111111", t(1)), // the same new number again: one row, two calls
+    talk("909999999", t(2)), // added as a client since and booked from the card, no number on the booking
   ];
   const db = fakeDb({
     calls,
     before: ["903333333"],
     outcomes: ["904444444"],
     booked: ["905555555"],
+    bookedClients: [9],
     staff: ["+998 90 777 77 77"],
     phones: [
       { phoneKey: "906666666", client: { createdAt: new Date(t(1)), cases: [{ status: "call_again" }] } },
       { phoneKey: "908888888", client: { createdAt: new Date(t(100)), cases: [{ status: "consultation" }] } },
+      { phoneKey: "909999999", clientId: 9, client: { createdAt: new Date(t(1)), cases: [{ status: "consultation" }] } },
     ],
   });
   const rows = await pending({ employeeIds: [1], now, db });
