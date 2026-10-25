@@ -74,7 +74,7 @@ const LESSONS = 10;
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "topic", "outcome", "about", "criteria", "grossErrors", "good", "improve", "betterLines"],
+  required: ["kind", "topic", "outcome", "about", "lost", "criteria", "grossErrors", "good", "improve", "betterLines"],
   properties: {
     kind: {
       type: "string",
@@ -84,6 +84,12 @@ const SCHEMA = {
     topic: { type: "string", description: "The legal area in a few Uzbek words («Jinoyat — chaqiruv», «Oila — ajrashish»), or what the call was if not relevant" },
     outcome: { type: "string", enum: OUTCOMES, description: "booked = the client was booked for a consultation in this call; not_booked = a lead that wasn't booked; existing / not_client as the kind" },
     about: { type: "string", description: "One or two Uzbek sentences: what the caller wanted and how the call ended (booked, will think, went to another lawyer, not a client…). No advice, no next step" },
+    lost: { type: "boolean", description: "true when the caller is lost to the firm in this call: says the matter is already settled, found another lawyer, no longer needs us, or refuses" },
+    lostCause: {
+      type: "string",
+      enum: ["late_callback", "operator", "client", "unknown"],
+      description: "only when lost: late_callback = they had called before and weren't called back in time (see the history: 'kech'); operator = the operator's handling in this call lost them; client = the client's own reasons (price, distance, changed mind) despite good handling; unknown",
+    },
     criteria: {
       type: "array",
       minItems: 9,
@@ -186,6 +192,8 @@ function clean(r) {
     topic: uz(r?.topic).slice(0, 120),
     outcome: OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked",
     about: uz(r?.about).slice(0, 400),
+    lost: r?.lost === true,
+    lostCause: r?.lost === true && ["late_callback", "operator", "client", "unknown"].includes(r?.lostCause) ? r.lostCause : null,
     criteria,
     grossErrors,
     good: list(r?.good, 3),
@@ -223,7 +231,7 @@ function reviewable(call) {
 // at night, not answered". Plain lines in Uzbek, firm time.
 const HISTORY_DAYS = 7;
 async function historyBefore(call) {
-  if (!call.phoneKey) return "";
+  if (!call.phoneKey) return { text: "", late: null };
   const { firmDate } = require("../lib/firmTime");
   const env = require("../config/env");
   const at = Number(call.callTimestampMs);
@@ -233,11 +241,11 @@ async function historyBefore(call) {
       where: { phoneKey: call.phoneKey, id: { not: call.id }, callTimestampMs: { gte: BigInt(at - HISTORY_DAYS * 86400000), lt: BigInt(at) } },
       orderBy: { callTimestampMs: "asc" },
       take: 12,
-      select: { callType: true, missed: true, durationSeconds: true, callTimestampMs: true, employee: { select: { name: true } } },
+      select: { callType: true, missed: true, durationSeconds: true, callTimestampMs: true, employeeId: true, employee: { select: { name: true } } },
     }),
     prisma.appointment.findMany({ where: { phoneKey: call.phoneKey, createdAt: { lt: new Date(at) } }, orderBy: { createdAt: "desc" }, take: 3, select: { date: true, status: true } }),
   ]);
-  if (!calls.length && !bookings.length) return "";
+  if (!calls.length && !bookings.length) return { text: "", late: null };
   const line = (c) => {
     const when = stamp.format(new Date(Number(c.callTimestampMs)));
     const what = c.missed ? "javobsiz (mijoz qoʻngʻiroq qilgan, olinmagan)" : c.callType === "outgoing" ? `operator qoʻngʻiroq qilgan, ${clock(c.durationSeconds)}` : `mijoz qoʻngʻiroq qilgan, gaplashilgan ${clock(c.durationSeconds)}`;
@@ -245,8 +253,37 @@ async function historyBefore(call) {
   };
   const parts = ["Bu raqam bilan oldingi qoʻngʻiroqlar (oxirgi 7 kun):", ...calls.map(line)];
   if (bookings.length) parts.push(`Konsultatsiyalar: ${bookings.map((b) => `${b.date} (${b.status})`).join(", ")}`);
+  const late = await callBackLateness(call, calls);
+  if (late) parts.push(`Javobsiz qoʻngʻiroqqa birinchi javob — shu qoʻngʻiroq: muddat ${stamp.format(new Date(late.dueMs))} edi, ${late.minutes > 0 ? `${late.minutes} daqiqa kech (kech)` : "oʻz vaqtida"}.`);
   parts.push(`Shu qoʻngʻiroq: ${stamp.format(new Date(at))}, bugun ${firmDate()}.`);
-  return `${parts.join("\n")}\n\n`;
+  return { text: `${parts.join("\n")}\n\n`, late };
+}
+
+// This call answers missed calls nobody returned before it: when it was due
+// by the firm's call-back rule (strikes.js — even while the rule is off) and
+// how many minutes late it came. null when it isn't a call-back.
+async function callBackLateness(call, earlier) {
+  const at = Number(call.callTimestampMs);
+  let firstMissed = null;
+  for (const c of earlier) {
+    if (c.missed) firstMissed = firstMissed ?? c;
+    else firstMissed = null; // answered or called out since: those were dealt with
+  }
+  if (!firstMissed) return null;
+  const { deadlineFor, strikeRules } = require("./strikes");
+  const { workingDates } = require("./workdays");
+  const { firmDate } = require("../lib/firmTime");
+  const rules = await strikeRules();
+  const missedMs = Number(firstMissed.callTimestampMs);
+  const who = firstMissed.employeeId ? await prisma.employee.findUnique({ where: { id: firstMissed.employeeId }, select: { id: true, workDays: true, holidaysOff: true } }) : null;
+  let works = () => true;
+  if (who) {
+    const days = await workingDates([who], firmDate(new Date(missedMs)), firmDate(new Date(at + 7 * 86400000)));
+    const set = new Set(days.byEmployee.get(who.id)?.work || []);
+    works = (date) => set.has(date);
+  }
+  const dueMs = deadlineFor(missedMs, rules, works);
+  return { dueMs, minutes: Math.max(0, Math.round((at - dueMs) / 60000)) };
 }
 
 async function reviewCall(callLogId) {
@@ -258,6 +295,7 @@ async function reviewCall(callLogId) {
   if (!segments.length) return null;
   const { rules, model } = await reviewSettings();
   await prisma.callAnalysis.upsert({ where: { callLogId }, create: { callLogId, status: "processing" }, update: { status: "processing", errorMessage: null } });
+  const history = await historyBefore(call);
   try {
     const response = await claude.create(
       {
@@ -267,7 +305,7 @@ async function reviewCall(callLogId) {
         messages: [
           {
             role: "user",
-            content: `${await historyBefore(call)}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
+            content: `${history.text}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
           },
         ],
         tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
@@ -282,14 +320,27 @@ async function reviewCall(callLogId) {
     // Not a client call (a colleague, a test, a wrong number) or text too
     // garbled to judge: kept, but not scored — no number to the operator
     // and nothing toward their stars (2026-10-24: a test call got 86).
-    // A short call (under MIN_TALK_SEC) gets its summary only.
+    // A short call (under MIN_TALK_SEC) gets its summary only — unless the
+    // client was lost through us (a late call-back, or this call): that
+    // always counts, with −20 for the lost client (2026-10-25: two night
+    // calls returned next morning at 10:05, "ishim bitdi").
     const short = call.durationSeconds < MIN_TALK_SEC;
-    const scored = details.kind !== "not_relevant" && !short;
+    const lostByUs = details.lost && (details.lostCause === "operator" || (details.lostCause === "late_callback" && history.late?.minutes > 0));
+    if (lostByUs) {
+      details.lateMinutes = history.late?.minutes ?? null;
+      details.grossErrors = [
+        ...details.grossErrors,
+        details.lostCause === "late_callback" ? `Mijoz yoʻqotildi — qayta qoʻngʻiroq ${history.late.minutes} daqiqa kech` : "Mijoz shu qoʻngʻiroqda yoʻqotildi",
+      ];
+    }
+    const scored = details.kind !== "not_relevant" && (!short || lostByUs);
+    const finalScore = lostByUs ? Math.max(0, score - 20) : score;
     const row = await prisma.callAnalysis.update({
       where: { callLogId },
-      data: { status: "done", score: scored ? score : null, summary: about, details: { ...details, unscored: !scored, ...(short ? { short: true } : {}) }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
+      data: { status: "done", score: scored ? finalScore : null, summary: about, details: { ...details, unscored: !scored, ...(short ? { short: true } : {}) }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
     });
     if (scored) await tellOperator(call, row).catch((err) => console.error("[call-review] telling the operator failed:", err.message));
+    if (lostByUs) await tellManagers(call, row).catch((err) => console.error("[call-review] telling the managers failed:", err.message));
     return row;
   } catch (err) {
     await prisma.callAnalysis.update({ where: { callLogId }, data: { status: "failed", errorMessage: String(err.message || err).slice(0, 300) } });
@@ -335,6 +386,25 @@ async function tick() {
     }
   }
   return done;
+}
+
+// A client lost through us -> the boss and the developer, once.
+async function tellManagers(call, analysis) {
+  const f = require("./telegram/format");
+  const { notifyUser, linkedUsers, once } = require("./telegram/notify");
+  const d = analysis.details || {};
+  const text = [
+    "🔴 <b>Mijoz yoʻqotildi</b>",
+    `${f.escapeHtml(call.employee.name)} · ${f.escapeHtml(f.phone(call.phoneNumber))}`,
+    d.lostCause === "late_callback" ? `Sabab: qayta qoʻngʻiroq ${d.lateMinutes} daqiqa kech` : "Sabab: shu qoʻngʻiroqdagi muomala",
+    analysis.summary ? f.escapeHtml(analysis.summary) : null,
+    f.portalLink(`/calls/${call.id}`, "Qoʻngʻiroqni ochish"),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  for (const user of await linkedUsers({ role: { in: ["BOSS", "DEVELOPER"] } })) {
+    await once(`lost-client:${call.id}:${user.id}`, () => notifyUser(user, "strikes", text));
+  }
 }
 
 // A manager's check: { correct, note }.
