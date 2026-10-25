@@ -63,7 +63,12 @@ const GROSS_LABELS = {
 };
 const OUTCOMES = ["booked", "not_booked", "existing", "not_client"];
 // Calls shorter than this aren't reviewed (a wrong number, "call me later").
+// Every answered operator call from MIN_TEXT_SEC gets its text and a short
+// summary (what the caller wanted, how it ended) — a 16-second "I already
+// found a lawyer" matters too (2026-10-25). Only from MIN_TALK_SEC is the
+// operator scored.
 const MIN_TALK_SEC = 20;
+const MIN_TEXT_SEC = 5;
 const LESSONS = 10;
 
 const SCHEMA = {
@@ -78,7 +83,7 @@ const SCHEMA = {
     },
     topic: { type: "string", description: "The legal area in a few Uzbek words («Jinoyat — chaqiruv», «Oila — ajrashish»), or what the call was if not relevant" },
     outcome: { type: "string", enum: OUTCOMES, description: "booked = the client was booked for a consultation in this call; not_booked = a lead that wasn't booked; existing / not_client as the kind" },
-    about: { type: "string", description: "One Uzbek sentence: what the caller wanted. No advice, no next step" },
+    about: { type: "string", description: "One or two Uzbek sentences: what the caller wanted and how the call ended (booked, will think, went to another lawyer, not a client…). No advice, no next step" },
     criteria: {
       type: "array",
       minItems: 9,
@@ -204,7 +209,7 @@ async function lessons(db = prisma) {
 // Whether a call is one to review: answered, long enough, an operator's
 // (the call center) — and it has a transcript.
 function reviewable(call) {
-  return Boolean(call && !call.missed && call.durationSeconds >= MIN_TALK_SEC && call.employee && isCallCenter(call.employee));
+  return Boolean(call && !call.missed && call.durationSeconds >= MIN_TEXT_SEC && call.employee && isCallCenter(call.employee));
 }
 
 // Reviews one call now. -> the CallAnalysis row, or null.
@@ -226,7 +231,7 @@ async function reviewCall(callLogId) {
         messages: [
           {
             role: "user",
-            content: `Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.\n\n${transcriptText(segments)}`,
+            content: `Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
           },
         ],
         tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
@@ -241,10 +246,12 @@ async function reviewCall(callLogId) {
     // Not a client call (a colleague, a test, a wrong number) or text too
     // garbled to judge: kept, but not scored — no number to the operator
     // and nothing toward their stars (2026-10-24: a test call got 86).
-    const scored = details.kind !== "not_relevant";
+    // A short call (under MIN_TALK_SEC) gets its summary only.
+    const short = call.durationSeconds < MIN_TALK_SEC;
+    const scored = details.kind !== "not_relevant" && !short;
     const row = await prisma.callAnalysis.update({
       where: { callLogId },
-      data: { status: "done", score: scored ? score : null, summary: about, details: { ...details, unscored: !scored }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
+      data: { status: "done", score: scored ? score : null, summary: about, details: { ...details, unscored: !scored, ...(short ? { short: true } : {}) }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
     });
     if (scored) await tellOperator(call, row).catch((err) => console.error("[call-review] telling the operator failed:", err.message));
     return row;
@@ -278,7 +285,7 @@ async function tellOperator(call, analysis) {
 async function tick() {
   if (!(await claudeFeatureOn("callReview"))) return 0;
   const rows = await prisma.transcript.findMany({
-    where: { status: "done", text: { not: "" }, callLog: { analysis: null, missed: false, durationSeconds: { gte: MIN_TALK_SEC }, employee: jobWhere(["call_center"]) } },
+    where: { status: "done", text: { not: "" }, callLog: { analysis: null, missed: false, durationSeconds: { gte: MIN_TEXT_SEC }, employee: jobWhere(["call_center"]) } },
     orderBy: { updatedAt: "desc" },
     take: 5,
     select: { callLogId: true },
@@ -302,4 +309,4 @@ async function setFeedback(callLogId, user, { correct, note }) {
   });
 }
 
-module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, reviewSettings, transcriptText, clean, reviewable, reviewCall, tick, setFeedback, lessons };
+module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, MIN_TEXT_SEC, reviewSettings, transcriptText, clean, reviewable, reviewCall, tick, setFeedback, lessons };

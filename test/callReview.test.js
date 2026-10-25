@@ -56,10 +56,11 @@ test("the transcript reads as turns: who said what, when", () => {
   assert.equal(transcriptText(segments), "[0:00] Operator: Mir Said Baraka Himoya, assalomu alaykum!\n[0:03] Mijoz: Assalomu alaykum\n[0:07] Suhbat: ?");
 });
 
-test("only an operator's answered, long enough call is reviewed", () => {
+test("an operator's answered call gets its text and summary from 5 s (scored from 20 s)", () => {
   const operator = { job: "call_center", extraJobs: "" };
   assert.equal(reviewable({ missed: false, durationSeconds: 60, employee: operator }), true);
-  assert.equal(reviewable({ missed: false, durationSeconds: 10, employee: operator }), false);
+  assert.equal(reviewable({ missed: false, durationSeconds: 16, employee: operator }), true);
+  assert.equal(reviewable({ missed: false, durationSeconds: 3, employee: operator }), false);
   assert.equal(reviewable({ missed: true, durationSeconds: 0, employee: operator }), false);
   assert.equal(reviewable({ missed: false, durationSeconds: 60, employee: { job: "coordinator", extraJobs: "" } }), false);
 });
