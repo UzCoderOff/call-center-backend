@@ -131,7 +131,9 @@ const SYSTEM = (rules, lessons) => `You review a law firm call-center operator's
 The firm's call standard for operators:
 ${rules}
 
-The call is a transcript made automatically from the recording (Uzbek speech recognition): lines marked "Operator" are the firm's operator, "Mijoz" the caller; a recording that couldn't be split is marked "Suhbat". Recognition makes mistakes — misheard words, missing words — so judge the meaning, never spelling, and don't blame the operator for what may be a recognition error. Tone of voice isn't in a transcript: judge manner by the words.
+The call is a transcript made automatically from the recording (Uzbek speech recognition): lines marked "Operator" are the firm's operator, "Mijoz" the caller; a recording that couldn't be split is marked "Suhbat". Recognition makes mistakes — misheard words, missing words — so judge the meaning, never spelling, and don't blame the operator for what may be a recognition error. Read words in context: common mix-ups are «bitta» for «bitdi» («ishim bor edi, bitdi» = the matter is already settled), «boʻldi» (= enough / it's done), «lejer/lider» for «Ledger». Tone of voice isn't in a transcript: judge manner by the words.
+
+You may also get the number's history before this call (missed calls, call-backs, earlier talks, bookings). Use it in «about»: e.g. "called twice at night, not answered; called back next morning — says the matter is already settled (likely went elsewhere)". Don't score the operator for what happened before this call.
 
 Decide the kind of call first:
 - lead: a new person with a legal question — judge all nine criteria by the standard.
@@ -164,13 +166,16 @@ function transcriptText(segments) {
 
 // The AI's answer, made safe: the nine criteria in order, points within
 // each maximum, the total 0..100 after gross errors.
+// The AI's text with oʻ, gʻ, ʼ (it often writes o', g').
+const uz = (text) => require("./pbx/transcribe").uzLetters(String(text || ""));
+
 function clean(r) {
   const byKey = new Map((Array.isArray(r?.criteria) ? r.criteria : []).map((c) => [c.key, c]));
   const criteria = CRITERIA.map((key) => {
     const c = byKey.get(key) || {};
-    return { key, points: Math.max(0, Math.min(MAX[key], Math.round(Number(c.points) || 0))), max: MAX[key], note: String(c.note || "").slice(0, 400) };
+    return { key, points: Math.max(0, Math.min(MAX[key], Math.round(Number(c.points) || 0))), max: MAX[key], note: uz(c.note).slice(0, 400) };
   });
-  const list = (v, n) => (Array.isArray(v) ? v : []).map((x) => String(x || "").trim()).filter(Boolean).slice(0, n);
+  const list = (v, n) => (Array.isArray(v) ? v : []).map((x) => uz(x).trim()).filter(Boolean).slice(0, n);
   const seen = new Set();
   const grossErrors = (Array.isArray(r?.grossErrors) ? r.grossErrors : [])
     .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
@@ -178,15 +183,15 @@ function clean(r) {
   const sum = criteria.reduce((s, c) => s + c.points, 0);
   return {
     kind: KINDS.includes(r?.kind) ? r.kind : "lead",
-    topic: String(r?.topic || "").slice(0, 120),
+    topic: uz(r?.topic).slice(0, 120),
     outcome: OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked",
-    about: String(r?.about || "").slice(0, 400),
+    about: uz(r?.about).slice(0, 400),
     criteria,
     grossErrors,
     good: list(r?.good, 3),
     improve: list(r?.improve, 3),
     betterLines: (Array.isArray(r?.betterLines) ? r.betterLines : [])
-      .map((b) => ({ said: String(b?.said || "").trim().slice(0, 400), better: String(b?.better || "").trim().slice(0, 400) }))
+      .map((b) => ({ said: uz(b?.said).trim().slice(0, 400), better: uz(b?.better).trim().slice(0, 400) }))
       .filter((b) => b.said && b.better)
       .slice(0, 3),
     score: Math.max(0, Math.min(100, sum - 20 * grossErrors.length)),
@@ -213,6 +218,37 @@ function reviewable(call) {
 }
 
 // Reviews one call now. -> the CallAnalysis row, or null.
+// What happened with this number before the call (7 days): missed calls and
+// call-backs, earlier talks, bookings — so the summary can say "called twice
+// at night, not answered". Plain lines in Uzbek, firm time.
+const HISTORY_DAYS = 7;
+async function historyBefore(call) {
+  if (!call.phoneKey) return "";
+  const { firmDate } = require("../lib/firmTime");
+  const env = require("../config/env");
+  const at = Number(call.callTimestampMs);
+  const stamp = new Intl.DateTimeFormat("sv-SE", { timeZone: env.firmTimezone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const [calls, bookings] = await Promise.all([
+    prisma.callLog.findMany({
+      where: { phoneKey: call.phoneKey, id: { not: call.id }, callTimestampMs: { gte: BigInt(at - HISTORY_DAYS * 86400000), lt: BigInt(at) } },
+      orderBy: { callTimestampMs: "asc" },
+      take: 12,
+      select: { callType: true, missed: true, durationSeconds: true, callTimestampMs: true, employee: { select: { name: true } } },
+    }),
+    prisma.appointment.findMany({ where: { phoneKey: call.phoneKey, createdAt: { lt: new Date(at) } }, orderBy: { createdAt: "desc" }, take: 3, select: { date: true, status: true } }),
+  ]);
+  if (!calls.length && !bookings.length) return "";
+  const line = (c) => {
+    const when = stamp.format(new Date(Number(c.callTimestampMs)));
+    const what = c.missed ? "javobsiz (mijoz qoʻngʻiroq qilgan, olinmagan)" : c.callType === "outgoing" ? `operator qoʻngʻiroq qilgan, ${clock(c.durationSeconds)}` : `mijoz qoʻngʻiroq qilgan, gaplashilgan ${clock(c.durationSeconds)}`;
+    return `- ${when}: ${what} — ${c.employee?.name || ""}`;
+  };
+  const parts = ["Bu raqam bilan oldingi qoʻngʻiroqlar (oxirgi 7 kun):", ...calls.map(line)];
+  if (bookings.length) parts.push(`Konsultatsiyalar: ${bookings.map((b) => `${b.date} (${b.status})`).join(", ")}`);
+  parts.push(`Shu qoʻngʻiroq: ${stamp.format(new Date(at))}, bugun ${firmDate()}.`);
+  return `${parts.join("\n")}\n\n`;
+}
+
 async function reviewCall(callLogId) {
   if (!(await claudeFeatureOn("callReview"))) return null;
   const claude = require("./ai/claude");
@@ -231,7 +267,7 @@ async function reviewCall(callLogId) {
         messages: [
           {
             role: "user",
-            content: `Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
+            content: `${await historyBefore(call)}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
           },
         ],
         tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
