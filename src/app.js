@@ -130,6 +130,7 @@ app.use("/api/audit", clientRoutes.auditLog);
 app.use("/api/materials", materialRoutes);
 app.use("/api/telegram", telegramRoutes);
 app.use("/api/tg-inbox", require("./routes/tgInbox"));
+app.use("/api/practice", require("./routes/practice"));
 app.use("/api/finance", financeRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/call-outcomes", require("./routes/callOutcomes"));

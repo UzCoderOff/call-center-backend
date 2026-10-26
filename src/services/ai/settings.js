@@ -15,10 +15,12 @@ const { getSetting, setSetting } = require("../../lib/settings");
 
 // What Claude powers (services/ai/reports.js, fileReader.js, consultSummary,
 // services/tgReview.js).
-const CLAUDE_FEATURES = ["weeklyReport", "lostAnalysis", "suggestions", "fileReader", "summaryDraft", "tgReview", "callReview"];
+const CLAUDE_FEATURES = ["weeklyReport", "lostAnalysis", "suggestions", "fileReader", "summaryDraft", "tgReview", "callReview", "practice"];
 // On unless switched off: the Telegram chat review (beta) — the firm asked
 // for it to work as soon as it's released (2026-10-15).
 // And the operators' call review (beta, 2026-10-24).
+// Practice with a made-up client (services/practice, 2026-10-26) starts
+// off: the firm switches it on for staff at the meeting where it's shown.
 const ON_BY_DEFAULT = new Set(["tgReview", "callReview"]);
 
 const AI_DEFAULTS = {

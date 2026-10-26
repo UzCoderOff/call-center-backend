@@ -43,6 +43,38 @@ The startup log should say `database: journal mode wal`, `listening on port
 
 `.env` only changes when a release says so — compare with `.env.example`.
 
+### This release (2026-10-26): Instagram in the inbox, the AI answering new people (beta), review flags, practice
+
+- «Mijozlar Telegrami» is now «Mijozlar xabarlari»: the firm's Instagram DMs
+  come in next to Telegram (read through treg every minute; only messages from
+  the first look on). Filters: all / Telegram / Instagram / agreed / needs a
+  person.
+- The AI that answers new people (`services/aiReply`, prompt in
+  `services/aiReply/prompt.js` — the same file the voice lab's `/chat` uses):
+  learns the problem, explains why a consultation helps, offers two free times
+  from the boss's calendar, and when they agree tells the operators (kind
+  "leads", in the bell). No legal answers (a second look blocks them), no
+  payments. Steps back when a person from the firm writes; staff can stop it
+  per chat. Its own monthly limit (default $15). **Off on both platforms until
+  a manager switches it on** (Sozlamalar → Mijozlar xabarlari → AI javoblar).
+- Migration `20261026000000_ai_replies` rebuilds TgChat and TgMessage (all rows
+  kept; existing chats are Telegram).
+
+**Right after deploying:**
+1. `.env`: `TREG_TOKEN` — a treg agent token limited to the instagram tool
+   (`treg org agent-new ledger-instagram --tools instagram`), then
+   `pm2 restart all`. Sozlamalar shows "Instagram: @… · oxirgi tekshiruv".
+2. Telegram: in the firm's account, Telegram Business → Chatbots → the Ledger
+   bot: turn on «Reply to messages», and give it only chats with non-contacts.
+3. Start with «Faqat taklif qiladi» (drafts) for a few days, then off-hours.
+- The chat review flags a legal answer, a wrong price and text that looks
+  pasted (TgReview.flags); Natijalar counts them per person.
+- Practice («Mashq», services/practice, migration `20261026010000_practice`):
+  the AI plays a made-up client, scored by the call standard. Off for staff
+  until a manager turns on Sozlamalar → Claude → «Mashq»; managers can try it
+  meanwhile.
+- What's-new: the boss only (staff hear at the meeting).
+
 ### Follow-up (2026-10-17, evening): cancelling, new or existing client, calls by direction
 
 - The old names are back: «Konsultatsiya» / «Konsultatsiyalar» (one thing:

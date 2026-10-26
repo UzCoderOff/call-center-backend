@@ -186,13 +186,15 @@ async function onMessage(msg, { edited = false } = {}) {
   const out = String(msg.from?.id) !== tgUserId;
   // Telegram Business's own away or greeting message: not anyone's answer.
   const auto = out && Boolean(msg.is_from_offline);
+  // Sent by the bot for the firm's account: Ledger's AI (services/aiReply).
+  const ai = out && !auto && Boolean(msg.sender_business_bot);
   const sentAt = new Date((msg.date || Date.now() / 1000) * 1000);
   const parsed = parse(msg);
   const connectionId = msg.business_connection_id || null;
 
   const chat = await prisma.tgChat.upsert({
-    where: { tgUserId },
-    create: { tgUserId, ...names(msg.chat), connectionId },
+    where: { platform_tgUserId: { platform: "telegram", tgUserId } },
+    create: { platform: "telegram", tgUserId, ...names(msg.chat), connectionId },
     update: { ...names(msg.chat), ...(connectionId ? { connectionId } : {}) },
   });
 
@@ -205,24 +207,38 @@ async function onMessage(msg, { edited = false } = {}) {
     return chat;
   }
 
+  return record(chat, { ...parsed, tgMessageId: msg.message_id, out, auto, ai, sentAt }, () => phoneFrom(msg, tgUserId));
+}
+
+// A person from the firm wrote in a chat: the AI keeps out of it this long.
+const AI_PAUSE_MS = 12 * 60 * 60 * 1000;
+
+// One message into a chat, from Telegram or Instagram (services/igInbox.js):
+// kept, and the chat follows — waiting or answered, their number, the client
+// it goes with, the AI stepping back when a person answers. `phoneOf` finds
+// their own number in it. -> the chat
+async function record(chat, m, phoneOf = () => phoneIn(m.text)) {
+  const { out, auto = false, ai = false, sentAt } = m;
   try {
     await prisma.tgMessage.create({
       data: {
         chatId: chat.id,
-        tgMessageId: msg.message_id,
+        tgMessageId: m.tgMessageId ?? null,
+        extId: m.extId ?? null,
         out,
         auto,
-        kind: parsed.kind,
-        text: parsed.text,
-        fileId: parsed.fileId ?? null,
-        fileName: parsed.fileName ?? null,
-        duration: parsed.duration ?? null,
+        ai,
+        kind: m.kind,
+        text: m.text ?? null,
+        fileId: m.fileId ?? null,
+        fileName: m.fileName ?? null,
+        duration: m.duration ?? null,
         sentAt,
-        answeredById: out && !auto ? await answeringOperator() : null,
+        answeredById: out && !auto && !ai ? await answeringOperator() : null,
       },
     });
   } catch (err) {
-    if (err.code === "P2002") return chat; // already have it (Telegram sent it again)
+    if (err.code === "P2002") return chat; // already have it (sent again, or it's the AI's own)
     throw err;
   }
 
@@ -231,13 +247,14 @@ async function onMessage(msg, { edited = false } = {}) {
   if (out && !auto) {
     data.lastOutAt = sentAt;
     data.waitingSince = null;
+    if (!ai) data.aiPausedUntil = new Date(sentAt.getTime() + AI_PAUSE_MS);
   } else if (!out) {
     data.lastInAt = sentAt;
     if (!chat.waitingSince) data.waitingSince = sentAt;
     // The AI took it out of the list; they've written again — a person looks.
     if (chat.aiHidden) Object.assign(data, { hidden: false, aiHidden: false });
     if (!chat.phone) {
-      const phone = phoneFrom(msg, tgUserId);
+      const phone = phoneOf();
       if (phone) Object.assign(data, { phone, phoneKey: phoneKey(phone) });
     }
   }
@@ -249,7 +266,7 @@ async function onMessage(msg, { edited = false } = {}) {
   }
   const updated = Object.keys(data).length ? await prisma.tgChat.update({ where: { id: chat.id }, data }) : chat;
   bumpInbox();
-  if (!out && updated.clientId) tellCoordinators(updated, parsed).catch((err) => console.error("[tg-inbox] coordinator notice failed:", err.message));
+  if (!out && updated.clientId) tellCoordinators(updated, m).catch((err) => console.error("[tg-inbox] coordinator notice failed:", err.message));
   return updated;
 }
 
@@ -295,7 +312,7 @@ async function refreshWaiting(chatId) {
 // deleted_business_messages: kept, marked deleted.
 async function onDeleted(update) {
   if (!(await isFirmConnection(update?.business_connection_id))) return 0;
-  const chat = await prisma.tgChat.findUnique({ where: { tgUserId: String(update?.chat?.id) } });
+  const chat = await prisma.tgChat.findUnique({ where: { platform_tgUserId: { platform: "telegram", tgUserId: String(update?.chat?.id) } } });
   if (!chat || !Array.isArray(update.message_ids)) return 0;
   const { count } = await prisma.tgMessage.updateMany({ where: { chatId: chat.id, tgMessageId: { in: update.message_ids }, deletedAt: null }, data: { deletedAt: new Date() } });
   if (count) await refreshWaiting(chat.id);
@@ -330,13 +347,14 @@ async function onConnection(conn) {
 
 // ------------------------------------------------------------ reading
 
-const displayName = (c) => [c.firstName, c.lastName].filter(Boolean).join(" ") || (c.username ? `@${c.username}` : "Telegram");
+const displayName = (c) => [c.firstName, c.lastName].filter(Boolean).join(" ") || (c.username ? `@${c.username}` : c.platform === "instagram" ? "Instagram" : "Telegram");
 
 function messageLine(m) {
   return {
     id: m.id,
     out: m.out,
     auto: m.auto,
+    ai: m.ai,
     kind: m.kind,
     text: m.deletedAt ? null : m.text,
     hasFile: Boolean(m.fileId) && !m.deletedAt,
@@ -353,6 +371,7 @@ function chatLine(c) {
   const last = c.messages?.[0];
   return {
     id: c.id,
+    platform: c.platform,
     name: displayName(c),
     firstName: c.firstName,
     lastName: c.lastName,
@@ -364,7 +383,9 @@ function chatLine(c) {
     topic: c.topic,
     lastMessageAt: c.lastMessageAt,
     waitingSince: c.waitingSince,
-    lastMessage: last ? { kind: last.kind, text: last.deletedAt ? null : last.text, out: last.out, deleted: Boolean(last.deletedAt), sentAt: last.sentAt } : null,
+    // What the AI is doing here (services/aiReply): "on" | "agreed" | "handoff" | "off" | "done" | null.
+    ai: c.aiState,
+    lastMessage: last ? { kind: last.kind, text: last.deletedAt ? null : last.text, out: last.out, ai: last.ai, deleted: Boolean(last.deletedAt), sentAt: last.sentAt } : null,
   };
 }
 
@@ -389,6 +410,8 @@ module.exports = {
   phoneIn,
   phoneFrom,
   onMessage,
+  record,
+  AI_PAUSE_MS,
   onDeleted,
   onConnection,
   displayName,

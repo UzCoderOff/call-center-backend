@@ -16,7 +16,9 @@ const router = express.Router();
 // section and AI feedback are theirs — services/tgInbox.js).
 async function withTelegram(user) {
   const { isAnswerer } = require("../services/tgInbox");
-  return { ...publicMe(user), tgInbox: await isAnswerer(user) };
+  const { claudeFeatureOn } = require("../services/ai/settings");
+  // Practice (Mashq): staff see it once a manager has switched it on.
+  return { ...publicMe(user), tgInbox: await isAnswerer(user), practice: await claudeFeatureOn("practice") };
 }
 
 // Shared with the Android app's sign-in (routes/device.js). Same generic

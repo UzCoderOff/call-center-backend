@@ -26,6 +26,7 @@ const KINDS = [
   { key: "summaries", label: "Suhbat yakunlari", hint: "konsultatsiyadan keyin yakun yozilmagan boʻlsa" },
   { key: "aiReports", label: "AI hisobotlari", hint: "dushanba kungi haftalik hisobot va oylik tahlil" },
   { key: "chat", label: "Chat", hint: "yangi xabarlar — Ledger ilovasi boʻlmasa" },
+  { key: "leads", label: "AI suhbatlari", hint: "AI bilan yozishgan odam konsultatsiyaga rozi boʻlganda yoki odam kerak boʻlganda" },
   { key: "calendar", label: "Shaxsiy kalendar", hint: "kimdir kalendaringizga yozuv qoʻshganda" },
   { key: "news", label: "Yangiliklar", hint: "Ledger yangilanganda — sizga tegishli oʻzgarishlar" },
   { key: "deploys", label: "Server yangilanishi", hint: "yangi versiya oʻrnatildimi yoki xato boʻldimi" },
@@ -70,6 +71,9 @@ function applicableKinds(user) {
   if (isCallCenter(e)) out.push("callReviews");
   // Ledger AI's weekly report and monthly analysis: the managers.
   if (isManagerUser(user)) out.push("aiReports");
+  // The AI that answers new people (services/aiReply): someone agreed to a
+  // consultation, or a person must take over — the call center and managers.
+  if (isManagerUser(user) || isCallCenter(e)) out.push("leads");
   // Chat messages (services/chat.js): here only for people without the app.
   out.push("chat");
   // Their own calendar (routes/personalCalendar.js): lawyer accounts.

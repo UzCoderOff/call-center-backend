@@ -24,6 +24,19 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    // Staff hear nothing yet: practice is shown to them at a meeting, and the
+    // AI replies stay off until a manager switches them on.
+    id: "2026-10-26-messages-ai-practice",
+    date: "2026-10-26",
+    boss: [
+      "<b>Mijozlar xabarlari</b>: «Mijozlar Telegrami» endi shunday ataladi — Telegram bilan birga firma Instagrami ham shu yerda boʻladi (Instagram xabarlarga ruxsat berilgach). Roʻyxatda Telegram / Instagram boʻyicha filtr bor.",
+      "<b>AI javoblar (beta)</b>: AI yangi odamlarga firmaning ssenariysi boʻyicha yozishi mumkin — muammosini bilib oladi, konsultatsiya nega kerakligini tushuntiradi, rozi boʻlsa operatorlarga xabar beradi. Yuridik javob bermaydi, toʻlov olmaydi. Hozircha oʻchiq: Sozlamalar → Mijozlar xabarlari → AI javoblar.",
+      "<b>AI tahlilida belgilar</b>: yozishmalarda «Yuridik javob berilgan», «Notoʻgʻri narx» va «Koʻchirilgan matnga oʻxshaydi» — operatorning oʻz soʻzlari bilan. Natijalarda har bir xodim uchun soni koʻrinadi.",
+      "<b>Mashq</b>: AI mijoz rolini oʻynaydi, xodim javob beradi, oxirida AI qoʻngʻiroq standarti boʻyicha baholaydi. Hozircha faqat rahbarlarga ochiq — sinab koʻring; xodimlarga ochish uchun Sozlamalar → Claude → «Mashq»ni yoqing.",
+    ],
+    staff: [],
+  },
+  {
     id: "2026-10-24-bell-second-chance-tv",
     date: "2026-10-24",
     boss: [

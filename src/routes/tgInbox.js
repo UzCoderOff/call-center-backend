@@ -11,6 +11,7 @@ const { getSetting, setSetting } = require("../lib/settings");
 const api = require("../services/telegram/api");
 const inbox = require("../services/tgInbox");
 const reviews = require("../services/tgReview");
+const aiReply = require("../services/aiReply");
 const { claudeFeatureOn } = require("../services/ai/settings");
 const { firmDayRange, firmNow } = require("../lib/firmTime");
 
@@ -31,6 +32,14 @@ const { firmDayRange, firmNow } = require("../lib/firmTime");
 //   PUT    /api/tg-inbox/reviews/:reviewId/feedback  { verdict: "right"|"wrong"|null,
 //                                         kind?, note? } — a manager checks the AI's review;
 //                                         corrections go back to the AI as examples
+//   GET    /api/tg-inbox/ai               the AI that answers new people: its settings, the
+//                                         month's cost, Instagram's state (managers)
+//   PUT    /api/tg-inbox/ai               { telegram?, instagram?, slowMinutes?, hoursFrom?,
+//                                         hoursTo?, capUsd?, model?, facts?, rules?, calendarId? }
+//   POST   /api/tg-inbox/:id/ai           { on } — stop the AI in this chat, or give it back
+//                                         (managers, the people who answer)
+//
+// Instagram chats (services/igInbox.js) are here too — the same rows, platform "instagram".
 
 const router = express.Router();
 router.use(requireAuth);
@@ -77,6 +86,9 @@ router.get("/", async (req, res, next) => {
     requireInbox(req.user);
     const q = String(req.query.q ?? "").trim().replace(/^@/, "");
     const where = { hidden: req.query.hidden === "1" && isManager(req.user), lastMessageAt: { not: null }, AND: [inbox.chatScope(req.user)] };
+    if (["telegram", "instagram"].includes(req.query.platform)) where.platform = req.query.platform;
+    // The ones the AI passed on: they agreed, or it handed over.
+    if (["agreed", "handoff"].includes(req.query.ai)) where.aiState = req.query.ai;
     if (q) {
       const digits = q.replace(/\D/g, "");
       where.OR = [{ firstName: { contains: q } }, { lastName: { contains: q } }, { username: { contains: q } }, ...(digits.length >= 4 ? [{ phone: { contains: digits } }] : []), { client: { name: { contains: q } } }];
@@ -87,8 +99,10 @@ router.get("/", async (req, res, next) => {
       take: PAGE,
       include: { client: inbox.CLIENT_REF, messages: inbox.LAST_MESSAGE },
     });
-    const waiting = await prisma.tgChat.count({ where: { hidden: false, waitingSince: { not: null }, AND: [inbox.chatScope(req.user)] } });
-    res.json({ chats: rows.map(inbox.chatLine), waiting });
+    const [waiting, agreed, handoff] = await Promise.all(
+      [{ waitingSince: { not: null } }, { aiState: "agreed" }, { aiState: "handoff" }].map((w) => prisma.tgChat.count({ where: { hidden: false, ...w, AND: [inbox.chatScope(req.user)] } }))
+    );
+    res.json({ chats: rows.map(inbox.chatLine), waiting, ai: { agreed, handoff } });
   } catch (err) {
     next(err);
   }
@@ -150,6 +164,31 @@ router.put("/settings", async (req, res, next) => {
   }
 });
 
+// The AI that answers new people (services/aiReply): managers set it.
+router.get("/ai", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) throw forbidden();
+    res.json(await aiReply.publicSettings());
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put("/ai", async (req, res, next) => {
+  try {
+    if (!isManager(req.user)) throw forbidden();
+    const b = req.body || {};
+    if (b.calendarId) {
+      const found = await prisma.calendar.count({ where: { id: parseId(b.calendarId, "calendarId") } });
+      if (!found) throw badRequest("unknown calendar");
+    }
+    await aiReply.saveSettings(b, req.user);
+    res.json(await aiReply.publicSettings());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Someone's reviewed chats in a month (Natijalar → their page): what the AI
 // said, newest first, and the counts.
 router.get("/reviews", async (req, res, next) => {
@@ -163,7 +202,7 @@ router.get("/reviews", async (req, res, next) => {
     const nextMonth = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`;
     const from = new Date(firmDayRange(`${month}-01`).from);
     const to = new Date(firmDayRange(nextMonth).from);
-    if (!employee.userId) return res.json({ month, counts: {}, averageScore: null, reviews: [] });
+    if (!employee.userId) return res.json({ month, counts: {}, flags: {}, flagged: [], averageScore: null, reviews: [] });
     // The latest look at each chat that month (a chat looked at twice: once)
     // — new leads only: an existing client's chat isn't selling, and a
     // manager's correction decides.
@@ -171,19 +210,29 @@ router.get("/reviews", async (req, res, next) => {
       where: { operatorId: employee.userId, createdAt: { gte: from, lt: to } },
       orderBy: { createdAt: "desc" },
       include: {
-        chat: { select: { id: true, firstName: true, lastName: true, username: true, client: { select: { id: true, name: true } } } },
+        chat: { select: { id: true, platform: true, firstName: true, lastName: true, username: true, client: { select: { id: true, name: true } } } },
         operator: { select: { name: true, username: true, employee: { select: { name: true } } } },
         feedbackBy: ANSWERED_BY,
       },
     });
     const seen = new Set();
-    const latest = rows.filter((r) => !seen.has(r.chatId) && seen.add(r.chatId)).filter((r) => reviews.effectiveKind(r) === "lead");
+    const perChat = rows.filter((r) => !seen.has(r.chatId) && seen.add(r.chatId));
+    const latest = perChat.filter((r) => reviews.effectiveKind(r) === "lead");
     const counts = {};
     for (const r of latest) counts[r.outcome] = (counts[r.outcome] || 0) + 1;
+    // What a manager should look at: chats with a legal answer, a wrong price,
+    // text that looks pasted — new people and existing clients alike.
+    const flags = Object.fromEntries(reviews.FLAGS.map((k) => [k, 0]));
+    for (const r of perChat.filter((x) => reviews.effectiveKind(x) !== "not_relevant")) {
+      for (const k of new Set((Array.isArray(r.flags) ? r.flags : []).map((f) => f.kind))) if (k in flags) flags[k] += 1;
+    }
+    const flagged = perChat.filter((r) => reviews.effectiveKind(r) !== "not_relevant" && Array.isArray(r.flags) && r.flags.length);
     const scored = latest.filter((r) => r.score > 0);
     res.json({
       month,
       counts,
+      flags,
+      flagged: flagged.slice(0, 20).map((r) => ({ ...reviews.reviewLine(r), chat: { id: r.chat.id, name: r.chat.client?.name || inbox.displayName(r.chat), clientId: r.chat.client?.id ?? null } })),
       averageScore: scored.length ? Math.round((scored.reduce((s, r) => s + r.score, 0) / scored.length) * 10) / 10 : null,
       reviews: latest.slice(0, 50).map((r) => ({ ...reviews.reviewLine(r), chat: { id: r.chat.id, name: r.chat.client?.name || inbox.displayName(r.chat), clientId: r.chat.client?.id ?? null } })),
     });
@@ -285,7 +334,21 @@ router.get("/:id", async (req, res, next) => {
       messages: rows.slice(0, MESSAGES).reverse().map(inbox.messageLine),
       hasOlder,
       review: reviews.reviewLine(review),
+      ai: inbox.handlesNew(req.user) ? aiReply.chatAi(chat) : null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Staff stop the AI in this chat ("I'll take it"), or give it back.
+router.post("/:id/ai", async (req, res, next) => {
+  try {
+    requireHandles(req.user);
+    const chat = await chatFor(req.user, parseId(req.params.id));
+    if (typeof req.body?.on !== "boolean") throw badRequest("on must be true or false");
+    const updated = await aiReply.setChatAi(chat.id, req.body.on);
+    res.json(aiReply.chatAi(updated));
   } catch (err) {
     next(err);
   }

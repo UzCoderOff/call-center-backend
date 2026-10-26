@@ -145,3 +145,30 @@ test("the firm's corrections go back to the AI as examples", async () => {
   assert.match(first, /AI: lead, open, 2\/5\. Toʻgʻrisi: existing — «Biz bilan ishlayotgan mijoz»/);
   assert.match(second, /AI toʻgʻri — «Yaxshi ish»/);
 });
+
+test("the review's flags: only known kinds, short quotes, none on an unrelated chat", () => {
+  const { clean, FLAGS } = require("../src/services/tgReview");
+  assert.deepEqual(FLAGS, ["legal_answer", "wrong_price", "pasted_text"]);
+  const r = clean({
+    kind: "lead",
+    outcome: "lost_by_us",
+    flags: [
+      { kind: "legal_answer", quote: "Yana 2 oydan keyin harakat qilishingiz mumkin" },
+      { kind: "wrong_price", quote: "Konsultatsiya narxi 300.000 so'm" },
+      { kind: "made_up", quote: "x" },
+      { kind: "pasted_text", quote: "a".repeat(500) },
+    ],
+  });
+  assert.deepEqual(r.flags.map((f) => f.kind), ["legal_answer", "wrong_price", "pasted_text"]);
+  assert.equal(r.flags[2].quote.length, 200);
+  // An existing client's chat keeps its flags; spam has none.
+  assert.equal(clean({ kind: "existing", flags: [{ kind: "legal_answer", quote: "q" }] }).flags.length, 1);
+  assert.equal(clean({ kind: "not_relevant", flags: [{ kind: "legal_answer", quote: "q" }] }).flags.length, 0);
+  assert.deepEqual(clean({ kind: "lead" }).flags, []);
+});
+
+test("the review's default rules have both of the firm's prices", () => {
+  const { DEFAULT_RULES } = require("../src/services/tgReview");
+  assert.match(DEFAULT_RULES, /450 000/);
+  assert.match(DEFAULT_RULES, /600 000/);
+});

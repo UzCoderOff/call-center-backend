@@ -10,9 +10,12 @@ const TIMEOUT_MS = 90 * 1000;
 
 const isReasoningModel = (model) => /^(gpt-5|o\d)/.test(model) && !/chat/.test(model);
 
-function requestBody({ model, messages, tools, maxTokens = 1500 }) {
+// `schema`: answer with JSON of this shape (OpenAI's strict mode — every
+// property required) instead of free text.
+function requestBody({ model, messages, tools, maxTokens = 1500, schema }) {
   const body = { model, messages };
   if (tools?.length) body.tools = tools.map((t) => ({ type: "function", function: t }));
+  if (schema) body.response_format = { type: "json_schema", json_schema: { name: "answer", strict: true, schema } };
   if (isReasoningModel(model)) {
     body.max_completion_tokens = maxTokens + 2000; // room for its own thinking
     body.reasoning_effort = "low";

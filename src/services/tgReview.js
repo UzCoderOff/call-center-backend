@@ -31,7 +31,7 @@ const inbox = require("./tgInbox");
 // The firm's sales script for chats (Materiallar → «Kiruvchi qoʻngʻiroq
 // boʻyicha ssenariy», 2026-10-17), in short — what a good operator does.
 const DEFAULT_RULES = [
-  "Konsultatsiya: 450 000 soʻm, advokat bilan — ofisda yoki videoaloqa orqali. Maqsad: mijozning muammosini tushunish va uni oldindan toʻlov bilan pullik konsultatsiyaga yozish. Operator yuridik masalani oʻzi hal qilmaydi.",
+  "Konsultatsiya: onlayn (videoaloqa) 450 000 soʻm, ofisda 600 000 soʻm, advokat bilan. Maqsad: mijozning muammosini tushunish va uni oldindan toʻlov bilan pullik konsultatsiyaga yozish. Operator yuridik masalani oʻzi hal qilmaydi.",
   "1. Salomlashish: «Assalomu alaykum!», hol-ahvol soʻrash (masalan, «Yaxshimisiz, kuningiz yaxshi oʻtyaptimi?»), oʻzini tanishtirish («Ismim …, men firma advokatlarining yordamchisiman») va mijozning ismini soʻrash — keyin uni ismi bilan atash.",
   "2. Tartib: avval mijozning muammosini bilib oling — «Nima boʻldi?» deb soʻrang va toʻliq aytib olishiga qoʻying, boʻlmang. Keyin qisqa savollar: bu qachon boshlandi? qoʻlida hujjatlar bormi (rasmini yuborishi mumkin)? biror chora koʻrdimi, boshqa yuristga murojaat qildimi? qaror qabul qilishda yana kim ishtirok etadi?",
   "3. Imkon boʻlsa, qoʻngʻiroqqa oʻtkazing: «Telefonda bu 5 daqiqa oladi — hozir qoʻngʻiroq qilsam qulaymi?». Mijoz yozishmani xohlasa — shu yerda davom eting.",
@@ -54,6 +54,11 @@ const KINDS = ["lead", "existing", "not_relevant"];
 // The firm's corrections shown to the AI with every review.
 const LESSONS = 20;
 const POTENTIALS = ["high", "medium", "low", "none"];
+// What a manager should look at in the operator's own messages (2026-10-26):
+// a legal answer given in the chat, a price that isn't the firm's, and text
+// that reads as pasted from an AI chatbot or a website (a hint only — a
+// person decides).
+const FLAGS = ["legal_answer", "wrong_price", "pasted_text"];
 
 // Quiet this long before a review (the conversation has paused).
 const QUIET_MS = 60 * 60 * 1000;
@@ -87,6 +92,24 @@ const SCHEMA = {
     good: { type: "array", items: { type: "string" }, maxItems: 3, description: "What the operator did well" },
     improve: { type: "array", items: { type: "string" }, maxItems: 3, description: "Next time do this — only for real mistakes" },
     betterReply: { type: "string", description: "Only after a real mistake: the message the operator could have sent at the key moment. Else empty" },
+    flags: {
+      type: "array",
+      maxItems: 4,
+      description: "Problems in the OPERATOR's own messages (never the client's, never AI YORDAMCHI's). Empty when there are none.",
+      items: {
+        type: "object",
+        required: ["kind", "quote"],
+        properties: {
+          kind: {
+            type: "string",
+            enum: FLAGS,
+            description:
+              "legal_answer = the operator said what the law says or what will happen in the client's matter (yes/no, deadlines, chances, a plan for court) — pointing to the lawyer or a consultation is NOT this; wrong_price = a consultation price or discount that isn't in the firm's rules; pasted_text = a message that reads as copied from an AI chatbot or a website: long, formal, essay-like, in a clearly different style, spelling or punctuation from the operator's other messages",
+          },
+          quote: { type: "string", description: "The operator's words, a short exact quote (up to 200 characters)" },
+        },
+      },
+    },
   },
 };
 
@@ -105,7 +128,10 @@ For a lead decide:
 - Did the person become a client (booked a consultation)? If not, why: the operator's fault (slow, too short, unclear, wrong language, no concrete time offered, gave a legal conclusion, didn't follow the rules above), the person wasn't serious (just asking, no real intention), or something else (price, distance) while the operator did fine. If the conversation is still going, "open".
 - How promising the person was at the start.
 - Score the operator's handling 1-5 (0 if there is nothing to judge).
+Messages marked "AI YORDAMCHI" were written by the firm's AI assistant, not the operator: judge the operator only by their own messages, and how they took over from the AI.
 Be fair: answering a late-night message the next morning in working hours is fine. Use only what is in the conversation; don't invent facts. Voice messages and photos can't be read here — judge from the rest, and don't blame the operator for what you can't see.
+
+Flags (any kind of chat but not_relevant): look only at the OPERATOR's own messages. Mark a legal answer, a price that isn't the firm's, or a message that reads as pasted from an AI chatbot or a website, each with a short exact quote. "pasted_text" is only a hint — mark it when the style clearly differs from how the same operator writes elsewhere, not just because a message is long or well written.
 
 Advice only where it's earned:
 - "improve" and "betterReply" are for real mistakes against the rules above. If the operator did well (score 4-5), leave "betterReply" empty and "improve" empty (or one small tip). Never suggest a reply that isn't clearly better than what the operator actually wrote.
@@ -161,8 +187,8 @@ function words(m) {
   }
 }
 
-// The firm's away / greeting message, said as such.
-const who = (m) => (m.out ? (m.auto ? "AVTOMATIK XABAR" : "OPERATOR") : "MIJOZ");
+// The firm's away / greeting message, and the AI's replies, said as such.
+const who = (m) => (m.out ? (m.auto ? "AVTOMATIK XABAR" : m.ai ? "AI YORDAMCHI" : "OPERATOR") : "MIJOZ");
 
 // The chat as the model reads it: when, who, and how long the person waited.
 function transcript(messages) {
@@ -194,11 +220,19 @@ function clean(r, facts = {}) {
   const list = (x) => (Array.isArray(x) ? x.map((v) => String(v).trim()).filter(Boolean).slice(0, 3) : x ? [String(x).trim()] : []);
   const text = (x, max = 2000) => (x == null ? "" : String(x).trim().slice(0, max));
   const kind = facts.knownExisting ? "existing" : kindOf(r);
+  const flags =
+    kind === "not_relevant" || !Array.isArray(r.flags)
+      ? []
+      : r.flags
+          .filter((x) => x && FLAGS.includes(x.kind))
+          .slice(0, 4)
+          .map((x) => ({ kind: x.kind, quote: text(x.quote, 200) }));
   const base = {
     kind,
     relevant: kind !== "not_relevant",
     topic: text(r.topic, 80) || null,
     summary: text(r.summary) || null,
+    flags,
   };
   // Not a sale: no score, no selling advice.
   if (kind === "existing") return { ...base, outcome: "existing", potential: null, score: 0, lossReason: null, good: [], improve: [], betterReply: null };
@@ -444,9 +478,10 @@ function reviewLine(r) {
     good: Array.isArray(r.good) ? r.good : [],
     improve: Array.isArray(r.improve) ? r.improve : [],
     betterReply: r.betterReply,
+    flags: Array.isArray(r.flags) ? r.flags : [],
     operator: r.operator ? r.operator.employee?.name || r.operator.name || r.operator.username : null,
     model: r.model,
   };
 }
 
-module.exports = { DEFAULT_RULES, MODELS, OUTCOMES, KINDS, SCHEMA, reviewSettings, transcript, words, clean, chatFacts, factsText, lessons, effectiveKind, setFeedback, reviewChat, tick, reviewLine, QUIET_MS };
+module.exports = { DEFAULT_RULES, MODELS, OUTCOMES, KINDS, FLAGS, SCHEMA, reviewSettings, transcript, words, clean, chatFacts, factsText, lessons, effectiveKind, setFeedback, reviewChat, tick, reviewLine, QUIET_MS };

@@ -7,7 +7,7 @@ const f = require("../src/services/telegram/format");
 
 test("each person gets the notification kinds that fit their job", () => {
   const operator = { role: "EMPLOYEE", employee: { job: "call_center", collectCalls: true, calendarAccess: "book", autoReport: true, reportTemplateId: 3 }, calendar: null };
-  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "callReviews", "chat", "news"]);
+  assert.deepEqual(applicableKinds(operator), ["appointments", "missedCalls", "digest", "materials", "tasks", "targets", "recordings", "followUps", "strikes", "callReviews", "leads", "chat", "news"]);
 
   const clerk = { role: "EMPLOYEE", employee: { collectCalls: false, calendarAccess: "none", autoReport: false, reportTemplateId: 3 }, calendar: null };
   assert.deepEqual(applicableKinds(clerk), ["digest", "reportReminder", "materials", "tasks", "targets", "chat", "news"]);
@@ -16,7 +16,7 @@ test("each person gets the notification kinds that fit their job", () => {
   assert.deepEqual(applicableKinds(lawyer), ["appointments", "digest", "materials", "planning", "summaries", "tasks", "cases", "hearings", "followUps", "chat", "calendar", "news"]);
 
   const boss = { role: "BOSS", employee: null, calendar: null };
-  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "hearings", "followUps", "strikes", "aiReports", "chat", "calendar", "news"]);
+  assert.deepEqual(applicableKinds(boss), ["appointments", "digest", "tasks", "recordings", "cases", "hearings", "followUps", "strikes", "aiReports", "leads", "chat", "calendar", "news"]);
 
   // A monitored phone that isn't the call center's: no call-back alerts.
   const developer = { role: "DEVELOPER", employee: null, calendar: null };

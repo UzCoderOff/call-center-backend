@@ -148,7 +148,50 @@ async function secondChanceTick() {
   }
 }
 
+// The firm's Instagram, read through treg every minute (services/igInbox.js),
+// and the AI that answers new people in the firm's chats (services/aiReply).
+// (IG_POLL_MS, AI_REPLY_TICK_MS: shorter, for tests.)
+const IG_POLL_EVERY_MS = Number(process.env.IG_POLL_MS) || 60 * 1000;
+const AI_REPLY_EVERY_MS = Number(process.env.AI_REPLY_TICK_MS) || 15 * 1000;
+// Instagram refusing (no access, treg down): asked again in 10 minutes, the
+// same error logged once.
+const IG_BACKOFF_MS = 10 * 60 * 1000;
+let igPolling = false;
+let igQuietUntil = 0;
+let igLastError = null;
+async function igPollTick() {
+  if (igPolling || Date.now() < igQuietUntil || !require("./igInbox").configured()) return;
+  igPolling = true;
+  try {
+    const added = await require("./igInbox").poll();
+    if (added) console.log(`[instagram] ${added} new message(s)`);
+    if (igLastError) console.log("[instagram] working again");
+    igLastError = null;
+  } catch (err) {
+    if (err.message !== igLastError) console.error("[instagram] failed:", err.message);
+    igLastError = err.message;
+    igQuietUntil = Date.now() + IG_BACKOFF_MS;
+  } finally {
+    igPolling = false;
+  }
+}
+let aiReplying = false;
+async function aiReplyTick() {
+  if (aiReplying) return;
+  aiReplying = true;
+  try {
+    await require("./aiReply").tick();
+  } catch (err) {
+    console.error("[ai-reply] failed:", err.message);
+  } finally {
+    aiReplying = false;
+  }
+}
+
 function start() {
+  setTimeout(igPollTick, Math.min(20 * 1000, IG_POLL_EVERY_MS)).unref();
+  setInterval(igPollTick, IG_POLL_EVERY_MS).unref();
+  setInterval(aiReplyTick, AI_REPLY_EVERY_MS).unref();
   setTimeout(secondChanceTick, 4 * 60 * 1000).unref();
   setInterval(secondChanceTick, SECOND_CHANCE_EVERY_MS).unref();
   setTimeout(callReviewTick, 3 * 60 * 1000).unref();
@@ -167,4 +210,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick, secondChanceTick };
+module.exports = { start, igPollTick, aiReplyTick, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick, secondChanceTick };

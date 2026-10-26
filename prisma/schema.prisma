@@ -135,6 +135,7 @@ model User {
   coversSet               LawyerCover[]         @relation("CoverSetBy")
   caseOutcomesWritten     CaseDate[]            @relation("CaseDateOutcomeBy")
   callOutcomesSet         CallOutcome[]         @relation("CallOutcomeBy")
+  practiceSessions        PracticeSession[]     @relation("PracticeSessionUser")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -1664,13 +1665,19 @@ model PersonalEvent {
 }
 
 // Someone writing to the firm's Telegram account (Telegram Business, the
-// Ledger bot connected to it as its chatbot — services/tgInbox.js): one row
-// per person, linked to their client once known. Seen in Chat → Telegram and
-// on the client's page; the replies are typed in the Telegram app for now.
+// Ledger bot connected to it as its chatbot — services/tgInbox.js) or, since
+// 2026-10-26, to the firm's Instagram (read through treg —
+// services/igInbox.js): one row per person, linked to their client once
+// known. Seen in «Mijozlar xabarlari» and on the client's page; staff reply in
+// the Telegram / Instagram app, and the AI may answer new people
+// (services/aiReply).
 model TgChat {
   id            Int         @id @default(autoincrement())
-  // Their Telegram user id (the chat's id), as text — it can pass 2^53.
-  tgUserId      String      @unique
+  // Where they write: "telegram" | "instagram".
+  platform      String      @default("telegram")
+  // Their id there, as text: the Telegram user id (the chat's id — it can
+  // pass 2^53), or the Instagram-scoped id (IGSID).
+  tgUserId      String
   firstName     String?
   lastName      String?
   username      String?
@@ -1696,11 +1703,31 @@ model TgChat {
   lastOutAt     DateTime?
   // Their first message nobody has answered yet (null: answered).
   waitingSince  DateTime?
+  // The AI that answers new people (services/aiReply, 2026-10-26):
+  //   null — it hasn't taken part; "on" — it is talking to them;
+  //   "agreed" — they agreed to a consultation, the operators were told;
+  //   "handoff" — a person must take over (it stopped, they were told);
+  //   "off" — staff stopped it for this chat; "done" — nothing for it to do
+  //   (spam, a matter the firm doesn't take).
+  aiState       String?
+  // Where it says the talk is (prompt.js STAGES) and what it learnt:
+  // { name, phone, problem, format, time }.
+  aiStage       String?
+  aiLead        Json?
+  // For the operator: why it handed over, in a line.
+  aiNote        String?
+  aiAt          DateTime?
+  // A person from the firm wrote: the AI keeps quiet here until then.
+  aiPausedUntil DateTime?
+  // "Only suggest" mode: its suggested reply to message aiDraftFor.
+  aiDraft       String?
+  aiDraftFor    Int?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
   messages      TgMessage[]
   reviews       TgReview[]
 
+  @@unique([platform, tgUserId])
   @@index([clientId])
   @@index([lastMessageAt])
   @@index([phoneKey])
@@ -1710,11 +1737,15 @@ model TgMessage {
   id           Int       @id @default(autoincrement())
   chatId       Int
   chat         TgChat    @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  tgMessageId  Int
+  // Telegram's message id; Instagram's (a text "mid") is extId.
+  tgMessageId  Int?
+  extId        String?
   // Sent by the firm's account (an operator in the Telegram app).
   out          Boolean   @default(false)
   // Telegram's own away / greeting message (Telegram Business), not a person.
   auto         Boolean   @default(false)
+  // Written and sent by Ledger's AI (services/aiReply), not a person.
+  ai           Boolean   @default(false)
   // "text" | "photo" | "voice" | "video" | "video_note" | "audio" |
   // "document" | "sticker" | "contact" | "location" | "other"
   kind         String    @default("text")
@@ -1732,6 +1763,7 @@ model TgMessage {
   createdAt    DateTime  @default(now())
 
   @@unique([chatId, tgMessageId])
+  @@unique([chatId, extId])
   @@index([chatId, sentAt])
 }
 
@@ -1767,6 +1799,9 @@ model TgReview {
   good          Json?
   improve       Json?
   betterReply   String?
+  // What a manager should look at in the operator's messages (2026-10-26):
+  // [{ kind: "legal_answer" | "wrong_price" | "pasted_text", quote }].
+  flags         Json?
   model         String
   costUsd       Float    @default(0)
   // A manager's check of the review: "right" | "wrong"; when wrong, the right
@@ -1782,4 +1817,30 @@ model TgReview {
   @@index([chatId, createdAt])
   @@index([operatorId, createdAt])
   @@index([feedbackAt])
+}
+
+// Practice (2026-10-26, the user's ask): a staff member talks to a made-up
+// client the AI plays (services/practice), then the AI scores them by the
+// firm's call standard — the same nine criteria as real calls. One row per
+// try; managers see everyone's, staff their own.
+model PracticeSession {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  user       User      @relation("PracticeSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  // services/practice/scenarios.js
+  scenario   String
+  // [{ from: "client" | "staff", text, at }]
+  messages   Json
+  // "active" | "done"
+  status     String    @default("active")
+  // How it ended: "booked" | "callback" | "routed" | "declined" | "left" | "stopped".
+  outcome    String?
+  // 0..100 by the call standard, and the review (callReview.clean's shape).
+  score      Int?
+  result     Json?
+  costUsd    Float     @default(0)
+  createdAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([userId, createdAt])
 }
