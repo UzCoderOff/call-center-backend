@@ -130,8 +130,7 @@ router.put("/settings", requireRole("DEVELOPER"), async (req, res, next) => {
       patch.night = { on, from, to };
     }
     if (req.body?.testNumbers !== undefined) {
-      const list = Array.isArray(req.body.testNumbers) ? req.body.testNumbers : String(req.body.testNumbers || "").split(/[,;
-]+/);
+      const list = Array.isArray(req.body.testNumbers) ? req.body.testNumbers : String(req.body.testNumbers || "").split(/[,;]+/);
       const numbers = [];
       for (const raw of list.map((n) => String(n).trim()).filter(Boolean)) {
         const uz = normalizeUz(raw);
