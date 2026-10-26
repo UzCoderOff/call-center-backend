@@ -174,3 +174,41 @@ test("AMI fields can repeat (Originate's Variable)", () => {
   const msg = formatMessage({ Action: "Originate", Variable: ["A=1", "B=2"], Skip: undefined });
   assert.equal(msg, "Action: Originate\r\nVariable: A=1\r\nVariable: B=2\r\n\r\n");
 });
+
+test("night hours: both ends for Asterisk, past midnight too; off or nonsense is empty", () => {
+  const { nightRange } = require("../src/services/pbx/settings");
+  assert.equal(nightRange({ on: true, from: "22:00", to: "08:00" }), "22:00-07:59");
+  assert.equal(nightRange({ on: true, from: "18:30", to: "00:00" }), "18:30-23:59");
+  assert.equal(nightRange({ on: true, from: "00:00", to: "07:00" }), "00:00-06:59");
+  assert.equal(nightRange({ on: false, from: "22:00", to: "08:00" }), "");
+  assert.equal(nightRange({ on: true, from: "22:00", to: "22:00" }), "");
+  assert.equal(nightRange({ on: true, from: "25:00", to: "08:00" }), "");
+  assert.equal(nightRange(undefined), "");
+});
+
+test("the line's globals: each voice message only when recorded; night only with its message", () => {
+  const { globalsFor } = require("../src/services/pbx/provision");
+  const settings = { trunkEnabled: true, companyNumber: "+998781139001", night: { on: true, from: "22:00", to: "08:00" } };
+  const none = globalsFor(settings, {});
+  assert.equal(none.HAS_GREETING, 0);
+  assert.equal(none.HAS_BUSY, 0);
+  assert.equal(none.LINE_NIGHT, ""); // no night message: the line works as by day
+  const all = globalsFor(settings, { greeting: {}, busy: {}, night: {}, thanks: {} });
+  assert.equal(all.HAS_GREETING, 1);
+  assert.equal(all.HAS_BUSY, 1);
+  assert.equal(all.HAS_THANKS, 1);
+  assert.equal(all.LINE_NIGHT, "22:00-07:59");
+  assert.match(renderGlobals(all), /\nLINE_NIGHT=22:00-07:59\n/);
+  assert.equal(globalsFor({ ...settings, night: { ...settings.night, on: false } }, { night: {} }).LINE_NIGHT, "");
+});
+
+test("a call outside working hours is a missed call for the call center, said to be at night", () => {
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1030&status=&vm=night"), [], ctx(12));
+  assert.equal(s.missed, true);
+  assert.equal(s.employeeId, 12);
+  assert.equal(s.detail.owner, "rotation");
+  assert.equal(s.detail.reason, "night");
+  const busy = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1200&status=TIMEOUT&vm=busy"), [parseEvt("ext=203&rs=1001&status=NOANSWER")], ctx(12));
+  assert.equal(busy.detail.reason, "not_answered");
+  assert.equal(busy.employeeId, 11);
+});

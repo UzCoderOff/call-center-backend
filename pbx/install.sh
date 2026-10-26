@@ -41,6 +41,8 @@ sudo install -d -o "$USER" -g ledgerpbx -m 2750 /etc/asterisk/ledger
 # Not under /var/spool/asterisk: only Asterisk may enter that.
 sudo install -d -o root -g ledgerpbx -m 2750 /var/spool/ledger-pbx
 sudo install -d -o asterisk -g ledgerpbx -m 2770 /var/spool/ledger-pbx/calls /var/spool/ledger-pbx/recordings
+# The firm's voice messages: Ledger writes them, Asterisk (the group) plays them.
+sudo install -d -o "$USER" -g ledgerpbx -m 2750 /var/spool/ledger-pbx/sounds
 for f in pjsip_staff.conf extensions_ledger.conf globals_ledger.conf; do
   [ -f "/etc/asterisk/ledger/$f" ] || sudo install -o "$USER" -g ledgerpbx -m 640 /dev/null "/etc/asterisk/ledger/$f"
 done

@@ -24,6 +24,20 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-26-line-night-message",
+    date: "2026-10-26",
+    boss: [
+      "<b>Firma raqamida ovozli xabarlar</b>: mijoz firmaning oʻz ovozida salomlashishni eshitadi. Hech kim boʻsh boʻlmasa, qoʻngʻiroq uzilmaydi — mijoz signaldan keyin ismi va masalasini aytib qoldiradi.",
+      "<b>Ish vaqtidan tashqari</b> (Sozlamalar → Telefon liniyasi, masalan 22:00–08:00): kechasi hech kim chaqirilmaydi; mijoz xabar qoldiradi va u ertalab qayta qoʻngʻiroq roʻyxatida, eshitib boʻladigan yozuv bilan turadi.",
+    ],
+    staff: [
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCallCenter(u.employee),
+        text: "Firma raqamiga qoʻngʻiroq qilgan mijoz hech kim javob bermasa yoki ish vaqtidan tashqarida xabar qoldirishi mumkin. Javobsiz qoʻngʻiroqlarda «xabar qoldirdi» deb yozilgan boʻlsa, qoʻngʻiroqni ochib, avval mijozning xabarini eshiting — keyin qoʻngʻiroq qiling.",
+      },
+    ],
+  },
+  {
     id: "2026-10-24-bell-second-chance-tv",
     date: "2026-10-24",
     boss: [

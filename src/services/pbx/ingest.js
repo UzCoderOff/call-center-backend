@@ -18,7 +18,9 @@ const presence = require("./presence");
 //   <call>.call.evt           the call: dir (in | out), num (the outside
 //                             number), ext (out: who called), start, end
 //                             (epoch seconds), status, talk (seconds), rec
-//                             (the recording's file name in PBX_MONITOR_DIR)
+//                             (the recording's file name in PBX_MONITOR_DIR),
+//                             vm (night | busy: the caller was asked to leave
+//                             a message, <call>.vm.wav in PBX_MONITOR_DIR)
 //   <call>.ring-<ext>-<n>.evt each time a phone was rung for it: ext, rs
 //                             (when), waited (seconds the phone took to come
 //                             up), status (ANSWER, NOANSWER, WAKE_TIMEOUT…),
@@ -32,6 +34,8 @@ const presence = require("./presence");
 const SETTLE_MS = 3000; // a call's ring files may land just after it
 const ORPHAN_RING_MS = 10 * 60 * 1000;
 const MIN_RECORDING_BYTES = 44 + 16000; // WAV header + 1 s of 8 kHz audio
+// A message shorter than a second and a half is someone hanging up at the beep.
+const MIN_MESSAGE_BYTES = 44 + 24000;
 
 const parseEvt = (text) => Object.fromEntries(new URLSearchParams(String(text).trim()));
 
@@ -107,11 +111,13 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
   }
   // Missed: the operator whose turn it was (rung first) owns it — their
   // call-back list, their Telegram, their strike — or, when nobody could be
-  // rung at all, whoever's turn it is in the rotation. A client in work rang
-  // their coordinator first: the coordinator's.
+  // rung at all (outside working hours too), whoever's turn it is in the
+  // rotation. A client in work rang their coordinator first: the
+  // coordinator's.
   const first = rang.find((r) => r.employeeId);
   const employeeId = first ? first.employeeId : pickRotation();
   if (!employeeId) return null;
+  const reason = call.vm === "night" ? "night" : rang.length ? "not_answered" : "nobody_free";
   return {
     ...base,
     employeeId,
@@ -119,7 +125,7 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
     missed: true,
     durationSeconds: 0,
     answered: false,
-    detail: { rang, owner: first ? "first_rung" : "rotation", status: call.status || null, reason: rang.length ? "not_answered" : "nobody_free", queueWaitSec, ...(direct ? { direct } : {}) },
+    detail: { rang, owner: first ? "first_rung" : "rotation", status: call.status || null, reason, queueWaitSec, ...(direct ? { direct } : {}) },
   };
 }
 
@@ -175,6 +181,28 @@ async function saveRecording(rec, { employeeId, callTimestampMs, callId, answere
   await transcodeToMp3(wav, path.join(env.storageRoot, relative), PHONE_LINE_AUDIO);
   removeQuietly(wav);
   return { recordingPath: relative, recordingFilename: name };
+}
+
+// The message a caller left ([line-message]): kept as the missed call's
+// recording, so whoever calls back hears their name and problem first.
+// -> { recordingPath, recordingFilename, seconds, wav } (the WAV stays for
+// the transcriber, transcribe.js queueMessage) or null.
+async function saveMessage(callId, { employeeId, callTimestampMs }) {
+  const wav = path.join(env.pbx.monitorDir, `${callId}.vm.wav`);
+  let size = 0;
+  try {
+    size = fs.statSync(wav).size;
+  } catch {
+    return null;
+  }
+  if (size < MIN_MESSAGE_BYTES) {
+    removeQuietly(wav);
+    return null;
+  }
+  const name = `${callTimestampMs}-pbx-${callId.replace(/[^\w-]/g, "_")}.mp3`;
+  const relative = path.join(String(employeeId), name);
+  await transcodeToMp3(wav, path.join(env.storageRoot, relative), PHONE_LINE_AUDIO);
+  return { recordingPath: relative, recordingFilename: name, seconds: Math.round((size - 44) / 16000), wav };
 }
 
 // The names on a call's transfers (the portal shows "Aziza'ga ulandi").
@@ -252,6 +280,7 @@ async function processCall(callId, ringFiles, rotation) {
     console.warn(`[pbx] call ${callId} (${call.dir || "?"}, ${call.num || "no number"}) belongs to nobody — no call-center staff and no known phone ID; not kept`);
     if (/^[\w.-]+\.wav$/.test(call.rec || "")) removeQuietly(path.join(env.pbx.monitorDir, call.rec));
     for (const who of ["client", "staff"]) for (const ext of ["wav", "wav16"]) removeQuietly(path.join(env.pbx.monitorDir, `${callId}.${who}.${ext}`));
+    removeQuietly(path.join(env.pbx.monitorDir, `${callId}.vm.wav`));
     return null;
   }
 
@@ -261,7 +290,13 @@ async function processCall(callId, ringFiles, rotation) {
   if (direct) direct.name = (await prisma.employee.findUnique({ where: { id: direct.employeeId ?? -1 }, select: { name: true } }))?.name || null;
   const isNew = !(await prisma.callLog.findUnique({ where: { pbxCallId: callId }, select: { id: true } }));
 
-  const recording = await saveRecording(call.rec, { ...summary, callId });
+  let recording = await saveRecording(call.rec, { ...summary, callId });
+  // A missed call with a message: the message is its recording.
+  const message = summary.missed && call.vm ? await saveMessage(callId, summary) : null;
+  if (message) {
+    recording = { recordingPath: message.recordingPath, recordingFilename: message.recordingFilename };
+    summary.detail.voicemail = { seconds: message.seconds };
+  }
   const key = phoneKey(summary.phoneNumber);
   const fields = {
     employeeId: summary.employeeId,
@@ -289,8 +324,11 @@ async function processCall(callId, ringFiles, rotation) {
     const { reviewable } = require("../callReview");
     const employee = await prisma.employee.findUnique({ where: { id: summary.employeeId } });
     await require("./transcribe").queueOrDrop(callId, row, { review: reviewable({ ...summary, employee }) && Boolean(recording.recordingPath) });
+    // The caller's message, to read as well as hear.
+    if (message) await require("./transcribe").queueMessage(row, message.wav);
   } catch (err) {
     console.error(`[pbx] call ${callId}: queueing it for text failed:`, err.message);
+    if (message) removeQuietly(message.wav);
   }
   if (key) {
     try {

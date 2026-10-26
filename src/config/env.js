@@ -87,6 +87,9 @@ module.exports = {
     // (Not under /var/spool/asterisk, which only Asterisk may enter.)
     spoolDir: process.env.PBX_SPOOL_DIR || "/var/spool/ledger-pbx/calls",
     monitorDir: process.env.PBX_MONITOR_DIR || "/var/spool/ledger-pbx/recordings",
+    // The firm's own voice messages callers hear (sounds.js), which Ledger
+    // writes and Asterisk plays.
+    soundsDir: process.env.PBX_SOUNDS_DIR || "/var/spool/ledger-pbx/sounds",
     // Asterisk asks Ledger things (wake this phone) on 127.0.0.1 at this port
     // — a second listener the web proxy never forwards to — with this secret.
     hookPort: Number(process.env.PBX_HOOK_PORT) || 4001,
