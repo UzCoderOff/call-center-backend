@@ -60,6 +60,25 @@ async function queueOrDrop(callId, row, { review }) {
   return true;
 }
 
+// A message a caller left ([line-message] in extensions.conf): its WAV moves
+// to the queue as the client's side. Only text — a message has no operator
+// to review (reviewCall skips missed calls).
+async function queueMessage(row, wav) {
+  fs.mkdirSync(DIR(), { recursive: true });
+  try {
+    fs.renameSync(wav, queuedFile(row.id, "client"));
+  } catch (err) {
+    if (err.code !== "EXDEV") throw err;
+    fs.copyFileSync(wav, queuedFile(row.id, "client"));
+    fs.rmSync(wav, { force: true });
+  }
+  await prisma.transcript.upsert({
+    where: { callLogId: row.id },
+    create: { callLogId: row.id, status: "pending", provider: "uz-asr" },
+    update: { status: "pending", errorMessage: null },
+  });
+}
+
 // The audio for a queued call: its two sides, or — recorded before the sides
 // were kept apart — the call's MP3.
 async function filesFor(callLogId) {
@@ -147,4 +166,4 @@ async function busy() {
   return value;
 }
 
-module.exports = { queueOrDrop, next, done, failed, busy, cleanSegments, uzLetters, filesFor, DIR };
+module.exports = { queueOrDrop, queueMessage, next, done, failed, busy, cleanSegments, uzLetters, filesFor, DIR };

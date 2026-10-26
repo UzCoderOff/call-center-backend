@@ -5,7 +5,8 @@ const env = require("../../config/env");
 const state = require("./state");
 const secrets = require("./secrets");
 const { renderStaff, renderHints, renderGlobals } = require("./config");
-const { pbxSettings } = require("./settings");
+const { pbxSettings, nightRange } = require("./settings");
+const sounds = require("./sounds");
 
 // Ledger tells Asterisk who is on the phone line: everyone active with
 // "Ledger calls" on gets a phone ID (from 201 up, never reused), and the
@@ -80,7 +81,8 @@ async function lineMembers(db = prisma) {
   return rows.map((r) => ({ ext: r.ext, employeeId: r.employeeId, name: r.employee.name, canCallOut: r.canCallOut, ha1: r.ha1Enc ? openQuietly(r.ha1Enc) : null }));
 }
 
-function globalsFor(settings) {
+// present: the firm's voice messages there are (sounds.js present()).
+function globalsFor(settings, present = {}) {
   return {
     LEDGER_HOOK: `http://127.0.0.1:${env.pbx.hookPort}/pbx`,
     LEDGER_HOOK_SECRET: env.pbx.hookSecret || "",
@@ -88,6 +90,20 @@ function globalsFor(settings) {
     PBX_SPOOL: env.pbx.spoolDir,
     TRUNK_ENABLED: settings.trunkEnabled ? 1 : 0,
     COMPANY_NUMBER: String(settings.companyNumber || "").replace(/[^\d+]/g, ""),
+    // The voice messages ([company-line], [line-message]); each one only
+    // when it has been recorded.
+    PBX_SOUNDS: env.pbx.soundsDir,
+    HAS_GREETING: present.greeting ? 1 : 0,
+    HAS_COORDINATOR: present.coordinator ? 1 : 0,
+    HAS_COORDINATOR_BUSY: present.coordinatorBusy ? 1 : 0,
+    HAS_BUSY: present.busy ? 1 : 0,
+    HAS_THANKS: present.thanks ? 1 : 0,
+    // Outside working hours ("22:00-07:59", the firm's time) — only with
+    // the night message recorded: without it the line works as by day.
+    LINE_NIGHT: present.night ? nightRange(settings.night) : "",
+    FIRM_TZ: env.firmTimezone,
+    // The firm's own test phones, digits only, "-" between them.
+    TEST_NUMBERS: (settings.testNumbers || []).map((n) => String(n).replace(/\D/g, "")).filter(Boolean).join("-"),
   };
 }
 
@@ -132,7 +148,7 @@ async function apply() {
   const dir = env.pbx.confDir;
   const staffChanged = writeIfChanged(path.join(dir, "pjsip_staff.conf"), renderStaff(members.filter((m) => m.ha1), { realm: env.pbx.realm }));
   const hintsChanged = writeIfChanged(path.join(dir, "extensions_ledger.conf"), renderHints(members));
-  const globalsChanged = writeIfChanged(path.join(dir, "globals_ledger.conf"), renderGlobals(globalsFor(settings)));
+  const globalsChanged = writeIfChanged(path.join(dir, "globals_ledger.conf"), renderGlobals(globalsFor(settings, sounds.present())));
   if (state.ami?.ready) {
     if (staffChanged) await state.ami.action({ Action: "Reload", Module: "res_pjsip.so" });
     if (hintsChanged || globalsChanged) await state.ami.action({ Action: "Reload", Module: "pbx_config.so" });

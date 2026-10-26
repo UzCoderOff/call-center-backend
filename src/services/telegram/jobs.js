@@ -46,7 +46,7 @@ async function missedCalls(now) {
         AND: [hasCallsWhere(), jobWhere(["call_center"])],
       },
     },
-    select: { id: true, phoneNumber: true, callTimestampMs: true, employee: { select: { userId: true } } },
+    select: { id: true, phoneNumber: true, callTimestampMs: true, pbxDetail: true, employee: { select: { userId: true } } },
     orderBy: { callTimestampMs: "asc" },
     take: 200,
   });
@@ -69,7 +69,9 @@ async function missedCalls(now) {
       const ago = minutes < 60 ? `${minutes} daqiqa oldin` : `${Math.floor(minutes / 60)} soat oldin`;
       // Written without spaces, so Telegram makes it a tappable number.
       const by = rules.enabled ? ` · ${f.clock(firmNow(new Date(Number(c.callTimestampMs) + rules.minutes * 60000)).minutes)} gacha` : "";
-      return `• ${f.escapeHtml(f.phoneCompact(c.phoneNumber))} — ${ago}${by}`;
+      // A message left on the line (outside working hours, or nobody free).
+      const message = c.pbxDetail?.voicemail ? " · 🎙 xabar qoldirdi" : "";
+      return `• ${f.escapeHtml(f.phoneCompact(c.phoneNumber))} — ${ago}${message}${by}`;
     });
     if (fresh.length > 15) lines.push(`… yana ${fresh.length - 15} ta`);
     const text = [

@@ -8,11 +8,23 @@ const pbx = require("../services/pbx");
 const state = require("../services/pbx/state");
 const provision = require("../services/pbx/provision");
 const secrets = require("../services/pbx/secrets");
-const { pbxSettings, savePbxSettings } = require("../services/pbx/settings");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const crypto = require("crypto");
+const { pbxSettings, savePbxSettings, HHMM } = require("../services/pbx/settings");
+const sounds = require("../services/pbx/sounds");
+const { normalizeUz } = require("../services/pbx/numbers");
 
 // Ledger's phone line in the portal (Settings → Phone line):
 //   GET  /api/pbx/status                       managers: is it running, who's on it
-//   PUT  /api/pbx/settings                     developer: company number, outside line
+//   PUT  /api/pbx/settings                     developer: company number, outside line,
+//                                              night hours { on, from, to }, test
+//                                              numbers (up to 5 Uzbek phones)
+//   PUT  /api/pbx/sounds/:key                  developer: a voice message (the
+//                                              recording's bytes; sounds.js KEYS)
+//   GET  /api/pbx/sounds/:key                  managers: listen to it (MP3)
+//   DELETE /api/pbx/sounds/:key                developer: remove it
 //   GET  /api/pbx/live                         the developer and accounts with
 //                                              "listens to calls": client calls
 //                                              going on right now
@@ -77,7 +89,9 @@ router.get("/status", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       ...pbx.status(),
       canIssue: secrets.hasKey(),
       sip: { host: env.pbx.sipHost, port: env.pbx.sipPort, transport: "TLS" },
-      settings: { companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled },
+      settings: { companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night, testNumbers: settings.testNumbers },
+      sounds: sounds.present(),
+      firmTimezone: env.firmTimezone,
       people: rows
         .filter((r) => r.employee.active && r.employee.pbxCalling)
         .map((r) => ({
@@ -109,10 +123,84 @@ router.put("/settings", requireRole("DEVELOPER"), async (req, res, next) => {
       if (typeof req.body.trunkEnabled !== "boolean") throw badRequest("trunkEnabled must be true or false");
       patch.trunkEnabled = req.body.trunkEnabled;
     }
+    if (req.body?.night !== undefined) {
+      const { on, from, to } = req.body.night || {};
+      if (typeof on !== "boolean") throw badRequest("night.on must be true or false");
+      if (!HHMM.test(String(from)) || !HHMM.test(String(to)) || from === to) throw badRequest("night needs two different times, HH:MM");
+      patch.night = { on, from, to };
+    }
+    if (req.body?.testNumbers !== undefined) {
+      const list = Array.isArray(req.body.testNumbers) ? req.body.testNumbers : String(req.body.testNumbers || "").split(/[,;]+/);
+      const numbers = [];
+      for (const raw of list.map((n) => String(n).trim()).filter(Boolean)) {
+        const uz = normalizeUz(raw);
+        if (!uz.e164) throw badRequest("invalid testNumbers");
+        if (!numbers.includes(uz.e164)) numbers.push(uz.e164);
+      }
+      if (numbers.length > 5) throw badRequest("at most 5 testNumbers");
+      patch.testNumbers = numbers;
+    }
     await savePbxSettings(patch, req.user.id);
+    if (patch.night) await prisma.auditLog.create({ data: { userId: req.user.id, action: "pbx.night", entity: "setting", entityId: null, detail: patch.night } });
     provision.scheduleApply();
     const settings = await pbxSettings();
-    res.json({ companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled });
+    res.json({ companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night, testNumbers: settings.testNumbers });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// The firm's voice messages on the line (sounds.js). The portal sends a
+// short recording as one piece (it makes it a 16 kHz WAV first, well under
+// the limit); ffmpeg makes the phone's copies. Asterisk is told at once.
+function soundKey(req) {
+  const key = String(req.params.key);
+  if (!sounds.isKey(key)) throw Object.assign(new Error("not_found"), { status: 404 });
+  return key;
+}
+
+router.put("/sounds/:key", requireRole("DEVELOPER"), express.raw({ type: () => true, limit: "1mb" }), async (req, res, next) => {
+  const tmp = path.join(os.tmpdir(), `ledger-sound-${crypto.randomBytes(6).toString("hex")}`);
+  try {
+    const key = soundKey(req);
+    if (!Buffer.isBuffer(req.body) || req.body.length < 1000) throw badRequest("empty recording");
+    fs.writeFileSync(tmp, req.body);
+    let saved;
+    try {
+      saved = await sounds.save(key, tmp);
+    } catch (err) {
+      if (err.message !== "not_audio") throw err;
+      console.warn(`[pbx] voice message ${key} not taken: ${err.detail}`);
+      return res.status(400).json({ error: "not_audio" });
+    }
+    await prisma.auditLog.create({ data: { userId: req.user.id, action: "pbx.sound", entity: "setting", entityId: null, detail: { key, seconds: saved?.seconds ?? null } } });
+    await provision.applyNow();
+    res.json({ key, ...saved });
+  } catch (err) {
+    next(err);
+  } finally {
+    fs.rm(tmp, { force: true }, () => {});
+  }
+});
+
+router.get("/sounds/:key", requireRole(...MANAGER_ROLES), (req, res, next) => {
+  try {
+    const file = sounds.listenFile(soundKey(req));
+    if (!file) return res.status(404).json({ error: "not_found" });
+    res.set("Cache-Control", "no-store");
+    res.type("audio/mpeg").sendFile(file);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete("/sounds/:key", requireRole("DEVELOPER"), async (req, res, next) => {
+  try {
+    const key = soundKey(req);
+    sounds.remove(key);
+    await prisma.auditLog.create({ data: { userId: req.user.id, action: "pbx.sound.remove", entity: "setting", entityId: null, detail: { key } } });
+    await provision.applyNow();
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
