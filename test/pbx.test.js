@@ -203,6 +203,8 @@ test("the line's globals: each voice message only when recorded; night only with
   assert.equal(all.LINE_NIGHT, "22:00-07:59");
   assert.match(renderGlobals(all), /\nLINE_NIGHT=22:00-07:59\n/);
   assert.equal(globalsFor({ ...settings, night: { ...settings.night, on: false } }, { night: {} }).LINE_NIGHT, "");
+  assert.equal(none.TEST_NUMBERS, "");
+  assert.equal(globalsFor({ ...settings, testNumbers: ["+998901234567", "+998935550011"] }, {}).TEST_NUMBERS, "998901234567-998935550011");
 });
 
 test("a call outside working hours is a missed call for the call center, said to be at night", () => {

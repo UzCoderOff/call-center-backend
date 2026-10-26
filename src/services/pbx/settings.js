@@ -8,8 +8,11 @@ const { getSetting, setSetting } = require("../../lib/settings");
 //                  `from` to `to` in the firm's time nobody is rung — the
 //                  caller hears the night message and leaves their own
 //                  (extensions.conf [line-message])
+//   testNumbers    the firm's own phones ("+998…") for trying the voice
+//                  messages: a call from one rings nobody and isn't kept
+//                  (extensions.conf [line-preview])
 const NIGHT_DEFAULTS = { on: false, from: "22:00", to: "08:00" };
-const PBX_DEFAULTS = { companyNumber: "", trunkEnabled: false, rotation: 0, night: NIGHT_DEFAULTS };
+const PBX_DEFAULTS = { companyNumber: "", trunkEnabled: false, rotation: 0, night: NIGHT_DEFAULTS, testNumbers: [] };
 
 const pbxSettings = async (db) => {
   const settings = await getSetting("pbx", PBX_DEFAULTS, db);

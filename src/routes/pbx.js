@@ -14,11 +14,13 @@ const path = require("path");
 const crypto = require("crypto");
 const { pbxSettings, savePbxSettings, HHMM } = require("../services/pbx/settings");
 const sounds = require("../services/pbx/sounds");
+const { normalizeUz } = require("../services/pbx/numbers");
 
 // Ledger's phone line in the portal (Settings → Phone line):
 //   GET  /api/pbx/status                       managers: is it running, who's on it
 //   PUT  /api/pbx/settings                     developer: company number, outside line,
-//                                              night hours { on, from, to }
+//                                              night hours { on, from, to }, test
+//                                              numbers (up to 5 Uzbek phones)
 //   PUT  /api/pbx/sounds/:key                  developer: a voice message (the
 //                                              recording's bytes; sounds.js KEYS)
 //   GET  /api/pbx/sounds/:key                  managers: listen to it (MP3)
@@ -87,7 +89,7 @@ router.get("/status", requireRole(...MANAGER_ROLES), async (req, res, next) => {
       ...pbx.status(),
       canIssue: secrets.hasKey(),
       sip: { host: env.pbx.sipHost, port: env.pbx.sipPort, transport: "TLS" },
-      settings: { companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night },
+      settings: { companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night, testNumbers: settings.testNumbers },
       sounds: sounds.present(),
       firmTimezone: env.firmTimezone,
       people: rows
@@ -127,11 +129,23 @@ router.put("/settings", requireRole("DEVELOPER"), async (req, res, next) => {
       if (!HHMM.test(String(from)) || !HHMM.test(String(to)) || from === to) throw badRequest("night needs two different times, HH:MM");
       patch.night = { on, from, to };
     }
+    if (req.body?.testNumbers !== undefined) {
+      const list = Array.isArray(req.body.testNumbers) ? req.body.testNumbers : String(req.body.testNumbers || "").split(/[,;
+]+/);
+      const numbers = [];
+      for (const raw of list.map((n) => String(n).trim()).filter(Boolean)) {
+        const uz = normalizeUz(raw);
+        if (!uz.e164) throw badRequest("invalid testNumbers");
+        if (!numbers.includes(uz.e164)) numbers.push(uz.e164);
+      }
+      if (numbers.length > 5) throw badRequest("at most 5 testNumbers");
+      patch.testNumbers = numbers;
+    }
     await savePbxSettings(patch, req.user.id);
     if (patch.night) await prisma.auditLog.create({ data: { userId: req.user.id, action: "pbx.night", entity: "setting", entityId: null, detail: patch.night } });
     provision.scheduleApply();
     const settings = await pbxSettings();
-    res.json({ companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night });
+    res.json({ companyNumber: settings.companyNumber, trunkEnabled: settings.trunkEnabled, night: settings.night, testNumbers: settings.testNumbers });
   } catch (err) {
     next(err);
   }

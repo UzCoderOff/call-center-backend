@@ -102,6 +102,8 @@ function globalsFor(settings, present = {}) {
     // the night message recorded: without it the line works as by day.
     LINE_NIGHT: present.night ? nightRange(settings.night) : "",
     FIRM_TZ: env.firmTimezone,
+    // The firm's own test phones, digits only, "-" between them.
+    TEST_NUMBERS: (settings.testNumbers || []).map((n) => String(n).replace(/\D/g, "")).filter(Boolean).join("-"),
   };
 }
 
