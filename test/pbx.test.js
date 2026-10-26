@@ -193,8 +193,11 @@ test("the line's globals: each voice message only when recorded; night only with
   assert.equal(none.HAS_GREETING, 0);
   assert.equal(none.HAS_BUSY, 0);
   assert.equal(none.LINE_NIGHT, ""); // no night message: the line works as by day
-  const all = globalsFor(settings, { greeting: {}, busy: {}, night: {}, thanks: {} });
+  assert.equal(none.HAS_COORDINATOR, 0);
+  const all = globalsFor(settings, { greeting: {}, coordinator: {}, coordinatorBusy: {}, busy: {}, night: {}, thanks: {} });
   assert.equal(all.HAS_GREETING, 1);
+  assert.equal(all.HAS_COORDINATOR, 1);
+  assert.equal(all.HAS_COORDINATOR_BUSY, 1);
   assert.equal(all.HAS_BUSY, 1);
   assert.equal(all.HAS_THANKS, 1);
   assert.equal(all.LINE_NIGHT, "22:00-07:59");

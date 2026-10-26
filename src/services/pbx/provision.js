@@ -94,6 +94,8 @@ function globalsFor(settings, present = {}) {
     // when it has been recorded.
     PBX_SOUNDS: env.pbx.soundsDir,
     HAS_GREETING: present.greeting ? 1 : 0,
+    HAS_COORDINATOR: present.coordinator ? 1 : 0,
+    HAS_COORDINATOR_BUSY: present.coordinatorBusy ? 1 : 0,
     HAS_BUSY: present.busy ? 1 : 0,
     HAS_THANKS: present.thanks ? 1 : 0,
     // Outside working hours ("22:00-07:59", the firm's time) — only with

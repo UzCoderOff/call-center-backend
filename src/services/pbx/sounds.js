@@ -9,16 +9,19 @@ const { ffmpegPath } = require("../../utils/audioTranscode");
 // member records them, no AI voice). Each one is uploaded in Settings →
 // Phone line and kept in PBX_SOUNDS_DIR, where Asterisk plays it
 // (extensions.conf, queues.conf):
-//   greeting  every call in working hours, before anyone is rung
-//   waiting   every 40 s while the caller waits in line (queues.conf)
-//   busy      nobody could take the call: then the caller leaves a message
-//   night     outside working hours: then the caller leaves a message
-//   thanks    after their message
+//   greeting         every call in working hours, before anyone is rung
+//   coordinator      instead, for a client with a contract: they're put
+//                    through to their coordinator
+//   coordinatorBusy  their coordinator didn't answer: the call center is rung
+//   waiting          every 40 s while the caller waits in line (queues.conf)
+//   busy             nobody could take the call: then the caller leaves a message
+//   night            outside working hours: then the caller leaves a message
+//   thanks           after their message
 // One recording becomes <key>.wav (8 kHz, what the outside line carries),
 // <key>.wav16 (16 kHz, for HD staff phones) and <key>.mp3 (to listen to in
 // the portal). A message that isn't there is skipped — except the night
 // one, without which the line stays as in the daytime (provision.js).
-const KEYS = ["greeting", "waiting", "busy", "night", "thanks"];
+const KEYS = ["greeting", "coordinator", "coordinatorBusy", "waiting", "busy", "night", "thanks"];
 const MAX_SECONDS = 60;
 
 const dir = () => env.pbx.soundsDir;
