@@ -160,8 +160,57 @@ test("a client's call the coordinator answered is the coordinator's", () => {
   const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100"), [parseEvt("ext=205&rs=1001&status=ANSWER&talk=80&kind=direct")], ctx);
   assert.equal(s.employeeId, 15);
   assert.equal(s.durationSeconds, 80);
-  assert.deepEqual(s.detail.direct, { ext: "205", employeeId: 15, answered: true, status: "ANSWER" });
+  assert.deepEqual(s.detail.direct, { ext: "205", employeeId: 15, answered: true, status: "ANSWER", coordinator: true });
   assert.deepEqual(missedBy(s), []);
+});
+
+// --- whose phone rang, and who took it (2026-10-27) -----------------------
+const { ringNotices } = require("../src/services/pbx/ingest");
+
+test("an operator rung first for their own caller isn't sent to call back when a colleague took it — they're told who did", () => {
+  const rings = [parseEvt("ext=206&rs=1001&status=NOANSWER&kind=direct&note=mine%3Alast"), parseEvt("ext=203&rs=1032&status=ANSWER&talk=50&kind=queue&note=missedop%3AVali")];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100"), rings, ctx);
+  assert.equal(s.employeeId, 11);
+  assert.equal(s.detail.direct.coordinator, false);
+  assert.equal(s.detail.rang[0].note, "mine:last");
+  assert.deepEqual(missedBy(s), []);
+  assert.deepEqual(ringNotices(s), [{ employeeId: 16, answeredBy: 11, owner: null }]);
+});
+
+test("a coordinator who missed their client is reminded, not told it's handled", () => {
+  const rings = [parseEvt("ext=205&rs=1001&status=NOANSWER&kind=direct&note=direct"), parseEvt("ext=203&rs=1032&status=ANSWER&talk=50&kind=queue")];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1100"), rings, ctx);
+  assert.deepEqual(
+    missedBy(s).map((m) => m.employeeId),
+    [15]
+  );
+  assert.deepEqual(ringNotices(s), []);
+});
+
+test("everyone whose phone rang hears once that someone else answered", () => {
+  const rings = [
+    parseEvt("ext=206&rs=1001&status=NOANSWER&kind=queue"),
+    parseEvt("ext=205&rs=1033&status=NOANSWER&kind=queue"),
+    parseEvt("ext=206&rs=1065&status=NOANSWER&kind=queue"),
+    parseEvt("ext=203&rs=1097&status=ANSWER&talk=20&kind=queue"),
+  ];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1200"), rings, ctx);
+  assert.deepEqual(ringNotices(s), [
+    { employeeId: 16, answeredBy: 11, owner: null },
+    { employeeId: 15, answeredBy: 11, owner: null },
+  ]);
+});
+
+test("nobody answered: each phone that rang hears it, and whose list it's on", () => {
+  const rings = [parseEvt("ext=206&rs=1001&status=NOANSWER&kind=queue"), parseEvt("ext=203&rs=1033&status=NOANSWER&kind=queue")];
+  const s = summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1070&status=TIMEOUT"), rings, ctx);
+  assert.equal(s.employeeId, 16);
+  assert.deepEqual(ringNotices(s), [
+    { employeeId: 16, answeredBy: null, owner: 16 },
+    { employeeId: 11, answeredBy: null, owner: 16 },
+  ]);
+  // At night nobody is rung: nobody is told.
+  assert.deepEqual(ringNotices(summarizeCall(parseEvt("dir=in&num=901234567&start=1000&end=1070&vm=night"), [], { ...ctx, pickRotation: () => 11 })), []);
 });
 
 test("the coordinator didn't answer, an operator did: the operator's call, a reminder for the coordinator", () => {

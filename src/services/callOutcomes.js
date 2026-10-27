@@ -68,6 +68,17 @@ async function askedSince(db = prisma) {
   return since;
 }
 
+// From when (epoch ms) an answer is REQUIRED before the operator goes on in
+// Ledger (the firm's ask, 2026-10-27: "enforce what happened after the
+// call"; routes/callOutcomes.js /required): the moment this first ran —
+// older calls stay on the home page's list, no backlog to clear first.
+async function requiredSince(db = prisma, now = Date.now()) {
+  const s = await getSetting(SETTING, {}, db);
+  if (Number.isFinite(s.requiredSince)) return s.requiredSince;
+  await setSetting(SETTING, { ...s, requiredSince: now }, null, db);
+  return now;
+}
+
 // Staff phones aren't callers.
 async function staffKeys(db) {
   const rows = await db.employee.findMany({ where: { phoneNumber: { not: null } }, select: { phoneNumber: true } });
@@ -381,6 +392,7 @@ module.exports = {
   GROUPS,
   LABELS,
   askedSince,
+  requiredSince,
   pending,
   record,
   callCenterIds,

@@ -14,6 +14,9 @@ const co = require("../services/callOutcomes");
 //         over) the day to talk again, tomorrow to 30 days on. A number on their own list, or
 //         the answer they gave themselves (to change or take back); managers
 //         any. It stays credited to the operator who talked to the caller.
+//   GET /api/call-outcomes/required         the person's own new callers, from
+//         calls since answers became required, still without one: the portal
+//         asks for them before anything else (AfterCallGate)
 const router = express.Router();
 router.use(requireAuth);
 
@@ -37,6 +40,18 @@ router.get("/", async (req, res, next) => {
       count: items.length,
       items: items.slice(0, MAX_ITEMS).map((r) => ({ ...r, employee: r.employeeId ? { id: r.employeeId, name: names.get(r.employeeId) || null } : null })),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get("/required", async (req, res, next) => {
+  try {
+    const self = req.user.employee;
+    if (!self || !isCallCenter(self)) return res.json({ outcomes: co.OUTCOMES, groups: co.GROUPS, items: [] });
+    const since = await co.requiredSince();
+    const items = (await co.pending({ employeeIds: [self.id] })).filter((r) => r.employeeId === self.id && r.lastAt >= since);
+    res.json({ outcomes: co.OUTCOMES, groups: co.GROUPS, items: items.slice(0, MAX_ITEMS) });
   } catch (err) {
     next(err);
   }

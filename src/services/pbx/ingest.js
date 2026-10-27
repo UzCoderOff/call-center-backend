@@ -24,7 +24,9 @@ const presence = require("./presence");
 //   <call>.ring-<ext>-<n>.evt each time a phone was rung for it: ext, rs
 //                             (when), waited (seconds the phone took to come
 //                             up), status (ANSWER, NOANSWER, WAKE_TIMEOUT…),
-//                             talk, kind (queue | direct | internal)
+//                             talk, kind (queue | direct | internal), note
+//                             (the line's word on it: "direct" a coordinator's
+//                             client, "mine:<why>" an operator's caller…)
 //
 // Files survive a backend restart (a deploy stops it for a minute); they're
 // picked up here, a call becomes a CallLog row (source "pbx") just like one
@@ -81,11 +83,16 @@ function summarizeCall(call, rings, { employeeByExt, pickRotation }) {
       waitedSec: Number(r.waited) || 0,
       talkSec: Number(r.talk) || 0,
       kind: r.kind || null,
+      ...(r.note ? { note: r.note } : {}),
     }));
   const queueWaitSec = Math.max(0, (Number(call.end) || start) - start);
-  // A client in work rung straight to their coordinator first (route.js).
+  // Rung straight away (route.js): a client in work's coordinator, or the
+  // operator whose caller it is ("mine:…" — thinking, second chance, talked
+  // to them last). Rings from before the note was kept were coordinators'.
   const directRing = rang.find((r) => r.kind === "direct");
-  const direct = directRing ? { ext: directRing.ext, employeeId: directRing.employeeId, answered: directRing.status === "ANSWER", status: directRing.status } : null;
+  const direct = directRing
+    ? { ext: directRing.ext, employeeId: directRing.employeeId, answered: directRing.status === "ANSWER", status: directRing.status, coordinator: !directRing.note || directRing.note === "direct" }
+    : null;
   const answer = rang.find((r) => r.status === "ANSWER" && r.employeeId);
   if (answer) {
     // Passed on to colleagues ([ledger-transfer]): the call stays the
@@ -219,7 +226,9 @@ async function nameTransfers(transfers) {
 // a colleague it was passed to, or the coordinator a client in work was sent
 // straight to. [{ employeeId, fromEmployeeId, notes }] — once each, and not
 // if they got the call on another try. A call nobody answered is a missed
-// call instead (its own call-back list and alerts).
+// call instead (its own call-back list and alerts). An operator rung first
+// for their own caller isn't sent to call back: a colleague talked to them
+// (ringNotices says so).
 function missedBy(summary) {
   if (summary.missed) return [];
   const { transfers = [], direct, rang = [] } = summary.detail;
@@ -231,7 +240,7 @@ function missedBy(summary) {
     seen.add(employeeId);
     out.push({ employeeId, ...item });
   };
-  if (direct && !direct.answered) {
+  if (direct && !direct.answered && direct.coordinator !== false) {
     add(direct.employeeId, { fromEmployeeId: summary.employeeId, notes: "Mijozingiz qoʻngʻiroq qildi — javob bermadingiz, qoʻngʻiroqni call-markaz oldi. Mijozga qoʻngʻiroq qiling." });
   }
   for (const t of transfers) {
@@ -239,6 +248,51 @@ function missedBy(summary) {
     add(t.employeeId, { fromEmployeeId: t.fromEmployeeId, notes: `${t.fromName || "Hamkasbingiz"} bu mijozning qoʻngʻirogʻini sizga ulagan edi — javob berilmadi. Mijozga qoʻngʻiroq qiling.` });
   }
   return out;
+}
+
+// Everyone whose phone rang for a client's call and who didn't pick up (the
+// firm's ask, 2026-10-27: "mark whether the caller was answered by someone
+// else or not"), each told once: [{ employeeId, answeredBy, owner }] —
+// answeredBy who took it (null: nobody), owner whose call-back list a missed
+// call is on. Not those reminded to call back instead (missedBy).
+function ringNotices(summary) {
+  const rang = summary.detail.rang || [];
+  const answered = summary.missed ? null : summary.employeeId;
+  const reminded = new Set(missedBy(summary).map((m) => m.employeeId));
+  const tookIt = new Set(rang.filter((r) => r.status === "ANSWER").map((r) => r.employeeId));
+  const out = [];
+  for (const r of rang) {
+    if (!r.employeeId || tookIt.has(r.employeeId) || reminded.has(r.employeeId) || out.some((o) => o.employeeId === r.employeeId)) continue;
+    out.push({ employeeId: r.employeeId, answeredBy: answered, owner: summary.missed ? summary.employeeId : null });
+  }
+  return out;
+}
+
+// Tells them (the bell and their phone): someone else talked to the caller —
+// no need to call back; or nobody did — the owner calls back.
+async function sendRingNotices(people, { phone, callId }) {
+  if (!people.length) return;
+  const { notifyPush } = require("../notify");
+  const { clientIndexFor } = require("../../lib/clientAccess");
+  const f = require("../telegram/format");
+  const ids = [...new Set(people.flatMap((p) => [p.employeeId, p.answeredBy, p.owner]).filter(Boolean))];
+  const names = new Map((await prisma.employee.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })).map((e) => [e.id, e.name]));
+  const key = phoneKey(phone);
+  for (const p of people) {
+    const user = await prisma.user.findFirst({ where: { employee: { id: p.employeeId }, active: true }, include: { employee: true } });
+    if (!user) continue;
+    const client = key ? (await clientIndexFor(user, [key])).get(key) : null;
+    const who = client && !client.restricted ? client.name : f.phone(phone);
+    const mine = p.owner === p.employeeId;
+    const notice = p.answeredBy
+      ? { title: `${who} — ${names.get(p.answeredBy) || "hamkasbingiz"} javob berdi`, body: "Bu qoʻngʻiroq sizga ham kelgan edi. Qayta qoʻngʻiroq qilish shart emas." }
+      : {
+          title: `${who} — hech kim javob bermadi`,
+          body: mine ? "Qayta qoʻngʻiroq qiling." : `Qayta qoʻngʻiroqni ${names.get(p.owner) || "navbatdagi operator"} qiladi.`,
+          ...(mine ? { phone } : {}),
+        };
+    await notifyPush(user.id, { ...notice, kind: "missedCalls", tag: `ring:${callId}` });
+  }
 }
 
 // A reminder, now, to call the client back — so the client never has to call
@@ -344,8 +398,17 @@ async function processCall(callId, ringFiles, rotation) {
     } catch (err) {
       console.error("[pbx] transfer reminders failed:", err.message);
     }
+    try {
+      if (summary.callType !== "outgoing") await sendRingNotices(ringNotices(summary), { phone: summary.phoneNumber, callId });
+    } catch (err) {
+      console.error("[pbx] ring notices failed:", err.message);
+    }
   }
   events.emit("calls.synced", { employeeId: summary.employeeId, callIds: [row.id], recordingCallIds: recording.recordingPath ? [row.id] : [] });
+  // Their open Ledger looks again: right after a talk with a new caller it
+  // asks what came of it (the portal's AfterCallGate).
+  const owner = await prisma.employee.findUnique({ where: { id: summary.employeeId }, select: { userId: true } });
+  if (owner?.userId) require("../live").bump([owner.userId]);
   return row.id;
 }
 
@@ -425,4 +488,4 @@ function start() {
   soon();
 }
 
-module.exports = { parseEvt, storedNumber, summarizeCall, missedBy, processCall, sweep, start };
+module.exports = { parseEvt, storedNumber, summarizeCall, missedBy, ringNotices, processCall, sweep, start };

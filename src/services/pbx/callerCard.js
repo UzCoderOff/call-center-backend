@@ -3,7 +3,7 @@ const { phoneKey } = require("../../lib/phone");
 const { isManager, isLawyer } = require("../../middleware/auth");
 const { clientIndexFor, clientLevel } = require("../../lib/clientAccess");
 const { countsCalls } = require("../../lib/calling");
-const { isCoordinator } = require("../../lib/jobs");
+const { isCoordinator, isCallCenter } = require("../../lib/jobs");
 const { isExtension } = require("./numbers");
 
 // What the call screen in the Ledger app shows about the other side
@@ -61,6 +61,11 @@ const SERVICE = {
   602: "Sinov: yangi raqam",
 };
 
+// A number Ledger doesn't know, on a call-center phone: once the talk ends
+// the app opens Ledger, which asks what came of it (routes/callOutcomes.js
+// /required — the answer is required before going on).
+const asksAfter = (user) => Boolean(user.employee && isCallCenter(user.employee));
+
 const canBook = (user) => isManager(user) || user.employee?.calendarAccess === "book";
 const canAddClient = (user) =>
   isManager(user) || isLawyer(user) || countsCalls(user.employee) || user.employee?.calendarAccess === "book" || isCoordinator(user.employee);
@@ -80,7 +85,7 @@ async function callerCard(user, number) {
   const key = phoneKey(raw);
   if (!key) return { kind: "unknown", ...actions, canAddClient: false };
   const found = (await clientIndexFor(user, [key])).get(key);
-  if (!found) return { kind: "unknown", ...actions };
+  if (!found) return { kind: "unknown", ...actions, askAfter: asksAfter(user) };
   if (found.restricted) {
     const owner = found.coordinator ? `Koordinator: ${found.coordinator}` : found.operator ? `Operator: ${found.operator}` : null;
     return { kind: "restricted", detail: owner, ...actions, canAddClient: false };
@@ -101,7 +106,7 @@ async function callerCard(user, number) {
       followUps: { where: { status: "open" }, orderBy: { dueAt: "asc" }, take: 1 },
     },
   });
-  if (!client) return { kind: "unknown", ...actions };
+  if (!client) return { kind: "unknown", ...actions, askAfter: asksAfter(user) };
   const { roles } = clientLevel(user, client);
   const cases = client.cases
     .filter((k) => roles.has(k.id) || isManager(user))

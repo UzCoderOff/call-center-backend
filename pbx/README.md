@@ -34,7 +34,8 @@ Ledger app (TLS + SRTP) ◄──────────────── [rin
 - **The company line:** everyone with Ledger calls on and **call center** among
   their jobs answers it.
   - There is no on/off switch. A phone that doesn't answer is skipped after
-    20 s.
+    30 s (20 s until 2026-10-27, too short once a sleeping phone's wake-up
+    is counted in).
   - A phone that fails to come up twice in a row rests, off the line, for
     10 minutes (`src/services/pbx/presence.js`).
 - **A missed client call** belongs to the operator whose turn it was (rung

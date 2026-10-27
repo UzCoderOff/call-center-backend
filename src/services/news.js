@@ -24,6 +24,26 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-27-ring-own-caller-after-call",
+    date: "2026-10-27",
+    boss: [
+      "<b>Qoʻngʻiroq uzoqroq jiringlaydi</b>: har bir telefon 30 soniya (avval 20 — uxlab yotgan telefon uygʻonguncha vaqt ketib, operatorga atigi 12–18 soniya qolardi). Ilova 3.2.3 telefon «tebranish» rejimida ham titraydi — avval bunday telefonda qoʻngʻiroq umuman sezilmasdi.",
+      "<b>Mijoz oʻz odamiga</b>: kimdir gaplashgan raqam qayta qoʻngʻiroq qilsa, avval oʻsha odamga ulanadi; 30 soniyada olmasa — navbatdagi operatorga.",
+      "<b>Javob berildimi?</b> Telefoni jiringlab, olmagan har kim Ledgerdan biladi: «Shaxodat javob berdi — qayta qoʻngʻiroq shart emas» yoki «hech kim javob bermadi». Javobsiz qoʻngʻiroqlar roʻyxatida ham kim gaplashgani yoki «Hali hech kim gaplashmadi» yoziladi.",
+      "<b>Qoʻngʻiroq natijasi majburiy</b>: operator yangi raqam bilan gaplashib, konsultatsiyaga yozmagan boʻlsa, Ledger «nima boʻldi?» deb soʻraydi va javob bermaguncha boshqa ish qildirmaydi (ilova 3.2.4 qoʻngʻiroq tugashi bilan oʻzi ochadi). Bugundan keyingi qoʻngʻiroqlar uchun — eskilari bosh sahifadagi roʻyxatda qoladi.",
+    ],
+    staff: [
+      {
+        to: (u) => u.role === "EMPLOYEE" && isCallCenter(u.employee),
+        text: "Qoʻngʻiroq endi 30 soniya jiringlaydi. Siz bilan gaplashgan mijoz qayta qoʻngʻiroq qilsa, avval sizga ulanadi. Telefoningiz jiringlab, siz olmagan boʻlsangiz, Ledger kim javob berganini yoki hech kim javob bermaganini aytadi. Yangi raqam bilan gaplashgach, Ledger «Qoʻngʻiroq natijasi»ni soʻraydi — belgilang yoki konsultatsiyaga yozing. Ilovani 3.2.4 ga yangilang: telefon «tebranish» rejimida ham titraydi.",
+      },
+      {
+        to: (u) => u.role === "EMPLOYEE" && !isCallCenter(u.employee) && isCoordinator(u.employee),
+        text: "Siz bilan gaplashgan odam firma raqamiga qoʻngʻiroq qilsa, avval sizga ulanadi (30 soniya), keyin call-markazga. Ilovani 3.2.4 ga yangilang: telefon «tebranish» rejimida ham titraydi.",
+      },
+    ],
+  },
+  {
     // Staff hear nothing yet: practice is shown to them at a meeting, and the
     // AI replies stay off until a manager switches them on.
     id: "2026-10-26-messages-ai-practice",
