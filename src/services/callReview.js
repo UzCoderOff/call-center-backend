@@ -27,7 +27,7 @@ const DEFAULT_RULES = [
   "4. Aniqlovchi savollar (15): qachon boshlandi, qanday hujjatlar bor, yaqin sana (sud, tergov, muddat) bormi, avval biror chora koʻrdimi, qanday natija kutadi, qarorni yana kim qiladi — bittadan.",
   "5. Xulosa (10): vaziyatni mijozning soʻzlari bilan qaytardi va «Toʻgʻri tushundimmi?» deb tasdiqlatdi.",
   "6. Taklif (10): mijozning vaziyati → advokat nima qiladi (hujjatlarni oʻrganadi, yoʻllar va xavflarni aytadi, reja beradi) → mijoz nima oladi. Muammoni bilmay turib yozishga shoshilmadi.",
-  "7. Narx va vaqt (15): narxni ishonch bilan, uzr soʻramasdan aytdi va darhol ikki aniq vaqt taklif qildi («ertaga 11:00 yoki payshanba 16:00»), «qachon qulay?» deb soʻramadi.",
+  "7. Narx va vaqt (15): narxni ishonch bilan, uzr soʻramasdan aytdi va darhol ikki aniq vaqt taklif qildi («ertaga 11:00 yoki payshanba 16:00»), «qachon qulay?» deb soʻramadi. Mijoz narxni (yoki manzil kabi oddiy savolni) oʻzi soʻrasa — operator darrov javob berdi, keyin muammosini soʻradi; savolni chetlab oʻtib boshqa gapga oʻtish — xato.",
   "8. Yakun (10): yozilgan boʻlsa — toʻlov, hujjatlar, eslatma; «yana savolingiz bormi?», rahmat; har holda aniq keyingi qadam (yozilish yoki kelishilgan qayta aloqa).",
   "9. Ovoz va odob (10): iliq ohang, «siz», ism bilan murojaat, ijobiy soʻzlar («Bilmadim» emas — «Aniqlab aytaman»), toʻldiruvchi soʻzlar («ee», «xoʻsh») kam.",
   "Qoʻpol xato — har biri −20 ball: yuridik maslahat yoki xulosa berdi; natija vaʼda qildi yoki foizda imkoniyat aytdi; oʻylab topilgan chegirma yoki muddat ishlatdi; mijozga qoʻpollik qildi; ishlayotgan mijozga uning ishi haqida maʼlumot berdi.",

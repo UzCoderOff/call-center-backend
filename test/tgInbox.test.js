@@ -96,8 +96,12 @@ test("whatever the AI sends back, the review has one shape", () => {
   assert.equal(r.betterReply, null);
   assert.equal(clean({ relevant: false }).outcome, "not_client");
   assert.equal(clean({ good: ["a", "b", "c", "d"] }).good.length, 3);
-  // The firm's order is in the default rules: the problem first, then the offer.
-  assert.match(DEFAULT_RULES, /avval mijozning muammosini/);
+  // The firm's order is in the default rules: answer what they asked, then
+  // the problem, then the offer (2026-10-28: operators skipped the price
+  // question to follow the order).
+  assert.match(DEFAULT_RULES, /mijozning savoliga javob bering/);
+  assert.match(DEFAULT_RULES, /mijozning savoliga javob bergach\) mijozning muammosini bilib oling/);
+  assert.match(DEFAULT_RULES, /narxni oʻzi soʻrasa, darrov ayting/);
 });
 
 test("three kinds of chat: an existing client isn't scored on selling, and Ledger's facts decide", () => {
@@ -148,7 +152,7 @@ test("the firm's corrections go back to the AI as examples", async () => {
 
 test("the review's flags: only known kinds, short quotes, none on an unrelated chat", () => {
   const { clean, FLAGS } = require("../src/services/tgReview");
-  assert.deepEqual(FLAGS, ["legal_answer", "wrong_price", "pasted_text"]);
+  assert.deepEqual(FLAGS, ["legal_answer", "wrong_price", "pasted_text", "unanswered"]);
   const r = clean({
     kind: "lead",
     outcome: "lost_by_us",
@@ -157,9 +161,10 @@ test("the review's flags: only known kinds, short quotes, none on an unrelated c
       { kind: "wrong_price", quote: "Konsultatsiya narxi 300.000 so'm" },
       { kind: "made_up", quote: "x" },
       { kind: "pasted_text", quote: "a".repeat(500) },
+      { kind: "unanswered", quote: "Sizga yordam berishimiz uchun iltimos oʻzingizni tanishtiring" },
     ],
   });
-  assert.deepEqual(r.flags.map((f) => f.kind), ["legal_answer", "wrong_price", "pasted_text"]);
+  assert.deepEqual(r.flags.map((f) => f.kind), ["legal_answer", "wrong_price", "pasted_text", "unanswered"]);
   assert.equal(r.flags[2].quote.length, 200);
   // An existing client's chat keeps its flags; spam has none.
   assert.equal(clean({ kind: "existing", flags: [{ kind: "legal_answer", quote: "q" }] }).flags.length, 1);

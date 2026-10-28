@@ -32,10 +32,11 @@ const inbox = require("./tgInbox");
 // boʻyicha ssenariy», 2026-10-17), in short — what a good operator does.
 const DEFAULT_RULES = [
   "Konsultatsiya: onlayn (videoaloqa) 450 000 soʻm, ofisda 600 000 soʻm, advokat bilan. Maqsad: mijozning muammosini tushunish va uni oldindan toʻlov bilan pullik konsultatsiyaga yozish. Operator yuridik masalani oʻzi hal qilmaydi.",
-  "1. Salomlashish: «Assalomu alaykum!», hol-ahvol soʻrash (masalan, «Yaxshimisiz, kuningiz yaxshi oʻtyaptimi?»), oʻzini tanishtirish («Ismim …, men firma advokatlarining yordamchisiman») va mijozning ismini soʻrash — keyin uni ismi bilan atash.",
-  "2. Tartib: avval mijozning muammosini bilib oling — «Nima boʻldi?» deb soʻrang va toʻliq aytib olishiga qoʻying, boʻlmang. Keyin qisqa savollar: bu qachon boshlandi? qoʻlida hujjatlar bormi (rasmini yuborishi mumkin)? biror chora koʻrdimi, boshqa yuristga murojaat qildimi? qaror qabul qilishda yana kim ishtirok etadi?",
+  "ENG MUHIMI — mijozning savoliga javob bering. Mijoz nimani soʻrasa (narx, manzil, qoʻngʻiroq qilsa boʻladimi, qachon ishlaysiz…), shu xabarning oʻzida qisqa va aniq javob bering, keyin muammosini soʻrang. Savolni chetlab oʻtish, uning oʻrniga shablon gap yozish yoki bir xil gapni takrorlash — xato: mijoz botga yozyapman deb oʻylaydi va ketadi. Masalan, «Konsultatsiya necha pul?» → «Konsultatsiya onlayn 450 000 soʻm, ofisda 600 000 soʻm. Muammoingizni qisqacha yozsangiz, qaysi biri sizga mos kelishini aytaman.»",
+  "1. Salomlashish: «Assalomu alaykum!», hol-ahvol soʻrash (masalan, «Yaxshimisiz, kuningiz yaxshi oʻtyaptimi?»), oʻzini tanishtirish («Ismim …, men firma advokatlarining yordamchisiman») va mijozning ismini soʻrash — keyin uni ismi bilan atash. Mijoz savol bilan yozgan boʻlsa — salomlashish bilan birga oʻsha savolga ham javob bering.",
+  "2. Tartib: (mijozning savoliga javob bergach) mijozning muammosini bilib oling — «Nima boʻldi?» deb soʻrang va toʻliq aytib olishiga qoʻying, boʻlmang. Keyin qisqa savollar: bu qachon boshlandi? qoʻlida hujjatlar bormi (rasmini yuborishi mumkin)? biror chora koʻrdimi, boshqa yuristga murojaat qildimi? qaror qabul qilishda yana kim ishtirok etadi?",
   "3. Imkon boʻlsa, qoʻngʻiroqqa oʻtkazing: «Telefonda bu 5 daqiqa oladi — hozir qoʻngʻiroq qilsam qulaymi?». Mijoz yozishmani xohlasa — shu yerda davom eting.",
-  "4. Muammo tushunarli boʻlgach, konsultatsiyani taklif qiling: mijozning vaziyati → advokat nima qiladi (hujjatlarni oʻrganadi, yoʻllar va xavflarni tushuntiradi, bosqichma-bosqich reja beradi) → mijoz nima oladi. Muammoni bilmay turib darrov yozishga shoshilmang.",
+  "4. Muammo tushunarli boʻlgach, konsultatsiyani taklif qiling: mijozning vaziyati → advokat nima qiladi (hujjatlarni oʻrganadi, yoʻllar va xavflarni tushuntiradi, bosqichma-bosqich reja beradi) → mijoz nima oladi. Muammoni bilmay turib darrov yozishga shoshilmang — lekin mijoz narxni oʻzi soʻrasa, darrov ayting.",
   "5. Narxni ishonch bilan, uzr soʻramasdan ayting va darrov ikki aniq vaqt taklif qiling (masalan, «ertaga 11:00 yoki payshanba 16:00») — «qachon qulay?» deb soʻramang.",
   "6. Yozilgach: toʻlov (havola yoki ofisda), qaysi hujjatlarni olib kelishni ayting, bir kun oldin eslatma boʻlishini ayting.",
   "Yozishma: ish vaqtida 5 daqiqa ichida javob bering; bitta xabar — bitta fikr, 3–4 qatordan oshmasin; har bir xabar savol bilan tugasin.",
@@ -58,7 +59,10 @@ const POTENTIALS = ["high", "medium", "low", "none"];
 // a legal answer given in the chat, a price that isn't the firm's, and text
 // that reads as pasted from an AI chatbot or a website (a hint only — a
 // person decides).
-const FLAGS = ["legal_answer", "wrong_price", "pasted_text"];
+// unanswered (2026-10-28): the person asked something plain — the price, the
+// address, may they call — and the operator wrote a script line instead
+// (one asked the price three times before getting it).
+const FLAGS = ["legal_answer", "wrong_price", "pasted_text", "unanswered"];
 
 // Quiet this long before a review (the conversation has paused).
 const QUIET_MS = 60 * 60 * 1000;
@@ -86,27 +90,27 @@ const SCHEMA = {
         "booked = konsultatsiyaga yozildi; lost_by_us = operator tufayli yoʻqotildi; lost_not_serious = niyati jiddiy emas edi; lost_other = boshqa sabab, operator yaxshi ishlagan; open = hali hal boʻlmagan; existing = mavjud mijoz bilan ish yuzasidan yozishma; not_client = firma ishiga aloqasi yoʻq",
     },
     potential: { type: "string", enum: POTENTIALS, description: "How likely this person was to become a client at the start" },
-    score: { type: "integer", minimum: 0, maximum: 5, description: "The operator's handling, 1-5 (0 = nothing to judge)" },
+    score: { type: "integer", description: "The operator's handling, 1-5 (0 = nothing to judge)" },
     summary: { type: "string", description: "1-2 sentences: what the person wanted and how it ended" },
     lossReason: { type: "string", description: "If lost: the main reason, plainly. Else empty" },
-    good: { type: "array", items: { type: "string" }, maxItems: 3, description: "What the operator did well" },
-    improve: { type: "array", items: { type: "string" }, maxItems: 3, description: "Next time do this — only for real mistakes" },
+    good: { type: "array", items: { type: "string" }, description: "What the operator did well, at most 3" },
+    improve: { type: "array", items: { type: "string" }, description: "Next time do this, at most 3 — only for real mistakes" },
     betterReply: { type: "string", description: "Only after a real mistake: the message the operator could have sent at the key moment. Else empty" },
     flags: {
       type: "array",
-      maxItems: 4,
-      description: "Problems in the OPERATOR's own messages (never the client's, never AI YORDAMCHI's). Empty when there are none.",
+      description: "Problems in the OPERATOR's own messages (never the client's, never AI YORDAMCHI's), at most 4. Empty when there are none.",
       items: {
         type: "object",
+        additionalProperties: false,
         required: ["kind", "quote"],
         properties: {
           kind: {
             type: "string",
             enum: FLAGS,
             description:
-              "legal_answer = the operator said what the law says or what will happen in the client's matter (yes/no, deadlines, chances, a plan for court) — pointing to the lawyer or a consultation is NOT this; wrong_price = a consultation price or discount that isn't in the firm's rules; pasted_text = a message that reads as copied from an AI chatbot or a website: long, formal, essay-like, in a clearly different style, spelling or punctuation from the operator's other messages",
+              "legal_answer = the operator said what the law says or what will happen in the client's matter (yes/no, deadlines, chances, a plan for court) — pointing to the lawyer or a consultation is NOT this; wrong_price = a consultation price or discount that isn't in the firm's rules; pasted_text = a message that reads as copied from an AI chatbot or a website: long, formal, essay-like, in a clearly different style, spelling or punctuation from the operator's other messages; unanswered = the person asked something plain (the price, the address, may they call, when the firm works…) and the operator's next reply didn't answer it — a script line, a question back, or the same line again instead",
           },
-          quote: { type: "string", description: "The operator's words, a short exact quote (up to 200 characters)" },
+          quote: { type: "string", description: "The operator's words, a short exact quote (up to 200 characters); for unanswered: the reply that skipped the question" },
         },
       },
     },
@@ -131,7 +135,7 @@ For a lead decide:
 Messages marked "AI YORDAMCHI" were written by the firm's AI assistant, not the operator: judge the operator only by their own messages, and how they took over from the AI.
 Be fair: answering a late-night message the next morning in working hours is fine. Use only what is in the conversation; don't invent facts. Voice messages and photos can't be read here — judge from the rest, and don't blame the operator for what you can't see.
 
-Flags (any kind of chat but not_relevant): look only at the OPERATOR's own messages. Mark a legal answer, a price that isn't the firm's, or a message that reads as pasted from an AI chatbot or a website, each with a short exact quote. "pasted_text" is only a hint — mark it when the style clearly differs from how the same operator writes elsewhere, not just because a message is long or well written.
+Flags (any kind of chat but not_relevant): look only at the OPERATOR's own messages. Mark a legal answer, a price that isn't the firm's, a message that reads as pasted from an AI chatbot or a website, or a plain question of the person's that the operator's next reply skipped ("unanswered" — e.g. they asked the price and got «Oʻzingizni tanishtiring» instead), each with a short exact quote. A skipped question is a real mistake against the rules: it counts in the score and the outcome (lost_by_us when they leave after it). "pasted_text" is only a hint — mark it when the style clearly differs from how the same operator writes elsewhere, not just because a message is long or well written.
 
 Advice only where it's earned:
 - "improve" and "betterReply" are for real mistakes against the rules above. If the operator did well (score 4-5), leave "betterReply" empty and "improve" empty (or one small tip). Never suggest a reply that isn't clearly better than what the operator actually wrote.
@@ -362,7 +366,9 @@ async function reviewChat(chatId) {
       max_tokens: 2000,
       system: SYSTEM(rules, learned),
       messages: [{ role: "user", content: `Ledger maʼlumoti:\n${factsText(facts)}\n\nTelegram yozishmasi (${inbox.displayName(chat)}):\n\n${transcript(messages)}` }],
-      tools: [{ name: "review", description: "Record the review of this conversation.", input_schema: SCHEMA }],
+      // Strict: the answer always fits SCHEMA (Haiku now and then sent a list
+      // as JSON text — the call review lost its scores that way, 2026-10-28).
+      tools: [{ name: "review", description: "Record the review of this conversation.", input_schema: SCHEMA, strict: true }],
       tool_choice: { type: "tool", name: "review" },
     },
     { feature: "tgReview" }

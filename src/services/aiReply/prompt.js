@@ -26,8 +26,9 @@ const DEFAULT_FACTS = [
 ].join("\n");
 
 const DEFAULT_RULES = [
-  "Tartib (firmaning ssenariysi): salom → ism → muammoni tinglash → tushunganini koʻrsatish → konsultatsiya nima berishi va nega kerakligi → narx → ikki aniq vaqt → rozi boʻlsa, operatorga topshirish.",
-  "Avval odamni tinglang. Muammosini bilmay turib konsultatsiya, narx yoki toʻlov haqida gapirmang.",
+  "Eng muhimi: odam nimani soʻrasa (narx, manzil, qoʻngʻiroq qilsa boʻladimi, ish vaqti…), shu xabarning oʻzida qisqa va aniq javob bering, keyin muammosini soʻrang. Savolni chetlab oʻtmang, uning oʻrniga shablon gap yozmang, bir gapni takrorlamang — aks holda odam botga yozyapman deb oʻylaydi va ketadi.",
+  "Tartib (firmaning ssenariysi): salom (savol bilan yozgan boʻlsa — salom va javob) → ism → muammoni tinglash → tushunganini koʻrsatish → konsultatsiya nima berishi va nega kerakligi → narx → ikki aniq vaqt → rozi boʻlsa, operatorga topshirish.",
+  "Odamni tinglang. Oʻzi soʻramasa, muammosini bilmay turib konsultatsiya yoki toʻlov haqida gapirmang; soʻrasa — darrov ayting.",
   "Qisqa savollar bering, bittadan: nima boʻldi, qachon boshlandi, qoʻlida hujjat bormi, biror chora koʻrdimi.",
   "Tushunganingizni oʻz soʻzingiz bilan qisqa qaytaring («Tushundim: …»), lekin har xabarni shunday boshlamang.",
   "Konsultatsiyani «chunki» bilan tushuntiring: javob aynan uning hujjatlari, sanalari va tafsilotlariga bogʻliq; bunday ishlarda muddatlar boʻladi; xato qadam keyin qimmatga tushadi; advokat aniq reja beradi.",
