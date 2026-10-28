@@ -42,6 +42,32 @@ test("the review's points stay within each criterion and the total is out of 100
   assert.equal(Object.values(MAX).reduce((a, b) => a + b, 0), 100);
 });
 
+test("the AI's lists are read when they come back as JSON text (it was nine zeros and 0/100)", () => {
+  const criteria = CRITERIA.map((key) => ({ key, points: 5, note: "ok" }));
+  const r = clean({ kind: "lead", criteria: JSON.stringify(criteria), good: JSON.stringify(["Iliq salomlashdi"]), betterLines: JSON.stringify([{ said: "Qachon qulay?", better: "Ertaga 11:00 yoki 16:00?" }]) });
+  assert.equal(r.missing, 0);
+  // 5 each, routing capped at its 5.
+  assert.equal(r.score, 45);
+  assert.equal(r.criteria[0].note, "ok");
+  assert.deepEqual(r.good, ["Iliq salomlashdi"]);
+  assert.equal(r.betterLines.length, 1);
+  // Text that isn't a list: nothing read, and it says so.
+  assert.equal(clean({ criteria: "greeting: 10" }).missing, 9);
+  assert.equal(clean({ criteria: criteria.slice(0, 7) }).missing, 2);
+});
+
+test("a caller is lost only with their own words to show it, and never when booked", () => {
+  const said = "Ishim bor edi, bitdi";
+  assert.equal(clean({ lost: true, lostCause: "operator" }).lost, false);
+  assert.equal(clean({ lost: true, lostCause: "operator" }).lostCause, null);
+  assert.equal(clean({ lost: true, lostCause: "client", lostQuote: said, outcome: "booked" }).lost, false);
+  const r = clean({ lost: true, lostCause: "late_callback", lostQuote: ` ${said} ` });
+  assert.equal(r.lost, true);
+  assert.equal(r.lostCause, "late_callback");
+  assert.equal(r.lostQuote, said);
+  assert.equal("lostQuote" in clean({ lost: false, lostQuote: said }), false);
+});
+
 test("the transcript reads as turns: who said what, when", () => {
   const segments = cleanSegments([
     { who: "client", start: 3.2, end: 6, text: " Assalomu alaykum " },

@@ -84,11 +84,17 @@ const SCHEMA = {
     topic: { type: "string", description: "The legal area in a few Uzbek words («Jinoyat — chaqiruv», «Oila — ajrashish»), or what the call was if not relevant" },
     outcome: { type: "string", enum: OUTCOMES, description: "booked = the client was booked for a consultation in this call; not_booked = a lead that wasn't booked; existing / not_client as the kind" },
     about: { type: "string", description: "One or two Uzbek sentences: what the caller wanted and how the call ended (booked, will think, went to another lawyer, not a client…). No advice, no next step" },
-    lost: { type: "boolean", description: "true when the caller is lost to the firm in this call: says the matter is already settled, found another lawyer, no longer needs us, or refuses" },
+    lost: {
+      type: "boolean",
+      description:
+        "true only when the caller's own words in this call show they are gone: the matter is already settled, they found or chose another lawyer, they no longer need us, or they plainly refuse. NOT lost: will think, will call back («Boʻldi, telefon qilaman» = OK, I'll call), asks to be written to, takes the firm's number or card, agrees to pay or come, haggles about the price but keeps talking. When in doubt: false",
+    },
+    lostQuote: { type: "string", description: "only when lost: the caller's own words that show it, copied from a «Mijoz» line" },
     lostCause: {
       type: "string",
       enum: ["late_callback", "operator", "client", "unknown"],
-      description: "only when lost: late_callback = they had called before and weren't called back in time (see the history: 'kech'); operator = the operator's handling in this call lost them; client = the client's own reasons (price, distance, changed mind) despite good handling; unknown",
+      description:
+        "only when lost: late_callback = they had called before and weren't called back in time (see the history: 'kech'); operator = the operator clearly broke the standard and that lost them (rude, didn't listen, wrong or no information, no time offered, cut the call short) — never when the operator followed the standard; client = the client's own reasons: the price, not wanting a paid consultation or the firm's way of working, found free help, distance, changed mind; unknown",
     },
     criteria: {
       type: "array",
@@ -137,7 +143,7 @@ const SYSTEM = (rules, lessons) => `You review a law firm call-center operator's
 The firm's call standard for operators:
 ${rules}
 
-The call is a transcript made automatically from the recording (Uzbek speech recognition): lines marked "Operator" are the firm's operator, "Mijoz" the caller; a recording that couldn't be split is marked "Suhbat". Recognition makes mistakes — misheard words, missing words — so judge the meaning, never spelling, and don't blame the operator for what may be a recognition error. Read words in context: common mix-ups are «bitta» for «bitdi» («ishim bor edi, bitdi» = the matter is already settled), «boʻldi» (= enough / it's done), «lejer/lider» for «Ledger». Tone of voice isn't in a transcript: judge manner by the words.
+The call is a transcript made automatically from the recording (Uzbek speech recognition): lines marked "Operator" are the firm's operator, "Mijoz" the caller; a recording that couldn't be split is marked "Suhbat". Recognition makes mistakes — misheard words, missing words — so judge the meaning, never spelling, and don't blame the operator for what may be a recognition error. Read words in context: «bitta» may be a mishearing of «bitdi» («ishim bor edi, bitdi» = the matter is already settled), but mostly it just means "one" («bitta savolim bor» = I have one question); «boʻldi» mostly means "OK / fine / enough" («Boʻldi, telefon qilaman» = OK, I'll call) — on its own it is never a refusal; «lejer/lider» is «Ledger». Tone of voice isn't in a transcript: judge manner by the words.
 
 You may also get the number's history before this call (missed calls, call-backs, earlier talks, bookings). Use it in «about»: e.g. "called twice at night, not answered; called back next morning — says the matter is already settled (likely went elsewhere)". Don't score the operator for what happened before this call.
 
@@ -147,6 +153,7 @@ Decide the kind of call first:
 - not_relevant: a wrong number, an ad, a personal call, a colleague or a test call, or a transcript too garbled to tell what the call was about — it is not scored; still fill the fields briefly.
 Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they clearly happened, quoting the operator; when in doubt, it is not a gross error — leave the list empty. Recommending a consultation with the firm's lawyer is the operator's job, never "legal advice". Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
 Advice only where it's earned: "improve" and "betterLines" are for real gaps; never suggest a line that isn't clearly better than what was said. Quote "said" from the transcript.
+Mark a caller «lost» only when their own words show it (quote them); a caller who hesitates but takes the firm's number, card or a time is not lost. The firm's prices and its paid consultation are the firm's rules: a caller who won't pay for them is lost for their own reasons (client), not through the operator.
 Don't decide what should happen with the client next, and don't give legal opinions yourself.${lessons ? `
 
 The firm checked earlier reviews and corrected these — learn from them and judge alike:
@@ -175,34 +182,59 @@ function transcriptText(segments) {
 // The AI's text with oʻ, gʻ, ʼ (it often writes o', g').
 const uz = (text) => require("./pbx/transcribe").uzLetters(String(text || ""));
 
+// A list from the AI. Haiku now and then hands one back as JSON text
+// ("[{\"key\":…}]") instead of a list — read as nothing, the nine criteria
+// became nine zeros and the operator was sent 0/100 (2026-10-28: 7 of 23
+// reviews).
+function listOf(v) {
+  if (Array.isArray(v)) return v;
+  if (typeof v !== "string") return [];
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function clean(r) {
-  const byKey = new Map((Array.isArray(r?.criteria) ? r.criteria : []).map((c) => [c.key, c]));
+  const byKey = new Map(listOf(r?.criteria).map((c) => [c?.key, c]));
   const criteria = CRITERIA.map((key) => {
     const c = byKey.get(key) || {};
     return { key, points: Math.max(0, Math.min(MAX[key], Math.round(Number(c.points) || 0))), max: MAX[key], note: uz(c.note).slice(0, 400) };
   });
-  const list = (v, n) => (Array.isArray(v) ? v : []).map((x) => uz(x).trim()).filter(Boolean).slice(0, n);
+  const list = (v, n) => listOf(v).map((x) => uz(x).trim()).filter(Boolean).slice(0, n);
   const seen = new Set();
-  const grossErrors = (Array.isArray(r?.grossErrors) ? r.grossErrors : [])
+  const grossErrors = listOf(r?.grossErrors)
     .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
     .map((g) => `${GROSS_LABELS[g.key]}: «${String(g.quote).trim().slice(0, 200)}»`);
   const sum = criteria.reduce((s, c) => s + c.points, 0);
+  const outcome = OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked";
+  // Lost only with the caller's own words to show it, and never a booked
+  // caller (2026-10-28: «Boʻldi, men telefon qilib oʻtaman» — "OK, I'll
+  // call" — from a caller who then took the card number read as lost).
+  const lostQuote = uz(r?.lostQuote).trim().slice(0, 300);
+  const lost = r?.lost === true && outcome !== "booked" && Boolean(lostQuote);
   return {
     kind: KINDS.includes(r?.kind) ? r.kind : "lead",
     topic: uz(r?.topic).slice(0, 120),
-    outcome: OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked",
+    outcome,
     about: uz(r?.about).slice(0, 400),
-    lost: r?.lost === true,
-    lostCause: r?.lost === true && ["late_callback", "operator", "client", "unknown"].includes(r?.lostCause) ? r.lostCause : null,
+    lost,
+    lostCause: lost && ["late_callback", "operator", "client", "unknown"].includes(r?.lostCause) ? r.lostCause : null,
+    ...(lost ? { lostQuote } : {}),
     criteria,
     grossErrors,
     good: list(r?.good, 3),
     improve: list(r?.improve, 3),
-    betterLines: (Array.isArray(r?.betterLines) ? r.betterLines : [])
+    betterLines: listOf(r?.betterLines)
       .map((b) => ({ said: uz(b?.said).trim().slice(0, 400), better: uz(b?.better).trim().slice(0, 400) }))
       .filter((b) => b.said && b.better)
       .slice(0, 3),
     score: Math.max(0, Math.min(100, sum - 20 * grossErrors.length)),
+    // How many of the nine criteria the AI didn't give (the score isn't
+    // trusted then).
+    missing: CRITERIA.filter((key) => !byKey.has(key)).length,
   };
 }
 
@@ -296,27 +328,35 @@ async function reviewCall(callLogId) {
   const { rules, model } = await reviewSettings();
   await prisma.callAnalysis.upsert({ where: { callLogId }, create: { callLogId, status: "processing" }, update: { status: "processing", errorMessage: null } });
   const history = await historyBefore(call);
-  try {
-    const response = await claude.create(
+  const request = {
+    model,
+    max_tokens: 3000,
+    system: SYSTEM(rules, await lessons()),
+    messages: [
       {
-        model,
-        max_tokens: 3000,
-        system: SYSTEM(rules, await lessons()),
-        messages: [
-          {
-            role: "user",
-            content: `${history.text}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
-          },
-        ],
-        tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
-        tool_choice: { type: "tool", name: "review" },
+        role: "user",
+        content: `${history.text}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
       },
-      { feature: "callReview" }
-    );
-    const used = (response.content || []).find((b) => b.type === "tool_use");
-    if (!used?.input) throw new Error("no review in the answer");
-    const r = clean(used.input);
-    const { score, about, ...details } = r;
+    ],
+    tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
+    tool_choice: { type: "tool", name: "review" },
+  };
+  try {
+    // A second try when the nine criteria didn't all come back; the fuller
+    // answer is kept.
+    let r = null;
+    let response = null;
+    let costUsd = 0;
+    for (let attempt = 0; attempt < 2 && !(r && r.missing === 0); attempt += 1) {
+      const res = await claude.create(request, { feature: "callReview" });
+      costUsd += claude.costOf(res.model || model, res.usage);
+      const used = (res.content || []).find((b) => b.type === "tool_use");
+      if (!used?.input) continue;
+      const next = clean(used.input);
+      if (!r || next.missing < r.missing) [r, response] = [next, res];
+    }
+    if (!r) throw new Error("no review in the answer");
+    const { score, about, missing, ...details } = r;
     // Not a client call (a colleague, a test, a wrong number) or text too
     // garbled to judge: kept, but not scored — no number to the operator
     // and nothing toward their stars (2026-10-24: a test call got 86).
@@ -330,14 +370,24 @@ async function reviewCall(callLogId) {
       details.lateMinutes = history.late?.minutes ?? null;
       details.grossErrors = [
         ...details.grossErrors,
-        details.lostCause === "late_callback" ? `Mijoz yoʻqotildi — qayta qoʻngʻiroq ${history.late.minutes} daqiqa kech` : "Mijoz shu qoʻngʻiroqda yoʻqotildi",
+        `${details.lostCause === "late_callback" ? `Mijoz yoʻqotildi — qayta qoʻngʻiroq ${history.late.minutes} daqiqa kech` : "Mijoz shu qoʻngʻiroqda yoʻqotildi"}: «${details.lostQuote}»`,
       ];
     }
-    const scored = details.kind !== "not_relevant" && (!short || lostByUs);
+    // The criteria still didn't come back: no score at all rather than a
+    // 0 the operator never earned.
+    const unreadable = missing > 0;
+    const scored = details.kind !== "not_relevant" && !unreadable && (!short || lostByUs);
     const finalScore = lostByUs ? Math.max(0, score - 20) : score;
     const row = await prisma.callAnalysis.update({
       where: { callLogId },
-      data: { status: "done", score: scored ? finalScore : null, summary: about, details: { ...details, unscored: !scored, ...(short ? { short: true } : {}) }, model: response.model || model, costUsd: claude.costOf(response.model || model, response.usage) },
+      data: {
+        status: "done",
+        score: scored ? finalScore : null,
+        summary: about,
+        details: { ...details, unscored: !scored, ...(short ? { short: true } : {}), ...(unreadable ? { unreadable: true } : {}) },
+        model: response.model || model,
+        costUsd,
+      },
     });
     if (scored) await tellOperator(call, row).catch((err) => console.error("[call-review] telling the operator failed:", err.message));
     if (lostByUs) await tellManagers(call, row).catch((err) => console.error("[call-review] telling the managers failed:", err.message));
@@ -397,6 +447,7 @@ async function tellManagers(call, analysis) {
     "🔴 <b>Mijoz yoʻqotildi</b>",
     `${f.escapeHtml(call.employee.name)} · ${f.escapeHtml(f.phone(call.phoneNumber))}`,
     d.lostCause === "late_callback" ? `Sabab: qayta qoʻngʻiroq ${d.lateMinutes} daqiqa kech` : "Sabab: shu qoʻngʻiroqdagi muomala",
+    d.lostQuote ? `Mijoz: «${f.escapeHtml(d.lostQuote)}»` : null,
     analysis.summary ? f.escapeHtml(analysis.summary) : null,
     f.portalLink(`/calls/${call.id}`, "Qoʻngʻiroqni ochish"),
   ]
