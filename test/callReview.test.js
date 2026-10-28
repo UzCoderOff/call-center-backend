@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { clean, transcriptText, reviewable, CRITERIA, MAX } = require("../src/services/callReview");
+const { clean, lostVerdict, transcriptText, reviewable, CRITERIA, MAX } = require("../src/services/callReview");
 const { cleanSegments } = require("../src/services/pbx/transcribe");
 
 test("the review's points stay within each criterion and the total is out of 100", () => {
@@ -58,14 +58,16 @@ test("the AI's lists are read when they come back as JSON text (it was nine zero
 
 test("a caller is lost only with their own words to show it, and never when booked", () => {
   const said = "Ishim bor edi, bitdi";
-  assert.equal(clean({ lost: true, lostCause: "operator" }).lost, false);
-  assert.equal(clean({ lost: true, lostCause: "operator" }).lostCause, null);
-  assert.equal(clean({ lost: true, lostCause: "client", lostQuote: said, outcome: "booked" }).lost, false);
-  const r = clean({ lost: true, lostCause: "late_callback", lostQuote: ` ${said} ` });
-  assert.equal(r.lost, true);
-  assert.equal(r.lostCause, "late_callback");
-  assert.equal(r.lostQuote, said);
-  assert.equal("lostQuote" in clean({ lost: false, lostQuote: said }), false);
+  assert.deepEqual(lostVerdict({ lost: true, cause: "operator", quote: "", why: "" }, "not_booked"), { lost: false, lostCause: null });
+  assert.deepEqual(lostVerdict(null, "not_booked"), { lost: false, lostCause: null });
+  assert.equal(lostVerdict({ lost: true, cause: "client", quote: said, why: "" }, "booked").lost, false);
+  assert.deepEqual(lostVerdict({ lost: true, cause: "late_callback", quote: ` ${said} `, why: "Kech qaytarildi" }, "not_booked"), {
+    lost: true,
+    lostCause: "late_callback",
+    lostQuote: said,
+    lostWhy: "Kech qaytarildi",
+  });
+  assert.equal(lostVerdict({ lost: true, cause: "none", quote: said, why: "" }, "not_booked").lostCause, "unknown");
 });
 
 test("the transcript reads as turns: who said what, when", () => {

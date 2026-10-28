@@ -71,10 +71,14 @@ const MIN_TALK_SEC = 20;
 const MIN_TEXT_SEC = 5;
 const LESSONS = 10;
 
+// The review tool is strict (2026-10-28): Claude's answer always matches this
+// schema — before, Haiku now and then sent the criteria as broken JSON text.
+// Strict schemas take no number or length limits (minimum, maxItems…):
+// they're in the descriptions, and clean() enforces them.
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "topic", "outcome", "about", "lost", "criteria", "grossErrors", "good", "improve", "betterLines"],
+  required: ["kind", "topic", "outcome", "about", "criteria", "grossErrors", "good", "improve", "betterLines"],
   properties: {
     kind: {
       type: "string",
@@ -84,34 +88,19 @@ const SCHEMA = {
     topic: { type: "string", description: "The legal area in a few Uzbek words («Jinoyat — chaqiruv», «Oila — ajrashish»), or what the call was if not relevant" },
     outcome: { type: "string", enum: OUTCOMES, description: "booked = the client was booked for a consultation in this call; not_booked = a lead that wasn't booked; existing / not_client as the kind" },
     about: { type: "string", description: "One or two Uzbek sentences: what the caller wanted and how the call ended (booked, will think, went to another lawyer, not a client…). No advice, no next step" },
-    lost: {
-      type: "boolean",
-      description:
-        "true only when the caller's own words in this call show they are gone: the matter is already settled, they found or chose another lawyer, they no longer need us, or they plainly refuse. NOT lost: will think, will call back («Boʻldi, telefon qilaman» = OK, I'll call), asks to be written to, takes the firm's number or card, agrees to pay or come, haggles about the price but keeps talking. When in doubt: false",
-    },
-    lostQuote: { type: "string", description: "only when lost: the caller's own words that show it, copied from a «Mijoz» line" },
-    lostCause: {
-      type: "string",
-      enum: ["late_callback", "operator", "client", "unknown"],
-      description:
-        "only when lost: late_callback = they had called before and weren't called back in time (see the history: 'kech'); operator = the operator clearly broke the standard and that lost them (rude, didn't listen, wrong or no information, no time offered, cut the call short) — never when the operator followed the standard; client = the client's own reasons: the price, not wanting a paid consultation or the firm's way of working, found free help, distance, changed mind; unknown",
-    },
     criteria: {
       type: "array",
-      minItems: 9,
-      maxItems: 9,
-      description: "The nine criteria, in order, each with the points earned (0..max) and a short Uzbek note on why",
+      description: "Exactly the nine criteria, in order, each with the points earned (0 up to its maximum) and a short Uzbek note on why",
       items: {
         type: "object",
         additionalProperties: false,
         required: ["key", "points", "note"],
-        properties: { key: { type: "string", enum: CRITERIA }, points: { type: "integer", minimum: 0, maximum: 15 }, note: { type: "string" } },
+        properties: { key: { type: "string", enum: CRITERIA }, points: { type: "integer" }, note: { type: "string" } },
       },
     },
     grossErrors: {
       type: "array",
-      maxItems: 5,
-      description: "Only gross errors that really happened in this call (−20 each), each with the operator's words that show it. An empty list when there were none — never list an absence",
+      description: "Only gross errors that really happened in this call (−20 each, at most 5), each with the operator's words that show it. An empty list when there were none — never list an absence",
       items: {
         type: "object",
         additionalProperties: false,
@@ -127,16 +116,69 @@ const SCHEMA = {
         },
       },
     },
-    good: { type: "array", items: { type: "string" }, maxItems: 3, description: "What the operator did well (Uzbek)" },
-    improve: { type: "array", items: { type: "string" }, maxItems: 3, description: "The most important things to do better next time (Uzbek) — only real gaps" },
+    good: { type: "array", items: { type: "string" }, description: "What the operator did well (Uzbek), at most 3" },
+    improve: { type: "array", items: { type: "string" }, description: "The most important things to do better next time (Uzbek), at most 3 — only real gaps" },
     betterLines: {
       type: "array",
-      maxItems: 3,
-      description: "Key moments: what the operator actually said, and a clearly better line per the standard. Only where it matters",
+      description: "Key moments, at most 3: what the operator actually said, and a clearly better line per the standard. Only where it matters",
       items: { type: "object", additionalProperties: false, required: ["said", "better"], properties: { said: { type: "string" }, better: { type: "string" } } },
     },
   },
 };
+
+// Was the caller lost — and through us? Asked of Claude Sonnet on its own
+// (2026-10-28): Haiku flipped on it (the same call came back "lost through
+// the operator" and "not lost"), and a red «Mijoz yoʻqotildi» goes to the
+// boss. About 1¢ a call; only new callers who weren't booked are asked.
+const LOST_MODEL = "claude-sonnet-5-5";
+const LOST_CAUSES = ["late_callback", "operator", "client", "unknown"];
+const LOST_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["lost", "cause", "quote", "why"],
+  properties: {
+    lost: { type: "boolean" },
+    cause: { type: "string", enum: ["none", ...LOST_CAUSES] },
+    quote: { type: "string" },
+    why: { type: "string" },
+  },
+};
+const LOST_SYSTEM = `You check one thing in a law firm call-center phone call: was the caller really lost to the firm in this call, and through whom.
+
+The transcript is automatic Uzbek speech recognition, so words can be misheard: «Boʻldi» mostly means "OK / enough" («Boʻldi, telefon qilaman» = OK, I'll call), «bitta» mostly means "one" (sometimes a mishearing of «bitdi» = settled). "Operator" lines are the firm's operator, "Mijoz" lines the caller. You may also get the number's history before the call.
+
+Lost = the caller's own words in this call show they are gone: the matter is already settled, they found or chose another lawyer, they no longer need the firm, or they plainly refuse. NOT lost: will think, will call back, asks to be written to, takes the firm's number or card, agrees to pay or come, haggles but keeps talking. When in doubt: not lost.
+
+Cause, only when lost:
+- late_callback: they had called before, weren't called back in time (the history says "kech"), and that is why they are gone.
+- operator: the operator clearly broke the firm's standard (rude, didn't listen, wrong or no information, no time offered, cut the call short) and that lost them.
+- client: their own reasons while the operator did the job — the price, not wanting a paid consultation or the firm's way of working, found free help, distance, changed mind. The firm's prices and paid consultation are its rules, not the operator's fault.
+- unknown.
+
+Answer in JSON. quote: the caller's own words that show it (empty when not lost). why: one short Uzbek sentence.`;
+
+// Sonnet's answer, made safe: lost only with the caller's words to show it,
+// and never a booked caller.
+function lostVerdict(v, outcome) {
+  const quote = uz(v?.quote).trim().slice(0, 300);
+  if (v?.lost !== true || outcome === "booked" || !quote) return { lost: false, lostCause: null };
+  return { lost: true, lostCause: LOST_CAUSES.includes(v.cause) ? v.cause : "unknown", lostQuote: quote, lostWhy: uz(v.why).trim().slice(0, 300) };
+}
+
+// -> { verdict, costUsd }; verdict null when Sonnet didn't answer (then the
+// caller isn't marked lost — no alert on a guess).
+async function askLost(claude, messages) {
+  try {
+    const response = await claude.create(
+      { model: LOST_MODEL, max_tokens: 4000, system: LOST_SYSTEM, messages, output_config: { effort: "low", format: { type: "json_schema", schema: LOST_SCHEMA } } },
+      { feature: "callReview" }
+    );
+    return { verdict: claude.jsonOf(response), costUsd: claude.costOf(response.model || LOST_MODEL, response.usage) };
+  } catch (err) {
+    console.error("[call-review] the lost-caller check failed:", err.message);
+    return { verdict: null, costUsd: 0 };
+  }
+}
 
 const SYSTEM = (rules, lessons) => `You review a law firm call-center operator's phone call, the way a demanding but kind head of customer service coaches a junior — the bar is high, so the operator grows.
 
@@ -153,7 +195,6 @@ Decide the kind of call first:
 - not_relevant: a wrong number, an ad, a personal call, a colleague or a test call, or a transcript too garbled to tell what the call was about — it is not scored; still fill the fields briefly.
 Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they clearly happened, quoting the operator; when in doubt, it is not a gross error — leave the list empty. Recommending a consultation with the firm's lawyer is the operator's job, never "legal advice". Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
 Advice only where it's earned: "improve" and "betterLines" are for real gaps; never suggest a line that isn't clearly better than what was said. Quote "said" from the transcript.
-Mark a caller «lost» only when their own words show it (quote them); a caller who hesitates but takes the firm's number, card or a time is not lost. The firm's prices and its paid consultation are the firm's rules: a caller who won't pay for them is lost for their own reasons (client), not through the operator.
 Don't decide what should happen with the client next, and don't give legal opinions yourself.${lessons ? `
 
 The firm checked earlier reviews and corrected these — learn from them and judge alike:
@@ -209,20 +250,11 @@ function clean(r) {
     .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
     .map((g) => `${GROSS_LABELS[g.key]}: «${String(g.quote).trim().slice(0, 200)}»`);
   const sum = criteria.reduce((s, c) => s + c.points, 0);
-  const outcome = OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked";
-  // Lost only with the caller's own words to show it, and never a booked
-  // caller (2026-10-28: «Boʻldi, men telefon qilib oʻtaman» — "OK, I'll
-  // call" — from a caller who then took the card number read as lost).
-  const lostQuote = uz(r?.lostQuote).trim().slice(0, 300);
-  const lost = r?.lost === true && outcome !== "booked" && Boolean(lostQuote);
   return {
     kind: KINDS.includes(r?.kind) ? r.kind : "lead",
     topic: uz(r?.topic).slice(0, 120),
-    outcome,
+    outcome: OUTCOMES.includes(r?.outcome) ? r.outcome : "not_booked",
     about: uz(r?.about).slice(0, 400),
-    lost,
-    lostCause: lost && ["late_callback", "operator", "client", "unknown"].includes(r?.lostCause) ? r.lostCause : null,
-    ...(lost ? { lostQuote } : {}),
     criteria,
     grossErrors,
     good: list(r?.good, 3),
@@ -338,12 +370,12 @@ async function reviewCall(callLogId) {
         content: `${history.text}Qoʻngʻiroq: ${call.callType === "outgoing" ? "operator qoʻngʻiroq qildi" : "mijoz qoʻngʻiroq qildi"}, ${clock(call.durationSeconds)}. Operator: ${call.employee.name}.${call.durationSeconds < MIN_TALK_SEC ? " Qisqa qoʻngʻiroq: asosiysi — «about» (nima istadi, qanday tugadi); baho qoʻyilmaydi." : ""}\n\n${transcriptText(segments)}`,
       },
     ],
-    tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA }],
+    tools: [{ name: "review", description: "Record the review of this call.", input_schema: SCHEMA, strict: true }],
     tool_choice: { type: "tool", name: "review" },
   };
   try {
-    // A second try when the nine criteria didn't all come back; the fuller
-    // answer is kept.
+    // A second try when the nine criteria still didn't all come back; the
+    // fuller answer is kept.
     let r = null;
     let response = null;
     let costUsd = 0;
@@ -357,6 +389,12 @@ async function reviewCall(callLogId) {
     }
     if (!r) throw new Error("no review in the answer");
     const { score, about, missing, ...details } = r;
+    // Lost or not: Sonnet's call, for new callers who weren't booked.
+    if (details.kind === "lead" && details.outcome !== "booked") {
+      const check = await askLost(claude, request.messages);
+      costUsd += check.costUsd;
+      Object.assign(details, lostVerdict(check.verdict, details.outcome));
+    } else Object.assign(details, lostVerdict(null, details.outcome));
     // Not a client call (a colleague, a test, a wrong number) or text too
     // garbled to judge: kept, but not scored — no number to the operator
     // and nothing toward their stars (2026-10-24: a test call got 86).
@@ -466,4 +504,4 @@ async function setFeedback(callLogId, user, { correct, note }) {
   });
 }
 
-module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, MIN_TEXT_SEC, reviewSettings, transcriptText, clean, reviewable, reviewCall, tick, setFeedback, lessons };
+module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, MIN_TEXT_SEC, reviewSettings, transcriptText, clean, lostVerdict, reviewable, reviewCall, tick, setFeedback, lessons };
