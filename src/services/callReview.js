@@ -78,7 +78,7 @@ const LESSONS = 10;
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["kind", "topic", "outcome", "about", "criteria", "grossErrors", "good", "improve", "betterLines"],
+  required: ["kind", "topic", "outcome", "about", "criteria", "good", "improve", "betterLines"],
   properties: {
     kind: {
       type: "string",
@@ -98,24 +98,6 @@ const SCHEMA = {
         properties: { key: { type: "string", enum: CRITERIA }, points: { type: "integer" }, note: { type: "string" } },
       },
     },
-    grossErrors: {
-      type: "array",
-      description: "Only gross errors that really happened in this call (−20 each, at most 5), each with the operator's words that show it. An empty list when there were none — never list an absence",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "quote"],
-        properties: {
-          key: {
-            type: "string",
-            enum: GROSS,
-            description:
-              "legal_advice = the operator says what the law says or what the client should do legally or will get («borishingiz shart emas», «sizga 3 yil beriladi», «prokuraturaga ariza yozing»); recommending to see the firm's lawyer or a consultation is NOT this — it is the operator's job. promised_result = «yutamiz», «100 foiz», «pulingizni qaytaramiz». made_up_deadline_or_discount = a discount or deadline that isn't real («faqat bugun 50% chegirma»); the firm's own prices, 450 000 and 600 000 soʻm, are never this. rude = insulting, mocking or shouting at the client. case_info_to_existing_client = telling a client in work about their case instead of passing them to their coordinator",
-          },
-          quote: { type: "string", description: "What the operator said" },
-        },
-      },
-    },
     good: { type: "array", items: { type: "string" }, description: "What the operator did well (Uzbek), at most 3" },
     improve: { type: "array", items: { type: "string" }, description: "The most important things to do better next time (Uzbek), at most 3 — only real gaps" },
     betterLines: {
@@ -126,36 +108,51 @@ const SCHEMA = {
   },
 };
 
-// Was the caller lost — and through us? Asked of Claude Sonnet on its own
-// (2026-10-28): Haiku flipped on it (the same call came back "lost through
-// the operator" and "not lost"), and a red «Mijoz yoʻqotildi» goes to the
-// boss. About 1¢ a call; only new callers who weren't booked are asked.
-const LOST_MODEL = "claude-sonnet-5-5";
+// The two things that hurt an operator most — a lost caller (a red
+// «Mijoz yoʻqotildi» to the boss) and gross errors (−20 each) — are Claude
+// Sonnet's call, on every reviewed call (2026-10-28): Haiku flipped on the
+// same call ("lost through the operator" / "not lost"), called a 16-second
+// "ishim bitdi" not relevant, and quoted a caller's words as the operator's
+// gross error. About 1¢ a call.
+const CHECK_MODEL = "claude-sonnet-5-5";
 const LOST_CAUSES = ["late_callback", "operator", "client", "unknown"];
-const LOST_SCHEMA = {
+const CHECK_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["lost", "cause", "quote", "why"],
+  required: ["lost", "cause", "quote", "why", "grossErrors"],
   properties: {
     lost: { type: "boolean" },
     cause: { type: "string", enum: ["none", ...LOST_CAUSES] },
     quote: { type: "string" },
     why: { type: "string" },
+    grossErrors: {
+      type: "array",
+      items: { type: "object", additionalProperties: false, required: ["key", "quote"], properties: { key: { type: "string", enum: GROSS }, quote: { type: "string" } } },
+    },
   },
 };
-const LOST_SYSTEM = `You check one thing in a law firm call-center phone call: was the caller really lost to the firm in this call, and through whom.
+const CHECK_SYSTEM = `You check two things in a law firm call-center phone call: was the caller really lost to the firm in this call (and through whom), and did the operator make a gross error.
 
 The transcript is automatic Uzbek speech recognition, so words can be misheard: «Boʻldi» mostly means "OK / enough" («Boʻldi, telefon qilaman» = OK, I'll call), «bitta» mostly means "one" (sometimes a mishearing of «bitdi» = settled). "Operator" lines are the firm's operator, "Mijoz" lines the caller. You may also get the number's history before the call.
 
-Lost = the caller's own words in this call show they are gone: the matter is already settled, they found or chose another lawyer, they no longer need the firm, or they plainly refuse. NOT lost: will think, will call back, asks to be written to, takes the firm's number or card, agrees to pay or come, haggles but keeps talking. When in doubt: not lost.
+1. Lost = the caller's own words in this call show they are gone: the matter is already settled, they found or chose another lawyer, they no longer need the firm, or they plainly refuse. NOT lost: will think, will call back, asks to be written to, takes the firm's number or card, agrees to pay or come, haggles but keeps talking. When in doubt: not lost.
 
 Cause, only when lost:
 - late_callback: they had called before, weren't called back in time (the history says "kech"), and that is why they are gone.
 - operator: the operator clearly broke the firm's standard (rude, didn't listen, wrong or no information, no time offered, cut the call short) and that lost them.
 - client: their own reasons while the operator did the job — the price, not wanting a paid consultation or the firm's way of working, found free help, distance, changed mind. The firm's prices and paid consultation are its rules, not the operator's fault.
 - unknown.
+quote: the caller's own words that show it (empty when not lost). why: one short Uzbek sentence.
 
-Answer in JSON. quote: the caller's own words that show it (empty when not lost). why: one short Uzbek sentence.`;
+2. Gross errors — only ones that clearly happened; usually there are none, and when in doubt there are none. Each with the operator's own words, copied from an «Operator» line:
+- legal_advice: the operator says what the law says, or what the client should do legally or will get («borishingiz shart emas», «sizga 3 yil beriladi», «prokuraturaga ariza yozing»).
+- promised_result: «yutamiz», «100 foiz», «pulingizni qaytaramiz».
+- made_up_deadline_or_discount: a discount or deadline that isn't real («faqat bugun 50% chegirma»); the firm's own prices, 450 000 and 600 000 soʻm, are never this.
+- rude: insulting, mocking or shouting at the client.
+- case_info_to_existing_client: telling a client in work about their case instead of passing them to their coordinator.
+Recommending a consultation with the firm's lawyer, or explaining the firm's prices and how it works, is never a gross error — it is the operator's job. A caller's words are never the operator's error.
+
+Answer in JSON.`;
 
 // Sonnet's answer, made safe: lost only with the caller's words to show it,
 // and never a booked caller.
@@ -165,17 +162,37 @@ function lostVerdict(v, outcome) {
   return { lost: true, lostCause: LOST_CAUSES.includes(v.cause) ? v.cause : "unknown", lostQuote: quote, lostWhy: uz(v.why).trim().slice(0, 300) };
 }
 
-// -> { verdict, costUsd }; verdict null when Sonnet didn't answer (then the
-// caller isn't marked lost — no alert on a guess).
-async function askLost(claude, messages) {
+// Words only: lower case, no oʻ/gʻ marks or punctuation.
+const plain = (text) =>
+  uz(text)
+    .toLowerCase()
+    .replace(/[ʻʼ'`‘’]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+// Whether the operator said these words: found in the operator's lines (or
+// a line that couldn't be split), or most of its words are.
+function operatorSaid(quote, segments) {
+  const q = plain(quote);
+  if (!q) return false;
+  const said = plain((segments || []).filter((s) => s.who !== "client").map((s) => s.text).join(" "));
+  if (said.includes(q)) return true;
+  const have = new Set(said.split(" "));
+  const words = q.split(" ").filter((w) => w.length >= 3);
+  return words.length > 0 && words.filter((w) => have.has(w)).length / words.length >= 0.7;
+}
+
+// -> { verdict, costUsd }; verdict null when Sonnet didn't answer (then no
+// lost caller and no gross errors — nothing on a guess).
+async function askCheck(claude, messages) {
   try {
     const response = await claude.create(
-      { model: LOST_MODEL, max_tokens: 4000, system: LOST_SYSTEM, messages, output_config: { effort: "low", format: { type: "json_schema", schema: LOST_SCHEMA } } },
+      { model: CHECK_MODEL, max_tokens: 4000, system: CHECK_SYSTEM, messages, output_config: { effort: "low", format: { type: "json_schema", schema: CHECK_SCHEMA } } },
       { feature: "callReview" }
     );
-    return { verdict: claude.jsonOf(response), costUsd: claude.costOf(response.model || LOST_MODEL, response.usage) };
+    return { verdict: claude.jsonOf(response), costUsd: claude.costOf(response.model || CHECK_MODEL, response.usage) };
   } catch (err) {
-    console.error("[call-review] the lost-caller check failed:", err.message);
+    console.error("[call-review] the lost-caller and gross-error check failed:", err.message);
     return { verdict: null, costUsd: 0 };
   }
 }
@@ -193,7 +210,7 @@ Decide the kind of call first:
 - lead: a new person with a legal question — judge all nine criteria by the standard.
 - existing: someone the firm already works with — they aren't sold to: give full points for criteria that don't apply (listening and questions still count as relevant to helping them; "routing" is whether the operator connected them to their coordinator instead of discussing the case).
 - not_relevant: a wrong number, an ad, a personal call, a colleague or a test call, or a transcript too garbled to tell what the call was about — it is not scored; still fill the fields briefly.
-Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). List gross errors only if they clearly happened, quoting the operator; when in doubt, it is not a gross error — leave the list empty. Recommending a consultation with the firm's lawyer is the operator's job, never "legal advice". Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
+Give each criterion's points honestly (0 up to its maximum: greeting 10, routing 5, listening 15, questions 15, summary 10, offer 10, priceTime 15, closing 10, manner 10). Misheard words (the transcript is automatic) are never the operator's mistake — don't take points for unclear wording.
 Advice only where it's earned: "improve" and "betterLines" are for real gaps; never suggest a line that isn't clearly better than what was said. Quote "said" from the transcript.
 Don't decide what should happen with the client next, and don't give legal opinions yourself.${lessons ? `
 
@@ -238,6 +255,14 @@ function listOf(v) {
   }
 }
 
+// Gross errors as shown: "label: «the operator's words»", each kind once.
+function grossLines(list) {
+  const seen = new Set();
+  return list
+    .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
+    .map((g) => `${GROSS_LABELS[g.key]}: «${String(g.quote).trim().slice(0, 200)}»`);
+}
+
 function clean(r) {
   const byKey = new Map(listOf(r?.criteria).map((c) => [c?.key, c]));
   const criteria = CRITERIA.map((key) => {
@@ -245,10 +270,7 @@ function clean(r) {
     return { key, points: Math.max(0, Math.min(MAX[key], Math.round(Number(c.points) || 0))), max: MAX[key], note: uz(c.note).slice(0, 400) };
   });
   const list = (v, n) => listOf(v).map((x) => uz(x).trim()).filter(Boolean).slice(0, n);
-  const seen = new Set();
-  const grossErrors = listOf(r?.grossErrors)
-    .filter((g) => GROSS.includes(g?.key) && String(g?.quote || "").trim() && !seen.has(g.key) && seen.add(g.key))
-    .map((g) => `${GROSS_LABELS[g.key]}: «${String(g.quote).trim().slice(0, 200)}»`);
+  const grossErrors = grossLines(listOf(r?.grossErrors));
   const sum = criteria.reduce((s, c) => s + c.points, 0);
   return {
     kind: KINDS.includes(r?.kind) ? r.kind : "lead",
@@ -388,13 +410,17 @@ async function reviewCall(callLogId) {
       if (!r || next.missing < r.missing) [r, response] = [next, res];
     }
     if (!r) throw new Error("no review in the answer");
-    const { score, about, missing, ...details } = r;
-    // Lost or not: Sonnet's call, for new callers who weren't booked.
-    if (details.kind === "lead" && details.outcome !== "booked") {
-      const check = await askLost(claude, request.messages);
-      costUsd += check.costUsd;
-      Object.assign(details, lostVerdict(check.verdict, details.outcome));
-    } else Object.assign(details, lostVerdict(null, details.outcome));
+    const { about, missing, ...details } = r;
+    // Lost or not, and the gross errors: Sonnet's call, on every call. A
+    // gross error counts only with the operator's own words.
+    const check = await askCheck(claude, request.messages);
+    costUsd += check.costUsd;
+    details.grossErrors = grossLines(listOf(check.verdict?.grossErrors).filter((g) => operatorSaid(g?.quote, segments)));
+    Object.assign(details, lostVerdict(check.verdict, details.outcome));
+    // A caller lost to the firm was a would-be client, whatever the review
+    // called the call.
+    if (details.lost && details.kind === "not_relevant") Object.assign(details, { kind: "lead", outcome: "not_booked" });
+    const score = Math.max(0, Math.min(100, details.criteria.reduce((s, c) => s + c.points, 0) - 20 * details.grossErrors.length));
     // Not a client call (a colleague, a test, a wrong number) or text too
     // garbled to judge: kept, but not scored — no number to the operator
     // and nothing toward their stars (2026-10-24: a test call got 86).
@@ -504,4 +530,4 @@ async function setFeedback(callLogId, user, { correct, note }) {
   });
 }
 
-module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, MIN_TEXT_SEC, reviewSettings, transcriptText, clean, lostVerdict, reviewable, reviewCall, tick, setFeedback, lessons };
+module.exports = { GROSS, DEFAULT_RULES, CRITERIA, LABELS, MAX, SCHEMA, MIN_TALK_SEC, MIN_TEXT_SEC, reviewSettings, transcriptText, clean, lostVerdict, operatorSaid, reviewable, reviewCall, tick, setFeedback, lessons };

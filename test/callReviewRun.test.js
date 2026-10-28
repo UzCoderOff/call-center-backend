@@ -6,11 +6,11 @@ const notify = require("../src/services/telegram/notify");
 const { reviewCall, CRITERIA } = require("../src/services/callReview");
 
 // reviewCall end to end, with a stand-in database and Claude: what is saved,
-// who is told. Haiku's review comes as a tool call; Sonnet's "lost?" check
-// as JSON text.
+// who is told. Haiku's review comes as a tool call; Sonnet's check (lost?
+// gross errors?) as JSON text.
 const CRIT = CRITERIA.map((key) => ({ key, points: 5, note: "ok" }));
-const answer = (extra = {}) => ({ kind: "lead", topic: "Kripto", outcome: "not_booked", about: "Maslahat soʻradi", criteria: CRIT, grossErrors: [], good: [], improve: [], betterLines: [], ...extra });
-const NOT_LOST = { lost: false, cause: "none", quote: "", why: "Telefon qilishini aytdi" };
+const answer = (extra = {}) => ({ kind: "lead", topic: "Kripto", outcome: "not_booked", about: "Maslahat soʻradi", criteria: CRIT, good: [], improve: [], betterLines: [], ...extra });
+const NOT_LOST = { lost: false, cause: "none", quote: "", why: "Telefon qilishini aytdi", grossErrors: [] };
 
 function setup(answers, verdict = NOT_LOST) {
   const saved = [];
@@ -28,7 +28,14 @@ function setup(answers, verdict = NOT_LOST) {
     phoneNumber: "+998901234567",
     employeeId: 2,
     employee: { name: "Operator", job: "call_center", extraJobs: "" },
-    transcript: { status: "done", segments: [{ who: "staff", start: 0, end: 2, text: "Assalomu alaykum" }, { who: "client", start: 2, end: 5, text: "Boʻldi, men telefon qilib oʻtaman" }] },
+    transcript: {
+      status: "done",
+      segments: [
+        { who: "staff", start: 0, end: 2, text: "Assalomu alaykum" },
+        { who: "client", start: 2, end: 5, text: "Boʻldi, men telefon qilib oʻtaman" },
+        { who: "staff", start: 5, end: 8, text: "Borishingiz shart emas, sizga hech narsa boʻlmaydi" },
+      ],
+    },
   });
   prisma.callAnalysis.findMany = async () => [];
   prisma.callAnalysis.upsert = async () => ({});
@@ -111,9 +118,30 @@ test("lost through the operator, with the caller's words: −20 and the managers
   assert.match(s.alerts[0], /Mijoz: «Boshqa advokat topdim»/);
 });
 
-test("a booked caller: Sonnet isn't asked", async () => {
-  const s = setup([answer({ outcome: "booked" })]);
+test("a booked caller is never lost", async () => {
+  const s = setup([answer({ outcome: "booked" })], { lost: true, cause: "operator", quote: "Boshqa advokat topdim", why: "", grossErrors: [] });
   await reviewCall(7);
-  assert.equal(s.requests.length, 1);
+  assert.equal(s.requests.length, 2);
   assert.equal(s.saved[0].details.lost, false);
+  assert.equal(s.alerts.length, 0);
+});
+
+test("a call the review called not relevant is a lead when Sonnet finds the caller lost", async () => {
+  const s = setup([answer({ kind: "not_relevant", outcome: "not_client" })], { lost: true, cause: "client", quote: "Ishim bitdi", why: "", grossErrors: [] });
+  await reviewCall(7);
+  assert.equal(s.saved[0].details.kind, "lead");
+  assert.equal(s.saved[0].details.outcome, "not_booked");
+  assert.equal(s.saved[0].details.lostCause, "client");
+  assert.equal(s.alerts.length, 0);
+});
+
+test("gross errors come from Sonnet, and only with the operator's own words (−20 each)", async () => {
+  const callerWords = setup([answer({ grossErrors: [{ key: "rude", quote: "Assalomu alaykum" }] })], { ...NOT_LOST, grossErrors: [{ key: "made_up_deadline_or_discount", quote: "Bo'ldi, men telefon qilib o'taman" }] });
+  await reviewCall(7);
+  assert.deepEqual(callerWords.saved[0].details.grossErrors, []);
+  assert.equal(callerWords.saved[0].score, 45);
+  const operatorWords = setup([answer()], { ...NOT_LOST, grossErrors: [{ key: "legal_advice", quote: "borishingiz shart emas" }] });
+  await reviewCall(7);
+  assert.deepEqual(operatorWords.saved[0].details.grossErrors, ["Yuridik maslahat yoki xulosa berdi: «borishingiz shart emas»"]);
+  assert.equal(operatorWords.saved[0].score, 25);
 });

@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { clean, lostVerdict, transcriptText, reviewable, CRITERIA, MAX } = require("../src/services/callReview");
+const { clean, lostVerdict, operatorSaid, transcriptText, reviewable, CRITERIA, MAX } = require("../src/services/callReview");
 const { cleanSegments } = require("../src/services/pbx/transcribe");
 
 test("the review's points stay within each criterion and the total is out of 100", () => {
@@ -68,6 +68,19 @@ test("a caller is lost only with their own words to show it, and never when book
     lostWhy: "Kech qaytarildi",
   });
   assert.equal(lostVerdict({ lost: true, cause: "none", quote: said, why: "" }, "not_booked").lostCause, "unknown");
+});
+
+test("a gross error counts only with words the operator said", () => {
+  const segments = [
+    { who: "staff", text: "Ishingizni olib boramiz, lekin tartib shunaqada." },
+    { who: "client", text: "Hozir konsultatsiya oʻzgarishlaringizga besh yuz olti ming bormi?" },
+    { who: "staff", text: "Onlayn konsultatsiya toʻrt yuz ming soʻm, oflayn olti yuz ming soʻm boʻladi. Hozirda advokatingiz bormi?" },
+  ];
+  assert.equal(operatorSaid("ishingizni olib boramiz", segments), true);
+  assert.equal(operatorSaid("Ishingizni olib boramiz — tartib shunaqa", segments), true);
+  // The caller's words (2026-10-28, call 2161), and nothing at all.
+  assert.equal(operatorSaid("Hozir konsultatsiya o'zgarishlaringizga besh yuz olti ming bormi?", segments), false);
+  assert.equal(operatorSaid("", segments), false);
 });
 
 test("the transcript reads as turns: who said what, when", () => {
