@@ -24,6 +24,13 @@ const state = require("./state");
 const DIR = () => path.join(env.storageRoot, "transcribe");
 const SIDES = ["client", "staff"];
 const STUCK_MS = 60 * 60 * 1000;
+// A call the transcriber got stuck on — it went past its time or memory limit,
+// or died on it and never answered — gets one more try, then it's given up on.
+// A "poison" call used to come back every hour for ever (2026-10-28: a
+// 14-second call took the transcriber to 3 GB and froze the server). The mark
+// rides in errorMessage until the text is in.
+const STUCK_ONCE = "stuck once, trying again";
+const GAVE_UP = "stuck twice, given up";
 
 // A side as Asterisk wrote it: 16 kHz (.wav16, since HD voice) or, from
 // before, 8 kHz (.wav). Either is a plain WAV file.
@@ -91,9 +98,13 @@ async function filesFor(callLogId) {
 }
 
 // The next call to turn into text (newest first, so today's calls come
-// back soonest). Work stuck "processing" for an hour goes back in the queue.
+// back soonest). Work stuck "processing" for an hour goes back in the queue —
+// once: stuck a second time, it's given up on.
 async function next() {
-  await prisma.transcript.updateMany({ where: { status: "processing", updatedAt: { lt: new Date(Date.now() - STUCK_MS) } }, data: { status: "pending" } });
+  const stuck = { status: "processing", updatedAt: { lt: new Date(Date.now() - STUCK_MS) } };
+  const why = "the transcriber never answered";
+  await prisma.transcript.updateMany({ where: { ...stuck, errorMessage: { startsWith: STUCK_ONCE } }, data: { status: "failed", errorMessage: `${GAVE_UP}: ${why}` } });
+  await prisma.transcript.updateMany({ where: stuck, data: { status: "pending", errorMessage: `${STUCK_ONCE}: ${why}` } });
   for (let tries = 0; tries < 5; tries++) {
     const job = await prisma.transcript.findFirst({ where: { status: "pending" }, orderBy: { createdAt: "desc" }, select: { callLogId: true } });
     if (!job) return {};
@@ -144,8 +155,20 @@ async function done({ id, language, segments }) {
   return "ok";
 }
 
-async function failed({ id, error }) {
-  await prisma.transcript.update({ where: { callLogId: Number(id) }, data: { status: "failed", errorMessage: String(error || "failed").slice(0, 300) } });
+// The transcriber couldn't do a call. "stuck": it went past the call's time or
+// memory limit — one more try, like a call stuck "processing".
+async function failed({ id, error, stuck }) {
+  const callLogId = Number(id);
+  let why = String(error || "failed").slice(0, 250);
+  if (stuck) {
+    const row = await prisma.transcript.findUnique({ where: { callLogId }, select: { errorMessage: true } });
+    if (!row?.errorMessage?.startsWith(STUCK_ONCE)) {
+      await prisma.transcript.update({ where: { callLogId }, data: { status: "pending", errorMessage: `${STUCK_ONCE}: ${why}` } });
+      return "ok";
+    }
+    why = `${GAVE_UP}: ${why}`;
+  }
+  await prisma.transcript.update({ where: { callLogId }, data: { status: "failed", errorMessage: why } });
   return "ok";
 }
 

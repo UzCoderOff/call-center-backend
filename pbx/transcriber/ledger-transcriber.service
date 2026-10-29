@@ -16,8 +16,10 @@ ExecStart=/home/ubuntu/uz-asr-server/.venv/bin/python /home/ubuntu/uz-asr-server
 Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
-# Never more than 2 GB: stopped rather than squeezing Ledger or the calls.
-MemoryMax=3G
+# Never more than 2 GB: stopped rather than squeezing Ledger or the calls
+# (at 3G a runaway call froze the whole server, 2026-10-26..28).
+MemoryHigh=1800M
+MemoryMax=2G
 MemorySwapMax=0
 Restart=always
 RestartSec=30
