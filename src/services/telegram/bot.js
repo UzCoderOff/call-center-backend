@@ -174,6 +174,22 @@ async function onCallback(query) {
     await api.enqueue("editMessageText", { chat_id: chatId, message_id: query.message.message_id, text: text.slice(0, 4000) }).catch(() => {});
     return answer("Bajarildi");
   }
+  // "Sud.uz: bu bizning mijozmi?" — ✅ Ha / Yoʻq (services/courts/sync.js).
+  const court = data.match(/^court:(yes|no):(\d+)$/);
+  if (court) {
+    const sync = require("../courts/sync");
+    let result;
+    try {
+      result = await sync.answer(Number(court[2]), user, court[1] === "yes");
+    } catch (err) {
+      if (err instanceof sync.FindError) return answer(err.status === 403 ? "Bu ish sizniki emas" : err.status === 409 ? "Ish yopilgan — kuzatilmaydi" : "Topilmadi");
+      throw err;
+    }
+    const said = { ours: "✅ Ha, bizniki — Ledger kuzatadi", not_ours: "Yoʻq, bizniki emas", closed: "Boshqa raqam tasdiqlangan" }[result.state] || "";
+    const text = `${query.message.text || ""}\n\n${result.already ? `Javob berilgan: ${said}` : said}`;
+    await api.enqueue("editMessageText", { chat_id: chatId, message_id: query.message.message_id, text: text.slice(0, 4000) }).catch(() => {});
+    return answer(result.already ? "Allaqachon javob berilgan" : result.state === "ours" ? "Saqlandi" : "Boʻldi");
+  }
   if (data === "unlink:yes") {
     await answer();
     return disconnect(chatId, user);

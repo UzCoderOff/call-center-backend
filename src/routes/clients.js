@@ -20,6 +20,8 @@ const { linkConsultationFees } = require("../services/consultationFee");
 const { scheduleOf, normalizeSchedule } = require("../services/installments");
 const { cashHolderId } = require("../services/cash");
 const entries = require("../services/caseEntries");
+const courtDirectory = require("../services/courts/directory");
+const courtSync = require("../services/courts/sync");
 const env = require("../config/env");
 
 // The clients database (replaces the firm's Excel CRM).
@@ -650,6 +652,8 @@ const CASE_INCLUDE = {
   installments: true,
   stages: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
   dates: { where: { deletedAt: null }, orderBy: [{ date: "asc" }, { time: "asc" }, { id: "asc" }], include: { createdBy: PERSON } },
+  // "Is this our client?" from sud.uz (services/courts/sync.js), still unanswered.
+  courtFinds: { where: { state: "asking" }, orderBy: [{ date: "asc" }, { id: "asc" }] },
   // Its consultations' summaries ("suhbat yakuni", services/consultSummary.js).
   consultations: {
     where: { summaryAt: { not: null } },
@@ -790,8 +794,18 @@ clients.get("/:id", async (req, res, next) => {
     const shownLink = (other) => (visibleLinked.has(other.id) ? linkedSummary(other) : { id: null, name: null, phone: null, status: null, archived: false, restricted: true });
 
     const caseOut = (k) => {
-      const base = moneyIds.has(k.id) ? withMoney(k) : caseWithoutMoney(k);
-      return { ...base, extraLawyers: k.extraLawyers.map((x) => ({ id: x.user.id, name: displayName(x.user) })), permissions: casePermissions(req.user, roles.get(k.id), k) };
+      const { courtFinds, ...base } = moneyIds.has(k.id) ? withMoney(k) : caseWithoutMoney(k);
+      const permissions = casePermissions(req.user, roles.get(k.id), k);
+      const court = courtDirectory.byKey(k.courtKey);
+      return {
+        ...base,
+        extraLawyers: k.extraLawyers.map((x) => ({ id: x.user.id, name: displayName(x.user) })),
+        // The court on sud.uz it's followed in, and "is this our client?"
+        // for the people who answer it.
+        sudCourt: court ? courtDirectory.publicCourt(court) : null,
+        courtFinds: permissions.canDates && k.status === "contract" ? (courtFinds || []).map(courtSync.publicFind) : [],
+        permissions,
+      };
     };
     // Payments: consultation fees for everyone who sees the client; the rest
     // only on cases whose money they see (Moliya: all, unattached ones too).
@@ -1005,6 +1019,7 @@ clients.post("/:id/cases", async (req, res, next) => {
     await requireClientAccess(req.user, clientId);
     const b = caseInput(req, req.body);
     const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId, req)) || {}) };
+    if (b.courtKey !== undefined) Object.assign(data, courtFields(b.courtKey, b.court));
     const operatorId = (await operatorFor(req, b.operatorId)) ?? req.user.employee?.id ?? null;
     const created = await prisma.$transaction(async (tx) => {
       const c = await tx.clientCase.create({ data: { ...data, clientId, operatorId } });
@@ -1030,8 +1045,8 @@ cases.use(requireAuth, gate);
 //   operator     the consultation: what it's about, its status up to the
 //                contract, its dates, themselves as operator, its lawyer
 const CASE_FIELDS = {
-  lawyer: ["status", "legalStage", "number", "matter", "details", "court", "closedDate", "lostReason", "lostNote"],
-  coordinator: ["number", "court", "legalStage", "details"],
+  lawyer: ["status", "legalStage", "number", "matter", "details", "court", "courtKey", "closedDate", "lostReason", "lostNote"],
+  coordinator: ["number", "court", "courtKey", "legalStage", "details"],
   operator: ["matter", "details", "status", "startDate", "consultationDate", "operatorId", "lawyerId", "lawyer", "number", "lostReason", "lostNote"],
 };
 // An operator moves a consultation along — up to the contract (or "didn't
@@ -1040,6 +1055,16 @@ const OPERATOR_STATUSES = ["consultation", "call_again", "contract", "declined"]
 // Changes shown on the timeline field by field (money is kept out of it;
 // long text shortened).
 const TRACKED = ["matter", "details", "number", "court", "startDate", "consultationDate", "contractDate", "closedDate"];
+
+// The court on sud.uz picked for a case (services/courts): its name is the
+// case's court too when it has none and none is sent with it (a court typed
+// in — the appeal court it's in now — stays). null clears it.
+function courtFields(key, typed, current = {}) {
+  if (key === null || key === "") return { courtKey: null };
+  const court = courtDirectory.byKey(String(key));
+  if (!court) throw badRequest("unknown court");
+  return { courtKey: court.key, ...(typed === undefined && !current.court ? { court: court.nameLatin } : {}) };
+}
 const shortened = (v) => (typeof v === "string" && v.length > 120 ? `${v.slice(0, 117)}…` : v);
 
 async function employeeName(tx, id) {
@@ -1081,6 +1106,7 @@ cases.patch("/:id", async (req, res, next) => {
     }
     const { legalStage, ...rest } = b;
     const data = cl.normalizeCase(rest, current, today());
+    if (b.courtKey !== undefined) Object.assign(data, courtFields(b.courtKey, b.court, current));
     // A consultation that didn't continue: say why (it's what shows where
     // clients are lost).
     if (data.status === "declined" && current.status !== "declined" && !data.lostReason && !current.lostReason) throw badRequest("lost reason required");
@@ -1148,6 +1174,8 @@ cases.patch("/:id", async (req, res, next) => {
     if (data.coordinatorId && data.coordinatorId !== current.coordinatorId) bus.emit("case.assigned", { caseId: id, role: "coordinator", byUserId: req.user.id });
     if (data.lawyerId && data.lawyerId !== current.lawyerId) bus.emit("case.assigned", { caseId: id, role: "lawyer", byUserId: req.user.id });
     for (const l of added) bus.emit("case.assigned", { caseId: id, role: "extra_lawyer", userId: l.id, byUserId: req.user.id });
+    // A new number or court: its hearings looked for now, not tonight.
+    if ((data.number !== undefined && data.number !== current.number) || (data.courtKey !== undefined && data.courtKey !== current.courtKey)) courtSync.checkSoon(id);
     res.json(canSeeCaseMoney(req.user, updated) ? updated : caseWithoutMoney(updated));
   } catch (err) {
     sendError(err, res, next);

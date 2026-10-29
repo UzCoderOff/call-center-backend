@@ -15,6 +15,8 @@ const { firmNow } = require("../lib/firmTime");
 //   every 10 minutes covers for lawyers who are away begin and end on their
 //                    days (services/covers.js); lost callers' second chance
 //                    (services/callOutcomes.js)
+//   every 15 minutes court hearings from sud.uz, at night and midday
+//                    (services/courts/sync.js)
 // Each run waits for the previous one; an error is logged, never thrown.
 
 const STRIKES_EVERY_MS = 5 * 60 * 1000;
@@ -188,7 +190,25 @@ async function aiReplyTick() {
   }
 }
 
+// Court hearings from sud.uz: the night's run and the midday one
+// (services/courts/sync.js).
+const COURTS_EVERY_MS = 15 * 60 * 1000;
+let courtsRunning = false;
+async function courtsTick() {
+  if (courtsRunning) return;
+  courtsRunning = true;
+  try {
+    await require("./courts/sync").tick();
+  } catch (err) {
+    console.error("[courts] run failed:", err.message);
+  } finally {
+    courtsRunning = false;
+  }
+}
+
 function start() {
+  setTimeout(courtsTick, 5 * 60 * 1000).unref();
+  setInterval(courtsTick, COURTS_EVERY_MS).unref();
   setTimeout(igPollTick, Math.min(20 * 1000, IG_POLL_EVERY_MS)).unref();
   setInterval(igPollTick, IG_POLL_EVERY_MS).unref();
   setInterval(aiReplyTick, AI_REPLY_EVERY_MS).unref();
@@ -210,4 +230,4 @@ function start() {
   setInterval(archiveTick, ARCHIVE_EVERY_MS).unref();
 }
 
-module.exports = { start, igPollTick, aiReplyTick, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick, secondChanceTick };
+module.exports = { start, igPollTick, aiReplyTick, strikesTick, archiveTick, aiTick, newsTick, coversTick, tgReviewTick, callReviewTick, secondChanceTick, courtsTick };

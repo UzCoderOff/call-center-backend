@@ -136,6 +136,7 @@ model User {
   caseOutcomesWritten     CaseDate[]            @relation("CaseDateOutcomeBy")
   callOutcomesSet         CallOutcome[]         @relation("CallOutcomeBy")
   practiceSessions        PracticeSession[]     @relation("PracticeSessionUser")
+  courtFindsAnswered      CourtFind[]           @relation("CourtFindBy")
 }
 
 // A staff member — call-center operator, translator, document clerk, anyone.
@@ -763,6 +764,12 @@ model ClientCase {
   // The investigating body or court handling it now, e.g. "Yunusobod tumani
   // sudi".
   court            String?
+  // The court on sud.uz the case began in ("civil:mulugtfsud",
+  // services/courts): picked, worked out from the case number, or found by
+  // the client's name. Ledger reads that court's hearing lists, and the ones
+  // above it, every night (services/courts/sync.js).
+  courtKey         String?
+  courtFinds       CourtFind[]
   // When it finished (done) or stopped (declined): "YYYY-MM-DD".
   closedDate       String?
   // A consultation that didn't continue ("declined"): why — the price, they
@@ -1211,12 +1218,47 @@ model CaseDate {
   outcomeBy   User?      @relation("CaseDateOutcomeBy", fields: [outcomeById], references: [id], onDelete: SetNull)
   createdById Int?
   createdBy   User?      @relation("CaseDateBy", fields: [createdById], references: [id], onDelete: SetNull)
+  // A hearing on sud.uz's lists (services/courts/sync.js): "court key|case
+  // number" — kept in step with the court (moved, a new time); when it was
+  // last seen there. null for dates only typed in.
+  sudKey      String?
+  sudSeenAt   DateTime?
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   deletedAt   DateTime?
 
   @@index([caseId, date])
   @@index([date])
+}
+
+// A hearing on sud.uz with the client's name, for a case with no number yet
+// (services/courts/sync.js): "Is this our client?" One tap — yes, and the
+// case gets the number and court, and is followed from then on; no, and it's
+// never asked again, and what the list said about the people is wiped.
+model CourtFind {
+  id           Int        @id @default(autoincrement())
+  caseId       Int
+  case         ClientCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  courtKey     String
+  number       String
+  date         String // "YYYY-MM-DD"
+  time         Int? // minutes from midnight
+  judge        String?
+  stage        String? // services/clients.js LEGAL_STAGES
+  instance     String?
+  category     String?
+  // The client's side ("claimant" | "defendant") and both sides as listed.
+  side         String?
+  parties      Json?
+  state        String     @default("asking") // "asking" | "ours" | "not_ours" | "closed"
+  answeredById Int?
+  answeredBy   User?      @relation("CourtFindBy", fields: [answeredById], references: [id], onDelete: SetNull)
+  answeredAt   DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([caseId, number])
+  @@index([state])
 }
 
 // Someone connected to a client — their father, wife, a representative — the

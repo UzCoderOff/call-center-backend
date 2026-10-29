@@ -113,6 +113,8 @@ app.use("/api/client-cases", clientRoutes.cases);
 app.use("/api/client-cases", caseWork.caseItems);
 app.use("/api/client-stages", caseWork.stages);
 app.use("/api/client-dates", caseWork.dates);
+// Hearings from sud.uz: the court picker, "is this our client?".
+app.use("/api/courts", require("./routes/courts"));
 // Connected people, follow-ups and files (some hang off /api/clients/:id).
 clientWork.attach(clientRoutes.clients);
 app.use("/api/client-contacts", clientWork.contacts);

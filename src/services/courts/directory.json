@@ -1,0 +1,5213 @@
+{
+ "builtAt": "2026-10-29",
+ "courts": [
+  {
+   "key": "criminal:15",
+   "type": "criminal",
+   "id": "15",
+   "name": "Олий суд",
+   "region": null,
+   "level": "supreme"
+  },
+  {
+   "key": "criminal:1",
+   "type": "criminal",
+   "id": "1",
+   "name": "Тошкент шаҳар суди",
+   "region": "toshkent",
+   "level": "region"
+  },
+  {
+   "key": "criminal:95",
+   "type": "criminal",
+   "id": "95",
+   "name": "Бектемир туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:78",
+   "type": "criminal",
+   "id": "78",
+   "name": "Мирзо Улуғбек туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:87",
+   "type": "criminal",
+   "id": "87",
+   "name": "Миробод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:93",
+   "type": "criminal",
+   "id": "93",
+   "name": "Олмазор туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:96",
+   "type": "criminal",
+   "id": "96",
+   "name": "Сергели туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:92",
+   "type": "criminal",
+   "id": "92",
+   "name": "Учтепа туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:91",
+   "type": "criminal",
+   "id": "91",
+   "name": "Чилонзор туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:88",
+   "type": "criminal",
+   "id": "88",
+   "name": "Шайхантохур туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:89",
+   "type": "criminal",
+   "id": "89",
+   "name": "Юнусобод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:90",
+   "type": "criminal",
+   "id": "90",
+   "name": "Яккасарой туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:220",
+   "type": "criminal",
+   "id": "220",
+   "name": "Янгиҳаёт туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:94",
+   "type": "criminal",
+   "id": "94",
+   "name": "Яшнобод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "criminal:14",
+   "type": "criminal",
+   "id": "14",
+   "name": "Тошкент вилоят суди",
+   "region": "toshkentvil",
+   "level": "region"
+  },
+  {
+   "key": "criminal:74",
+   "type": "criminal",
+   "id": "74",
+   "name": "Ангрен шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:73",
+   "type": "criminal",
+   "id": "73",
+   "name": "Бекобод туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:72",
+   "type": "criminal",
+   "id": "72",
+   "name": "Бекобод шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:75",
+   "type": "criminal",
+   "id": "75",
+   "name": "Бўка туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:76",
+   "type": "criminal",
+   "id": "76",
+   "name": "Бўстонлиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:71",
+   "type": "criminal",
+   "id": "71",
+   "name": "Зангиота туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:77",
+   "type": "criminal",
+   "id": "77",
+   "name": "Қибрай туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:97",
+   "type": "criminal",
+   "id": "97",
+   "name": "Қуйи Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:213",
+   "type": "criminal",
+   "id": "213",
+   "name": "Нурафшон шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:98",
+   "type": "criminal",
+   "id": "98",
+   "name": "Оққўрғон туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:99",
+   "type": "criminal",
+   "id": "99",
+   "name": "Олмалиқ шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:100",
+   "type": "criminal",
+   "id": "100",
+   "name": "Оҳангарон туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:212",
+   "type": "criminal",
+   "id": "212",
+   "name": "Оҳангарон шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:101",
+   "type": "criminal",
+   "id": "101",
+   "name": "Паркент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:102",
+   "type": "criminal",
+   "id": "102",
+   "name": "Пискент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:214",
+   "type": "criminal",
+   "id": "214",
+   "name": "Тошкент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:103",
+   "type": "criminal",
+   "id": "103",
+   "name": "Ўрта Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:104",
+   "type": "criminal",
+   "id": "104",
+   "name": "Чиноз туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:105",
+   "type": "criminal",
+   "id": "105",
+   "name": "Чирчиқ шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:106",
+   "type": "criminal",
+   "id": "106",
+   "name": "Юқори Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:107",
+   "type": "criminal",
+   "id": "107",
+   "name": "Янгийўл туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:211",
+   "type": "criminal",
+   "id": "211",
+   "name": "Янгийўл шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "criminal:2",
+   "type": "criminal",
+   "id": "2",
+   "name": "Андижон вилоят суди",
+   "region": "andijon",
+   "level": "region"
+  },
+  {
+   "key": "criminal:22",
+   "type": "criminal",
+   "id": "22",
+   "name": "Андижон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:21",
+   "type": "criminal",
+   "id": "21",
+   "name": "Андижон шаҳар суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:23",
+   "type": "criminal",
+   "id": "23",
+   "name": "Асака туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:24",
+   "type": "criminal",
+   "id": "24",
+   "name": "Балиқчи туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:25",
+   "type": "criminal",
+   "id": "25",
+   "name": "Булоқбоши туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:26",
+   "type": "criminal",
+   "id": "26",
+   "name": "Бўстон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:153",
+   "type": "criminal",
+   "id": "153",
+   "name": "Жалақудуқ туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:154",
+   "type": "criminal",
+   "id": "154",
+   "name": "Избоскан туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:155",
+   "type": "criminal",
+   "id": "155",
+   "name": "Қўрғонтепа туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:156",
+   "type": "criminal",
+   "id": "156",
+   "name": "Марҳамат туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:157",
+   "type": "criminal",
+   "id": "157",
+   "name": "Олтинкўл туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:158",
+   "type": "criminal",
+   "id": "158",
+   "name": "Пахтаобод туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:159",
+   "type": "criminal",
+   "id": "159",
+   "name": "Улуғнор туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:160",
+   "type": "criminal",
+   "id": "160",
+   "name": "Хонобод шаҳар суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:161",
+   "type": "criminal",
+   "id": "161",
+   "name": "Хўжаобод туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:162",
+   "type": "criminal",
+   "id": "162",
+   "name": "Шаҳрихон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "criminal:3",
+   "type": "criminal",
+   "id": "3",
+   "name": "Бухоро вилоят суди",
+   "region": "buxoro",
+   "level": "region"
+  },
+  {
+   "key": "criminal:28",
+   "type": "criminal",
+   "id": "28",
+   "name": "Бухоро туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:27",
+   "type": "criminal",
+   "id": "27",
+   "name": "Бухоро шаҳар суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:31",
+   "type": "criminal",
+   "id": "31",
+   "name": "Вобкент туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:32",
+   "type": "criminal",
+   "id": "32",
+   "name": "Ғиждувон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:178",
+   "type": "criminal",
+   "id": "178",
+   "name": "Жондор туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:30",
+   "type": "criminal",
+   "id": "30",
+   "name": "Когон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:29",
+   "type": "criminal",
+   "id": "29",
+   "name": "Когон шаҳар суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:179",
+   "type": "criminal",
+   "id": "179",
+   "name": "Қоракўл туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:180",
+   "type": "criminal",
+   "id": "180",
+   "name": "Қоровулбозор туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:181",
+   "type": "criminal",
+   "id": "181",
+   "name": "Олот туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:182",
+   "type": "criminal",
+   "id": "182",
+   "name": "Пешку туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:183",
+   "type": "criminal",
+   "id": "183",
+   "name": "Ромитан туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:184",
+   "type": "criminal",
+   "id": "184",
+   "name": "Шофиркон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "criminal:11",
+   "type": "criminal",
+   "id": "11",
+   "name": "Фарғона вилоят суди",
+   "region": "fargona",
+   "level": "region"
+  },
+  {
+   "key": "criminal:131",
+   "type": "criminal",
+   "id": "131",
+   "name": "Бешариқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:132",
+   "type": "criminal",
+   "id": "132",
+   "name": "Боғдод туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:133",
+   "type": "criminal",
+   "id": "133",
+   "name": "Бувайда туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:134",
+   "type": "criminal",
+   "id": "134",
+   "name": "Данғара туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:135",
+   "type": "criminal",
+   "id": "135",
+   "name": "Ёзъёвон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:83",
+   "type": "criminal",
+   "id": "83",
+   "name": "Қувасой шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:136",
+   "type": "criminal",
+   "id": "136",
+   "name": "Қува туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:81",
+   "type": "criminal",
+   "id": "81",
+   "name": "Қўқон шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:137",
+   "type": "criminal",
+   "id": "137",
+   "name": "Қўштепа туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:138",
+   "type": "criminal",
+   "id": "138",
+   "name": "Марғилон шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:139",
+   "type": "criminal",
+   "id": "139",
+   "name": "Олтиариқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:140",
+   "type": "criminal",
+   "id": "140",
+   "name": "Риштон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:141",
+   "type": "criminal",
+   "id": "141",
+   "name": "Сўх туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:142",
+   "type": "criminal",
+   "id": "142",
+   "name": "Тошлоқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:143",
+   "type": "criminal",
+   "id": "143",
+   "name": "Учкўприк туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:82",
+   "type": "criminal",
+   "id": "82",
+   "name": "Ўзбекистон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:80",
+   "type": "criminal",
+   "id": "80",
+   "name": "Фарғона туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:79",
+   "type": "criminal",
+   "id": "79",
+   "name": "Фарғона шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:144",
+   "type": "criminal",
+   "id": "144",
+   "name": "Фурқат туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "criminal:5",
+   "type": "criminal",
+   "id": "5",
+   "name": "Жиззах вилоят суди",
+   "region": "jizzax",
+   "level": "region"
+  },
+  {
+   "key": "criminal:35",
+   "type": "criminal",
+   "id": "35",
+   "name": "Арнасой туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:36",
+   "type": "criminal",
+   "id": "36",
+   "name": "Бахмал туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:37",
+   "type": "criminal",
+   "id": "37",
+   "name": "Ғаллаорол туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:115",
+   "type": "criminal",
+   "id": "115",
+   "name": "Дўстлик туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:33",
+   "type": "criminal",
+   "id": "33",
+   "name": "Жиззах шаҳар суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:117",
+   "type": "criminal",
+   "id": "117",
+   "name": "Зарбдор туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:118",
+   "type": "criminal",
+   "id": "118",
+   "name": "Зафаробод туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:116",
+   "type": "criminal",
+   "id": "116",
+   "name": "Зомин туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:119",
+   "type": "criminal",
+   "id": "119",
+   "name": "Мирзачўл туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:120",
+   "type": "criminal",
+   "id": "120",
+   "name": "Пахтакор туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:121",
+   "type": "criminal",
+   "id": "121",
+   "name": "Фориш туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:34",
+   "type": "criminal",
+   "id": "34",
+   "name": "Ш.Рашидов туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:122",
+   "type": "criminal",
+   "id": "122",
+   "name": "Янгиобод туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "criminal:7",
+   "type": "criminal",
+   "id": "7",
+   "name": "Наманган вилоят суди",
+   "region": "namangan",
+   "level": "region"
+  },
+  {
+   "key": "criminal:51",
+   "type": "criminal",
+   "id": "51",
+   "name": "Косонсой туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:52",
+   "type": "criminal",
+   "id": "52",
+   "name": "Мингбулоқ туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:50",
+   "type": "criminal",
+   "id": "50",
+   "name": "Наманган туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:49",
+   "type": "criminal",
+   "id": "49",
+   "name": "Наманган шаҳар суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:145",
+   "type": "criminal",
+   "id": "145",
+   "name": "Норин туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:146",
+   "type": "criminal",
+   "id": "146",
+   "name": "Поп туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:147",
+   "type": "criminal",
+   "id": "147",
+   "name": "Тўрақўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:148",
+   "type": "criminal",
+   "id": "148",
+   "name": "Уйчи туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:149",
+   "type": "criminal",
+   "id": "149",
+   "name": "Учқўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:150",
+   "type": "criminal",
+   "id": "150",
+   "name": "Чортоқ туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:151",
+   "type": "criminal",
+   "id": "151",
+   "name": "Чуст туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:152",
+   "type": "criminal",
+   "id": "152",
+   "name": "Янгиқўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "criminal:6",
+   "type": "criminal",
+   "id": "6",
+   "name": "Навоий вилоят суди",
+   "region": "navoiy",
+   "level": "region"
+  },
+  {
+   "key": "criminal:46",
+   "type": "criminal",
+   "id": "46",
+   "name": "Зарафшон шаҳар суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:47",
+   "type": "criminal",
+   "id": "47",
+   "name": "Кармана туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:185",
+   "type": "criminal",
+   "id": "185",
+   "name": "Қизилтепа туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:48",
+   "type": "criminal",
+   "id": "48",
+   "name": "Конимех туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:186",
+   "type": "criminal",
+   "id": "186",
+   "name": "Навбаҳор туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:45",
+   "type": "criminal",
+   "id": "45",
+   "name": "Навоий шаҳар суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:187",
+   "type": "criminal",
+   "id": "187",
+   "name": "Нурота туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:188",
+   "type": "criminal",
+   "id": "188",
+   "name": "Томди туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:189",
+   "type": "criminal",
+   "id": "189",
+   "name": "Учқудуқ туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:190",
+   "type": "criminal",
+   "id": "190",
+   "name": "Хатирчи туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "criminal:13",
+   "type": "criminal",
+   "id": "13",
+   "name": "Қашқадарё вилоят суди",
+   "region": "qashqadaryo",
+   "level": "region"
+  },
+  {
+   "key": "criminal:42",
+   "type": "criminal",
+   "id": "42",
+   "name": "Ғузор туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:43",
+   "type": "criminal",
+   "id": "43",
+   "name": "Деҳқонобод туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:165",
+   "type": "criminal",
+   "id": "165",
+   "name": "Қамаши туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:39",
+   "type": "criminal",
+   "id": "39",
+   "name": "Қарши туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:38",
+   "type": "criminal",
+   "id": "38",
+   "name": "Қарши шаҳар суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:44",
+   "type": "criminal",
+   "id": "44",
+   "name": "Касби туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:163",
+   "type": "criminal",
+   "id": "163",
+   "name": "Китоб туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:164",
+   "type": "criminal",
+   "id": "164",
+   "name": "Косон туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:166",
+   "type": "criminal",
+   "id": "166",
+   "name": "Миришкор туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:167",
+   "type": "criminal",
+   "id": "167",
+   "name": "Муборак туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:168",
+   "type": "criminal",
+   "id": "168",
+   "name": "Нишон туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:169",
+   "type": "criminal",
+   "id": "169",
+   "name": "Чироқчи туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:40",
+   "type": "criminal",
+   "id": "40",
+   "name": "Шаҳрисабз туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:210",
+   "type": "criminal",
+   "id": "210",
+   "name": "Шахрисабз шаҳар суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:41",
+   "type": "criminal",
+   "id": "41",
+   "name": "Яккабоғ туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:221",
+   "type": "criminal",
+   "id": "221",
+   "name": "Кўкдала туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:4",
+   "type": "criminal",
+   "id": "4",
+   "name": "Қорақалпоғистон Республикаси суди",
+   "region": "qoraqalpoq",
+   "level": "region"
+  },
+  {
+   "key": "criminal:20",
+   "type": "criminal",
+   "id": "20",
+   "name": "Амударё туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:199",
+   "type": "criminal",
+   "id": "199",
+   "name": "Беруний туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:217",
+   "type": "criminal",
+   "id": "217",
+   "name": "Бўзатов туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:200",
+   "type": "criminal",
+   "id": "200",
+   "name": "Кегейли туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:201",
+   "type": "criminal",
+   "id": "201",
+   "name": "Қонликўл туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:202",
+   "type": "criminal",
+   "id": "202",
+   "name": "Қораўзак туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:18",
+   "type": "criminal",
+   "id": "18",
+   "name": "Қўнғирот туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:203",
+   "type": "criminal",
+   "id": "203",
+   "name": "Мўйноқ туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:17",
+   "type": "criminal",
+   "id": "17",
+   "name": "Нукус туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:16",
+   "type": "criminal",
+   "id": "16",
+   "name": "Нукус шаҳар суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:204",
+   "type": "criminal",
+   "id": "204",
+   "name": "Тахиатош туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:205",
+   "type": "criminal",
+   "id": "205",
+   "name": "Тахтакўпир туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:206",
+   "type": "criminal",
+   "id": "206",
+   "name": "Тўрткўл туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:207",
+   "type": "criminal",
+   "id": "207",
+   "name": "Хўжайли туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:19",
+   "type": "criminal",
+   "id": "19",
+   "name": "Чимбой туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:208",
+   "type": "criminal",
+   "id": "208",
+   "name": "Шуманай туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:209",
+   "type": "criminal",
+   "id": "209",
+   "name": "Элликқалъа туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "criminal:8",
+   "type": "criminal",
+   "id": "8",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "region"
+  },
+  {
+   "key": "criminal:57",
+   "type": "criminal",
+   "id": "57",
+   "name": "Булунғур туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:58",
+   "type": "criminal",
+   "id": "58",
+   "name": "Жомбой туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:59",
+   "type": "criminal",
+   "id": "59",
+   "name": "Иштихон туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:56",
+   "type": "criminal",
+   "id": "56",
+   "name": "Каттақўрғон туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:55",
+   "type": "criminal",
+   "id": "55",
+   "name": "Каттақўрғон шаҳар суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:60",
+   "type": "criminal",
+   "id": "60",
+   "name": "Қўшрабод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:123",
+   "type": "criminal",
+   "id": "123",
+   "name": "Нарпай туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:124",
+   "type": "criminal",
+   "id": "124",
+   "name": "Нуробод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:125",
+   "type": "criminal",
+   "id": "125",
+   "name": "Оқдарё туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:126",
+   "type": "criminal",
+   "id": "126",
+   "name": "Пайариқ туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:127",
+   "type": "criminal",
+   "id": "127",
+   "name": "Пастдарғом туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:128",
+   "type": "criminal",
+   "id": "128",
+   "name": "Пахтачи туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:54",
+   "type": "criminal",
+   "id": "54",
+   "name": "Самарқанд туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:53",
+   "type": "criminal",
+   "id": "53",
+   "name": "Самарқанд шаҳар суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:129",
+   "type": "criminal",
+   "id": "129",
+   "name": "Тойлоқ туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:130",
+   "type": "criminal",
+   "id": "130",
+   "name": "Ургут туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "criminal:9",
+   "type": "criminal",
+   "id": "9",
+   "name": "Сирдарё вилоят суди",
+   "region": "sirdaryo",
+   "level": "region"
+  },
+  {
+   "key": "criminal:69",
+   "type": "criminal",
+   "id": "69",
+   "name": "Боёвут туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:68",
+   "type": "criminal",
+   "id": "68",
+   "name": "Гулистон туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:67",
+   "type": "criminal",
+   "id": "67",
+   "name": "Гулистон шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:70",
+   "type": "criminal",
+   "id": "70",
+   "name": "Мирзаобод туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:108",
+   "type": "criminal",
+   "id": "108",
+   "name": "Оқолтин туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:109",
+   "type": "criminal",
+   "id": "109",
+   "name": "Сайхунобод туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:110",
+   "type": "criminal",
+   "id": "110",
+   "name": "Сардоба туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:111",
+   "type": "criminal",
+   "id": "111",
+   "name": "Сирдарё туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:112",
+   "type": "criminal",
+   "id": "112",
+   "name": "Ховос туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:113",
+   "type": "criminal",
+   "id": "113",
+   "name": "Ширин шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:114",
+   "type": "criminal",
+   "id": "114",
+   "name": "Янгиер шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:10",
+   "type": "criminal",
+   "id": "10",
+   "name": "Сурхондарё вилоят суди",
+   "region": "surxondaryo",
+   "level": "region"
+  },
+  {
+   "key": "criminal:63",
+   "type": "criminal",
+   "id": "63",
+   "name": "Ангор туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:216",
+   "type": "criminal",
+   "id": "216",
+   "name": "Бандихон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:64",
+   "type": "criminal",
+   "id": "64",
+   "name": "Бойсун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:65",
+   "type": "criminal",
+   "id": "65",
+   "name": "Денов туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:66",
+   "type": "criminal",
+   "id": "66",
+   "name": "Жарқўрғон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:170",
+   "type": "criminal",
+   "id": "170",
+   "name": "Қизириқ туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:171",
+   "type": "criminal",
+   "id": "171",
+   "name": "Қумқўрғон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:172",
+   "type": "criminal",
+   "id": "172",
+   "name": "Музработ туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:173",
+   "type": "criminal",
+   "id": "173",
+   "name": "Олтинсой туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:174",
+   "type": "criminal",
+   "id": "174",
+   "name": "Сариосиё туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:62",
+   "type": "criminal",
+   "id": "62",
+   "name": "Термиз туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:61",
+   "type": "criminal",
+   "id": "61",
+   "name": "Термиз шаҳар суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:175",
+   "type": "criminal",
+   "id": "175",
+   "name": "Узун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:176",
+   "type": "criminal",
+   "id": "176",
+   "name": "Шеробод туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:177",
+   "type": "criminal",
+   "id": "177",
+   "name": "Шўрчи туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "criminal:12",
+   "type": "criminal",
+   "id": "12",
+   "name": "Хоразм вилоят суди",
+   "region": "xorazm",
+   "level": "region"
+  },
+  {
+   "key": "criminal:192",
+   "type": "criminal",
+   "id": "192",
+   "name": "Боғот туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:193",
+   "type": "criminal",
+   "id": "193",
+   "name": "Гурлан туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:194",
+   "type": "criminal",
+   "id": "194",
+   "name": "Қўшкўпир туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:218",
+   "type": "criminal",
+   "id": "218",
+   "name": "Тупроққалъа туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:85",
+   "type": "criminal",
+   "id": "85",
+   "name": "Урганч туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:84",
+   "type": "criminal",
+   "id": "84",
+   "name": "Урганч шаҳар суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:195",
+   "type": "criminal",
+   "id": "195",
+   "name": "Хазорасп туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:86",
+   "type": "criminal",
+   "id": "86",
+   "name": "Хива туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:215",
+   "type": "criminal",
+   "id": "215",
+   "name": "Хива шаҳар суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:196",
+   "type": "criminal",
+   "id": "196",
+   "name": "Хонқа туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:191",
+   "type": "criminal",
+   "id": "191",
+   "name": "Шовот туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:197",
+   "type": "criminal",
+   "id": "197",
+   "name": "Янгиариқ туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "criminal:198",
+   "type": "criminal",
+   "id": "198",
+   "name": "Янгибозор туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:15",
+   "type": "offence",
+   "id": "15",
+   "name": "Олий суд",
+   "region": null,
+   "level": "supreme"
+  },
+  {
+   "key": "offence:1",
+   "type": "offence",
+   "id": "1",
+   "name": "Тошкент шаҳар суди",
+   "region": "toshkent",
+   "level": "region"
+  },
+  {
+   "key": "offence:95",
+   "type": "offence",
+   "id": "95",
+   "name": "Бектемир туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:78",
+   "type": "offence",
+   "id": "78",
+   "name": "Мирзо Улуғбек туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:87",
+   "type": "offence",
+   "id": "87",
+   "name": "Миробод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:93",
+   "type": "offence",
+   "id": "93",
+   "name": "Олмазор туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:96",
+   "type": "offence",
+   "id": "96",
+   "name": "Сергели туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:92",
+   "type": "offence",
+   "id": "92",
+   "name": "Учтепа туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:91",
+   "type": "offence",
+   "id": "91",
+   "name": "Чилонзор туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:88",
+   "type": "offence",
+   "id": "88",
+   "name": "Шайхантохур туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:89",
+   "type": "offence",
+   "id": "89",
+   "name": "Юнусобод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:90",
+   "type": "offence",
+   "id": "90",
+   "name": "Яккасарой туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:219",
+   "type": "offence",
+   "id": "219",
+   "name": "Янгиҳаёт туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:94",
+   "type": "offence",
+   "id": "94",
+   "name": "Яшнобод туман суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "offence:14",
+   "type": "offence",
+   "id": "14",
+   "name": "Тошкент вилоят суди",
+   "region": "toshkentvil",
+   "level": "region"
+  },
+  {
+   "key": "offence:74",
+   "type": "offence",
+   "id": "74",
+   "name": "Ангрен шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:73",
+   "type": "offence",
+   "id": "73",
+   "name": "Бекобод туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:72",
+   "type": "offence",
+   "id": "72",
+   "name": "Бекобод шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:75",
+   "type": "offence",
+   "id": "75",
+   "name": "Бўка туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:76",
+   "type": "offence",
+   "id": "76",
+   "name": "Бўстонлиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:71",
+   "type": "offence",
+   "id": "71",
+   "name": "Зангиота туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:77",
+   "type": "offence",
+   "id": "77",
+   "name": "Қибрай туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:97",
+   "type": "offence",
+   "id": "97",
+   "name": "Қуйи Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:213",
+   "type": "offence",
+   "id": "213",
+   "name": "Нурафшон шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:98",
+   "type": "offence",
+   "id": "98",
+   "name": "Оққўрғон туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:99",
+   "type": "offence",
+   "id": "99",
+   "name": "Олмалиқ шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:100",
+   "type": "offence",
+   "id": "100",
+   "name": "Оҳангарон туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:212",
+   "type": "offence",
+   "id": "212",
+   "name": "Оҳангарон шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:101",
+   "type": "offence",
+   "id": "101",
+   "name": "Паркент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:102",
+   "type": "offence",
+   "id": "102",
+   "name": "Пискент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:214",
+   "type": "offence",
+   "id": "214",
+   "name": "Тошкент туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:103",
+   "type": "offence",
+   "id": "103",
+   "name": "Ўрта Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:104",
+   "type": "offence",
+   "id": "104",
+   "name": "Чиноз туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:105",
+   "type": "offence",
+   "id": "105",
+   "name": "Чирчиқ шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:106",
+   "type": "offence",
+   "id": "106",
+   "name": "Юқори Чирчиқ туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:107",
+   "type": "offence",
+   "id": "107",
+   "name": "Янгийўл туман суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:211",
+   "type": "offence",
+   "id": "211",
+   "name": "Янгийўл шаҳар суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "offence:2",
+   "type": "offence",
+   "id": "2",
+   "name": "Андижон вилоят суди",
+   "region": "andijon",
+   "level": "region"
+  },
+  {
+   "key": "offence:22",
+   "type": "offence",
+   "id": "22",
+   "name": "Андижон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:21",
+   "type": "offence",
+   "id": "21",
+   "name": "Андижон шаҳар суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:23",
+   "type": "offence",
+   "id": "23",
+   "name": "Асака туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:24",
+   "type": "offence",
+   "id": "24",
+   "name": "Балиқчи туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:25",
+   "type": "offence",
+   "id": "25",
+   "name": "Булоқбоши туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:26",
+   "type": "offence",
+   "id": "26",
+   "name": "Бўстон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:153",
+   "type": "offence",
+   "id": "153",
+   "name": "Жалақудуқ туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:154",
+   "type": "offence",
+   "id": "154",
+   "name": "Избоскан туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:155",
+   "type": "offence",
+   "id": "155",
+   "name": "Қўрғонтепа туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:156",
+   "type": "offence",
+   "id": "156",
+   "name": "Марҳамат туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:157",
+   "type": "offence",
+   "id": "157",
+   "name": "Олтинкўл туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:158",
+   "type": "offence",
+   "id": "158",
+   "name": "Пахтаобод туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:159",
+   "type": "offence",
+   "id": "159",
+   "name": "Улуғнор туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:160",
+   "type": "offence",
+   "id": "160",
+   "name": "Хонобод шаҳар суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:161",
+   "type": "offence",
+   "id": "161",
+   "name": "Хўжаобод туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:162",
+   "type": "offence",
+   "id": "162",
+   "name": "Шаҳрихон туман суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "offence:3",
+   "type": "offence",
+   "id": "3",
+   "name": "Бухоро вилоят суди",
+   "region": "buxoro",
+   "level": "region"
+  },
+  {
+   "key": "offence:28",
+   "type": "offence",
+   "id": "28",
+   "name": "Бухоро туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:27",
+   "type": "offence",
+   "id": "27",
+   "name": "Бухоро шаҳар суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:31",
+   "type": "offence",
+   "id": "31",
+   "name": "Вобкент туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:32",
+   "type": "offence",
+   "id": "32",
+   "name": "Ғиждувон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:178",
+   "type": "offence",
+   "id": "178",
+   "name": "Жондор туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:30",
+   "type": "offence",
+   "id": "30",
+   "name": "Когон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:29",
+   "type": "offence",
+   "id": "29",
+   "name": "Когон шаҳар суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:179",
+   "type": "offence",
+   "id": "179",
+   "name": "Қоракўл туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:180",
+   "type": "offence",
+   "id": "180",
+   "name": "Қоровулбозор туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:181",
+   "type": "offence",
+   "id": "181",
+   "name": "Олот туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:182",
+   "type": "offence",
+   "id": "182",
+   "name": "Пешку туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:183",
+   "type": "offence",
+   "id": "183",
+   "name": "Ромитан туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:184",
+   "type": "offence",
+   "id": "184",
+   "name": "Шофиркон туман суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "offence:11",
+   "type": "offence",
+   "id": "11",
+   "name": "Фарғона вилоят суди",
+   "region": "fargona",
+   "level": "region"
+  },
+  {
+   "key": "offence:131",
+   "type": "offence",
+   "id": "131",
+   "name": "Бешариқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:132",
+   "type": "offence",
+   "id": "132",
+   "name": "Боғдод туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:133",
+   "type": "offence",
+   "id": "133",
+   "name": "Бувайда туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:134",
+   "type": "offence",
+   "id": "134",
+   "name": "Данғара туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:135",
+   "type": "offence",
+   "id": "135",
+   "name": "Ёзъёвон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:83",
+   "type": "offence",
+   "id": "83",
+   "name": "Қувасой шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:136",
+   "type": "offence",
+   "id": "136",
+   "name": "Қува туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:81",
+   "type": "offence",
+   "id": "81",
+   "name": "Қўқон шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:137",
+   "type": "offence",
+   "id": "137",
+   "name": "Қўштепа туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:138",
+   "type": "offence",
+   "id": "138",
+   "name": "Марғилон шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:139",
+   "type": "offence",
+   "id": "139",
+   "name": "Олтиариқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:140",
+   "type": "offence",
+   "id": "140",
+   "name": "Риштон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:141",
+   "type": "offence",
+   "id": "141",
+   "name": "Сўх туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:142",
+   "type": "offence",
+   "id": "142",
+   "name": "Тошлоқ туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:143",
+   "type": "offence",
+   "id": "143",
+   "name": "Учкўприк туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:82",
+   "type": "offence",
+   "id": "82",
+   "name": "Ўзбекистон туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:80",
+   "type": "offence",
+   "id": "80",
+   "name": "Фарғона туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:79",
+   "type": "offence",
+   "id": "79",
+   "name": "Фарғона шаҳар суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:144",
+   "type": "offence",
+   "id": "144",
+   "name": "Фурқат туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "offence:5",
+   "type": "offence",
+   "id": "5",
+   "name": "Жиззах вилоят суди",
+   "region": "jizzax",
+   "level": "region"
+  },
+  {
+   "key": "offence:35",
+   "type": "offence",
+   "id": "35",
+   "name": "Арнасой туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:36",
+   "type": "offence",
+   "id": "36",
+   "name": "Бахмал туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:37",
+   "type": "offence",
+   "id": "37",
+   "name": "Ғаллаорол туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:115",
+   "type": "offence",
+   "id": "115",
+   "name": "Дўстлик туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:33",
+   "type": "offence",
+   "id": "33",
+   "name": "Жиззах шаҳар суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:117",
+   "type": "offence",
+   "id": "117",
+   "name": "Зарбдор туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:118",
+   "type": "offence",
+   "id": "118",
+   "name": "Зафаробод туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:116",
+   "type": "offence",
+   "id": "116",
+   "name": "Зомин туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:119",
+   "type": "offence",
+   "id": "119",
+   "name": "Мирзачўл туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:120",
+   "type": "offence",
+   "id": "120",
+   "name": "Пахтакор туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:121",
+   "type": "offence",
+   "id": "121",
+   "name": "Фориш туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:34",
+   "type": "offence",
+   "id": "34",
+   "name": "Ш.Рашидов туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:122",
+   "type": "offence",
+   "id": "122",
+   "name": "Янгиобод туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "offence:7",
+   "type": "offence",
+   "id": "7",
+   "name": "Наманган вилоят суди",
+   "region": "namangan",
+   "level": "region"
+  },
+  {
+   "key": "offence:51",
+   "type": "offence",
+   "id": "51",
+   "name": "Косонсой туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:52",
+   "type": "offence",
+   "id": "52",
+   "name": "Мингбулоқ туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:50",
+   "type": "offence",
+   "id": "50",
+   "name": "ЧНаманган туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:49",
+   "type": "offence",
+   "id": "49",
+   "name": "Наманган шаҳар суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:145",
+   "type": "offence",
+   "id": "145",
+   "name": "Норин туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:146",
+   "type": "offence",
+   "id": "146",
+   "name": "Поп туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:147",
+   "type": "offence",
+   "id": "147",
+   "name": "Тўрақўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:148",
+   "type": "offence",
+   "id": "148",
+   "name": "Уйчи туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:149",
+   "type": "offence",
+   "id": "149",
+   "name": "Учқўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:150",
+   "type": "offence",
+   "id": "150",
+   "name": "Чортоқ туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:151",
+   "type": "offence",
+   "id": "151",
+   "name": "Чуст туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:152",
+   "type": "offence",
+   "id": "152",
+   "name": "Янгиқўрғон туман суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "offence:6",
+   "type": "offence",
+   "id": "6",
+   "name": "Навоий вилоят суди",
+   "region": "navoiy",
+   "level": "region"
+  },
+  {
+   "key": "offence:46",
+   "type": "offence",
+   "id": "46",
+   "name": "Зарафшон шаҳар суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:47",
+   "type": "offence",
+   "id": "47",
+   "name": "Кармана туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:185",
+   "type": "offence",
+   "id": "185",
+   "name": "Қизилтепа туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:48",
+   "type": "offence",
+   "id": "48",
+   "name": "Конимех туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:186",
+   "type": "offence",
+   "id": "186",
+   "name": "Навбаҳор туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:45",
+   "type": "offence",
+   "id": "45",
+   "name": "Навоий шаҳар суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:187",
+   "type": "offence",
+   "id": "187",
+   "name": "Нурота туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:188",
+   "type": "offence",
+   "id": "188",
+   "name": "Томди туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:189",
+   "type": "offence",
+   "id": "189",
+   "name": "Учқудуқ туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:190",
+   "type": "offence",
+   "id": "190",
+   "name": "Хатирчи туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "offence:13",
+   "type": "offence",
+   "id": "13",
+   "name": "Қашқадарё вилоят суди",
+   "region": "qashqadaryo",
+   "level": "region"
+  },
+  {
+   "key": "offence:42",
+   "type": "offence",
+   "id": "42",
+   "name": "Ғузор туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:43",
+   "type": "offence",
+   "id": "43",
+   "name": "Деҳқонобод туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:165",
+   "type": "offence",
+   "id": "165",
+   "name": "Қамаши туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:39",
+   "type": "offence",
+   "id": "39",
+   "name": "Қарши туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:38",
+   "type": "offence",
+   "id": "38",
+   "name": "Қарши шаҳар суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:44",
+   "type": "offence",
+   "id": "44",
+   "name": "Касби туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:163",
+   "type": "offence",
+   "id": "163",
+   "name": "Китоб туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:164",
+   "type": "offence",
+   "id": "164",
+   "name": "Косон туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:166",
+   "type": "offence",
+   "id": "166",
+   "name": "Миришкор туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:167",
+   "type": "offence",
+   "id": "167",
+   "name": "Муборак туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:168",
+   "type": "offence",
+   "id": "168",
+   "name": "Нишон туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:169",
+   "type": "offence",
+   "id": "169",
+   "name": "Чироқчи туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:40",
+   "type": "offence",
+   "id": "40",
+   "name": "Шаҳрисабз туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:215",
+   "type": "offence",
+   "id": "215",
+   "name": "Шахрисабз шаҳар суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:41",
+   "type": "offence",
+   "id": "41",
+   "name": "Яккабоғ туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:220",
+   "type": "offence",
+   "id": "220",
+   "name": "Кўкдала туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:4",
+   "type": "offence",
+   "id": "4",
+   "name": "Қорақалпоғистон Республикаси суди",
+   "region": "qoraqalpoq",
+   "level": "region"
+  },
+  {
+   "key": "offence:20",
+   "type": "offence",
+   "id": "20",
+   "name": "Амударё туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:199",
+   "type": "offence",
+   "id": "199",
+   "name": "Беруний туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:217",
+   "type": "offence",
+   "id": "217",
+   "name": "Бўзатов туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:200",
+   "type": "offence",
+   "id": "200",
+   "name": "Кегейли туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:201",
+   "type": "offence",
+   "id": "201",
+   "name": "Қонликўл туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:202",
+   "type": "offence",
+   "id": "202",
+   "name": "Қораўзак туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:18",
+   "type": "offence",
+   "id": "18",
+   "name": "Қонликўл туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:203",
+   "type": "offence",
+   "id": "203",
+   "name": "Мўйноқ туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:17",
+   "type": "offence",
+   "id": "17",
+   "name": "Нукус туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:16",
+   "type": "offence",
+   "id": "16",
+   "name": "Нукус шаҳар суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:204",
+   "type": "offence",
+   "id": "204",
+   "name": "Тахиатош туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:205",
+   "type": "offence",
+   "id": "205",
+   "name": "Тахтакўпир туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:206",
+   "type": "offence",
+   "id": "206",
+   "name": "Тўрткўл туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:207",
+   "type": "offence",
+   "id": "207",
+   "name": "Хўжайли туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:19",
+   "type": "offence",
+   "id": "19",
+   "name": "Чимбой туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:208",
+   "type": "offence",
+   "id": "208",
+   "name": "Шуманай туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:209",
+   "type": "offence",
+   "id": "209",
+   "name": "Элликқалъа туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "offence:8",
+   "type": "offence",
+   "id": "8",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "region"
+  },
+  {
+   "key": "offence:57",
+   "type": "offence",
+   "id": "57",
+   "name": "Булунғур туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:58",
+   "type": "offence",
+   "id": "58",
+   "name": "Жомбой туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:59",
+   "type": "offence",
+   "id": "59",
+   "name": "Иштихон туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:56",
+   "type": "offence",
+   "id": "56",
+   "name": "Каттақўрғон туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:55",
+   "type": "offence",
+   "id": "55",
+   "name": "Каттақўрғон шаҳар суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:60",
+   "type": "offence",
+   "id": "60",
+   "name": "Қўшрабод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:123",
+   "type": "offence",
+   "id": "123",
+   "name": "Нарпай туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:124",
+   "type": "offence",
+   "id": "124",
+   "name": "Нуробод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:125",
+   "type": "offence",
+   "id": "125",
+   "name": "Оқдарё туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:126",
+   "type": "offence",
+   "id": "126",
+   "name": "Пайариқ туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:127",
+   "type": "offence",
+   "id": "127",
+   "name": "Пастдарғом туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:128",
+   "type": "offence",
+   "id": "128",
+   "name": "Пахтачи туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:54",
+   "type": "offence",
+   "id": "54",
+   "name": "Самарқанд туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:53",
+   "type": "offence",
+   "id": "53",
+   "name": "Самарқанд шаҳар суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:129",
+   "type": "offence",
+   "id": "129",
+   "name": "Тойлоқ туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:130",
+   "type": "offence",
+   "id": "130",
+   "name": "Ургут туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "offence:9",
+   "type": "offence",
+   "id": "9",
+   "name": "Сирдарё вилоят суди",
+   "region": "sirdaryo",
+   "level": "region"
+  },
+  {
+   "key": "offence:69",
+   "type": "offence",
+   "id": "69",
+   "name": "Боёвут туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:68",
+   "type": "offence",
+   "id": "68",
+   "name": "Гулистон туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:67",
+   "type": "offence",
+   "id": "67",
+   "name": "Гулистон шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:70",
+   "type": "offence",
+   "id": "70",
+   "name": "Мирзаобод туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:108",
+   "type": "offence",
+   "id": "108",
+   "name": "Оқолтин туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:109",
+   "type": "offence",
+   "id": "109",
+   "name": "Сайхунобод туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:110",
+   "type": "offence",
+   "id": "110",
+   "name": "Сардоба туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:111",
+   "type": "offence",
+   "id": "111",
+   "name": "Сирдарё туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:112",
+   "type": "offence",
+   "id": "112",
+   "name": "Ховос туман суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:113",
+   "type": "offence",
+   "id": "113",
+   "name": "Ширин шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:114",
+   "type": "offence",
+   "id": "114",
+   "name": "Янгиер шаҳар суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:10",
+   "type": "offence",
+   "id": "10",
+   "name": "Сурхондарё вилоят суди",
+   "region": "surxondaryo",
+   "level": "region"
+  },
+  {
+   "key": "offence:63",
+   "type": "offence",
+   "id": "63",
+   "name": "Ангор туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:216",
+   "type": "offence",
+   "id": "216",
+   "name": "Бандихон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:64",
+   "type": "offence",
+   "id": "64",
+   "name": "Бойсун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:65",
+   "type": "offence",
+   "id": "65",
+   "name": "Денов туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:66",
+   "type": "offence",
+   "id": "66",
+   "name": "Жарқўрғон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:170",
+   "type": "offence",
+   "id": "170",
+   "name": "Қизириқ туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:171",
+   "type": "offence",
+   "id": "171",
+   "name": "Қумқўрғон туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:172",
+   "type": "offence",
+   "id": "172",
+   "name": "Музработ туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:173",
+   "type": "offence",
+   "id": "173",
+   "name": "Олтинсой туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:174",
+   "type": "offence",
+   "id": "174",
+   "name": "Сариосиё туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:62",
+   "type": "offence",
+   "id": "62",
+   "name": "Термиз туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:61",
+   "type": "offence",
+   "id": "61",
+   "name": "Термиз шаҳар суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:175",
+   "type": "offence",
+   "id": "175",
+   "name": "Узун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:176",
+   "type": "offence",
+   "id": "176",
+   "name": "Шеробод туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:177",
+   "type": "offence",
+   "id": "177",
+   "name": "Шўрчи туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "offence:12",
+   "type": "offence",
+   "id": "12",
+   "name": "Хоразм вилоят суди",
+   "region": "xorazm",
+   "level": "region"
+  },
+  {
+   "key": "offence:192",
+   "type": "offence",
+   "id": "192",
+   "name": "Боғот туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:193",
+   "type": "offence",
+   "id": "193",
+   "name": "Гурлан туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:194",
+   "type": "offence",
+   "id": "194",
+   "name": "Қўшкўпир туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:218",
+   "type": "offence",
+   "id": "218",
+   "name": "Тупроққалъа туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:85",
+   "type": "offence",
+   "id": "85",
+   "name": "Урганч туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:84",
+   "type": "offence",
+   "id": "84",
+   "name": "Урганч шаҳар суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:195",
+   "type": "offence",
+   "id": "195",
+   "name": "Хазорасп туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:86",
+   "type": "offence",
+   "id": "86",
+   "name": "Хива туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:196",
+   "type": "offence",
+   "id": "196",
+   "name": "Хонқа туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:191",
+   "type": "offence",
+   "id": "191",
+   "name": "Шовот туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:197",
+   "type": "offence",
+   "id": "197",
+   "name": "Янгиариқ туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "offence:198",
+   "type": "offence",
+   "id": "198",
+   "name": "Янгибозор туман суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "civil:oliyfsud",
+   "type": "civil",
+   "id": "oliyfsud",
+   "name": "Олий суд",
+   "region": null,
+   "level": "supreme"
+  },
+  {
+   "key": "civil:toshfsud",
+   "type": "civil",
+   "id": "toshfsud",
+   "name": "Тошкент шаҳар суди",
+   "region": "toshkent",
+   "level": "region"
+  },
+  {
+   "key": "civil:mulugtfsud",
+   "type": "civil",
+   "id": "mulugtfsud",
+   "name": "Мирзо Улуғбек туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "civil:mirtfsud",
+   "type": "civil",
+   "id": "mirtfsud",
+   "name": "Миробод туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "civil:uchttfsud",
+   "type": "civil",
+   "id": "uchttfsud",
+   "name": "Учтепа туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "civil:shayxtfsud",
+   "type": "civil",
+   "id": "shayxtfsud",
+   "name": "Шайхонтоҳур туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "civil:yakkatfsud",
+   "type": "civil",
+   "id": "yakkatfsud",
+   "name": "Яккасарой туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "civil:toshvilfsud",
+   "type": "civil",
+   "id": "toshvilfsud",
+   "name": "Тошкент вилоят суди",
+   "region": "toshkentvil",
+   "level": "region"
+  },
+  {
+   "key": "civil:bekobtfsud",
+   "type": "civil",
+   "id": "bekobtfsud",
+   "name": "Бекобод туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:zangtfsud",
+   "type": "civil",
+   "id": "zangtfsud",
+   "name": "Зангиота туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:kuychtfsud",
+   "type": "civil",
+   "id": "kuychtfsud",
+   "name": "Қуйичирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:oxantfsud",
+   "type": "civil",
+   "id": "oxantfsud",
+   "name": "Оҳангарон туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:urtchtfsud",
+   "type": "civil",
+   "id": "urtchtfsud",
+   "name": "Ўртачирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:chichtfsud",
+   "type": "civil",
+   "id": "chichtfsud",
+   "name": "Чирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:yukchtfsud",
+   "type": "civil",
+   "id": "yukchtfsud",
+   "name": "Юқоричирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:yangiyultgsud",
+   "type": "civil",
+   "id": "yangiyultgsud",
+   "name": "Янгийўл туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "civil:andvilfsud",
+   "type": "civil",
+   "id": "andvilfsud",
+   "name": "Андижон вилоят суди",
+   "region": "andijon",
+   "level": "region"
+  },
+  {
+   "key": "civil:andtfsud",
+   "type": "civil",
+   "id": "andtfsud",
+   "name": "Андижон туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:asaktfsud",
+   "type": "civil",
+   "id": "asaktfsud",
+   "name": "Асака туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:boztfsud",
+   "type": "civil",
+   "id": "boztfsud",
+   "name": "Бўстон туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:izbsktfsud",
+   "type": "civil",
+   "id": "izbsktfsud",
+   "name": "Избоскан туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:kteptfsud",
+   "type": "civil",
+   "id": "kteptfsud",
+   "name": "Қўрғонтепа туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:xojaotfsud",
+   "type": "civil",
+   "id": "xojaotfsud",
+   "name": "Хўжаобод туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "civil:buxvilfsud",
+   "type": "civil",
+   "id": "buxvilfsud",
+   "name": "Бухоро вилоят суди",
+   "region": "buxoro",
+   "level": "region"
+  },
+  {
+   "key": "civil:buxtfsud",
+   "type": "civil",
+   "id": "buxtfsud",
+   "name": "Бухоро туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:gijdutfsud",
+   "type": "civil",
+   "id": "gijdutfsud",
+   "name": "Ғиждувон туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:kogontfsud",
+   "type": "civil",
+   "id": "kogontfsud",
+   "name": "Когон туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:kkultfsud",
+   "type": "civil",
+   "id": "kkultfsud",
+   "name": "Қоракўл туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:peshtfsud",
+   "type": "civil",
+   "id": "peshtfsud",
+   "name": "Пешку туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:romittfsud",
+   "type": "civil",
+   "id": "romittfsud",
+   "name": "Ромитон туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "civil:fargvilfsud",
+   "type": "civil",
+   "id": "fargvilfsud",
+   "name": "Фарғона вилоят суди",
+   "region": "fargona",
+   "level": "region"
+  },
+  {
+   "key": "civil:kokantfsud",
+   "type": "civil",
+   "id": "kokantfsud",
+   "name": "Қўқон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:margiltfsud",
+   "type": "civil",
+   "id": "margiltfsud",
+   "name": "Марғилон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:rishtontfsud",
+   "type": "civil",
+   "id": "rishtontfsud",
+   "name": "Риштон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:suxtfsud",
+   "type": "civil",
+   "id": "suxtfsud",
+   "name": "Сўх туман суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:uzbektfsud",
+   "type": "civil",
+   "id": "uzbektfsud",
+   "name": "Ўзбекистон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:fargtfsud",
+   "type": "civil",
+   "id": "fargtfsud",
+   "name": "Фарғона туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "civil:jizzavilfsud",
+   "type": "civil",
+   "id": "jizzavilfsud",
+   "name": "Жиззах вилоят суди",
+   "region": "jizzax",
+   "level": "region"
+  },
+  {
+   "key": "civil:galortfsud",
+   "type": "civil",
+   "id": "galortfsud",
+   "name": "Ғаллаорол туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:dusttfsud",
+   "type": "civil",
+   "id": "dusttfsud",
+   "name": "Дўстлик туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:jizzatfsud",
+   "type": "civil",
+   "id": "jizzatfsud",
+   "name": "Жиззах туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:zarbtfsudr",
+   "type": "civil",
+   "id": "zarbtfsudr",
+   "name": "Зарбдор туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:paxtakortfsud",
+   "type": "civil",
+   "id": "paxtakortfsud",
+   "name": "Пахтакор туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:fortfsud",
+   "type": "civil",
+   "id": "fortfsud",
+   "name": "Фориш туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "civil:namvilfsud",
+   "type": "civil",
+   "id": "namvilfsud",
+   "name": "Наманган вилоят суди",
+   "region": "namangan",
+   "level": "region"
+  },
+  {
+   "key": "civil:namtfsud",
+   "type": "civil",
+   "id": "namtfsud",
+   "name": "Наманган туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "civil:uchkurtfsud",
+   "type": "civil",
+   "id": "uchkurtfsud",
+   "name": "Учқўрғон туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "civil:chusttfsud",
+   "type": "civil",
+   "id": "chusttfsud",
+   "name": "Чуст туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "civil:yankurtfsud",
+   "type": "civil",
+   "id": "yankurtfsud",
+   "name": "Янгиқўрғон туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "civil:navvilfsud",
+   "type": "civil",
+   "id": "navvilfsud",
+   "name": "Навоий вилоят суди",
+   "region": "navoiy",
+   "level": "region"
+  },
+  {
+   "key": "civil:zartfsud",
+   "type": "civil",
+   "id": "zartfsud",
+   "name": "Зарафшон туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "civil:navtfsud",
+   "type": "civil",
+   "id": "navtfsud",
+   "name": "Кармана туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "civil:navbxtfsud",
+   "type": "civil",
+   "id": "navbxtfsud",
+   "name": "Навбаҳор туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "civil:uchkutfsud",
+   "type": "civil",
+   "id": "uchkutfsud",
+   "name": "Учқудуқ туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "civil:xatirchitfsud",
+   "type": "civil",
+   "id": "xatirchitfsud",
+   "name": "Хатирчи туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "civil:kashvilfsud",
+   "type": "civil",
+   "id": "kashvilfsud",
+   "name": "Қашқадарё вилоят суди",
+   "region": "qashqadaryo",
+   "level": "region"
+  },
+  {
+   "key": "civil:guzortfsud",
+   "type": "civil",
+   "id": "guzortfsud",
+   "name": "Ғузор туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:karshitfsud",
+   "type": "civil",
+   "id": "karshitfsud",
+   "name": "Қарши туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:kasbtfsud",
+   "type": "civil",
+   "id": "kasbtfsud",
+   "name": "Касби туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:kosontfsud",
+   "type": "civil",
+   "id": "kosontfsud",
+   "name": "Косон туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:chrkchitfsud",
+   "type": "civil",
+   "id": "chrkchitfsud",
+   "name": "Чироқчи туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:shaxrtfsud",
+   "type": "civil",
+   "id": "shaxrtfsud",
+   "name": "Шаҳрисабз туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:yakbogtfsud",
+   "type": "civil",
+   "id": "yakbogtfsud",
+   "name": "Яккабоғ туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:qrfsud",
+   "type": "civil",
+   "id": "qrfsud",
+   "name": "Қорақалпоғистон Республикаси суди",
+   "region": "qoraqalpoq",
+   "level": "region"
+  },
+  {
+   "key": "civil:amudtfsud",
+   "type": "civil",
+   "id": "amudtfsud",
+   "name": "Амударё туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "civil:bertfsud",
+   "type": "civil",
+   "id": "bertfsud",
+   "name": "Беруний туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "civil:kungtfsud",
+   "type": "civil",
+   "id": "kungtfsud",
+   "name": "Қўнғирот туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "civil:nuktfsud",
+   "type": "civil",
+   "id": "nuktfsud",
+   "name": "Нукус туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "civil:chimtfsud",
+   "type": "civil",
+   "id": "chimtfsud",
+   "name": "Чимбой туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "civil:samvilfsud",
+   "type": "civil",
+   "id": "samvilfsud",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "region"
+  },
+  {
+   "key": "civil:jombtfsud",
+   "type": "civil",
+   "id": "jombtfsud",
+   "name": "Жомбой туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:ishtixtfsud",
+   "type": "civil",
+   "id": "ishtixtfsud",
+   "name": "Иштихон туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:kkurgtfsud",
+   "type": "civil",
+   "id": "kkurgtfsud",
+   "name": "Каттақўрғон туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:nurobtfsud",
+   "type": "civil",
+   "id": "nurobtfsud",
+   "name": "Нуробод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:payartfsud",
+   "type": "civil",
+   "id": "payartfsud",
+   "name": "Пайариқ туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:pstdargtfsud",
+   "type": "civil",
+   "id": "pstdargtfsud",
+   "name": "Пастдарғом туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:samtfsud",
+   "type": "civil",
+   "id": "samtfsud",
+   "name": "Самарқанд шаҳар суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:tayloktfsud",
+   "type": "civil",
+   "id": "tayloktfsud",
+   "name": "Тайлоқ туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:urguttfsud",
+   "type": "civil",
+   "id": "urguttfsud",
+   "name": "Ургут туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "civil:sirdvilfsud",
+   "type": "civil",
+   "id": "sirdvilfsud",
+   "name": "Сирдарё вилоят суди",
+   "region": "sirdaryo",
+   "level": "region"
+  },
+  {
+   "key": "civil:boyovtfsud",
+   "type": "civil",
+   "id": "boyovtfsud",
+   "name": "Боёвут туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:gulistfsud",
+   "type": "civil",
+   "id": "gulistfsud",
+   "name": "Гулистон туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:okolttfsud",
+   "type": "civil",
+   "id": "okolttfsud",
+   "name": "Оқолтин туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:sirdtfsud",
+   "type": "civil",
+   "id": "sirdtfsud",
+   "name": "Сирдарё туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:surxvilfsud",
+   "type": "civil",
+   "id": "surxvilfsud",
+   "name": "Сурхондарё вилоят суди",
+   "region": "surxondaryo",
+   "level": "region"
+  },
+  {
+   "key": "civil:boystfsud",
+   "type": "civil",
+   "id": "boystfsud",
+   "name": "Бойсун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:denovtfsud",
+   "type": "civil",
+   "id": "denovtfsud",
+   "name": "Денов туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:kumkgtfsud",
+   "type": "civil",
+   "id": "kumkgtfsud",
+   "name": "Қумқўрғон туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:sariostfsud",
+   "type": "civil",
+   "id": "sariostfsud",
+   "name": "Сариосиё туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:termtfsud",
+   "type": "civil",
+   "id": "termtfsud",
+   "name": "Термиз туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:sherobtfsud",
+   "type": "civil",
+   "id": "sherobtfsud",
+   "name": "Шеробод туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "civil:xorzvilfsud",
+   "type": "civil",
+   "id": "xorzvilfsud",
+   "name": "Хоразм вилоят суди",
+   "region": "xorazm",
+   "level": "region"
+  },
+  {
+   "key": "civil:bogottfsud",
+   "type": "civil",
+   "id": "bogottfsud",
+   "name": "Боғот туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "civil:urgatfsud",
+   "type": "civil",
+   "id": "urgatfsud",
+   "name": "Урганч туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "civil:shovtfsud",
+   "type": "civil",
+   "id": "shovtfsud",
+   "name": "Шовот туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "economic:oliyxsud",
+   "type": "economic",
+   "id": "oliyxsud",
+   "name": "Олий суд",
+   "region": null,
+   "level": "supreme"
+  },
+  {
+   "key": "economic:tashxsud",
+   "type": "economic",
+   "id": "tashxsud",
+   "name": "Тошкент шаҳар суди",
+   "region": "toshkent",
+   "level": "region"
+  },
+  {
+   "key": "economic:toshkent.t",
+   "type": "economic",
+   "id": "toshkent.t",
+   "name": "Тошкент туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "economic:toshxsud",
+   "type": "economic",
+   "id": "toshxsud",
+   "name": "Тошкент вилоят суди",
+   "region": "toshkentvil",
+   "level": "region"
+  },
+  {
+   "key": "economic:nurafshon.t",
+   "type": "economic",
+   "id": "nurafshon.t",
+   "name": "Нурафшон туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:bekobod.t",
+   "type": "economic",
+   "id": "bekobod.t",
+   "name": "Бекобод туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:zangiota.t",
+   "type": "economic",
+   "id": "zangiota.t",
+   "name": "Зангиота туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:quyichirchiq.t",
+   "type": "economic",
+   "id": "quyichirchiq.t",
+   "name": "Қуйичирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:ohangaron.t",
+   "type": "economic",
+   "id": "ohangaron.t",
+   "name": "Оҳангарон туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:urtachirchiq.t",
+   "type": "economic",
+   "id": "urtachirchiq.t",
+   "name": "Ўртачирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:chirchiq.t",
+   "type": "economic",
+   "id": "chirchiq.t",
+   "name": "Чирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:yuqorichirchiq.t",
+   "type": "economic",
+   "id": "yuqorichirchiq.t",
+   "name": "Юқоричирчиқ туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "economic:andxsud",
+   "type": "economic",
+   "id": "andxsud",
+   "name": "Андижон вилоят суди",
+   "region": "andijon",
+   "level": "region"
+  },
+  {
+   "key": "economic:andijon.t",
+   "type": "economic",
+   "id": "andijon.t",
+   "name": "Андижон туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:asaka.t",
+   "type": "economic",
+   "id": "asaka.t",
+   "name": "Асака туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:buz.t",
+   "type": "economic",
+   "id": "buz.t",
+   "name": "Бўстон туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:izboskan.t",
+   "type": "economic",
+   "id": "izboskan.t",
+   "name": "Избоскан туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:qurgontepa.t",
+   "type": "economic",
+   "id": "qurgontepa.t",
+   "name": "Қўрғонтепа туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:xujaobod.t",
+   "type": "economic",
+   "id": "xujaobod.t",
+   "name": "Хўжаобод туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "economic:buxxsud",
+   "type": "economic",
+   "id": "buxxsud",
+   "name": "Бухоро вилоят суди",
+   "region": "buxoro",
+   "level": "region"
+  },
+  {
+   "key": "economic:buxoro.t",
+   "type": "economic",
+   "id": "buxoro.t",
+   "name": "Бухоро туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:gijduvon.t",
+   "type": "economic",
+   "id": "gijduvon.t",
+   "name": "Ғиждувон туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:kogon.t",
+   "type": "economic",
+   "id": "kogon.t",
+   "name": "Когон туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:qorakul.t",
+   "type": "economic",
+   "id": "qorakul.t",
+   "name": "Қоракўл туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:peshku.t",
+   "type": "economic",
+   "id": "peshku.t",
+   "name": "Пешку туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:romitan.t",
+   "type": "economic",
+   "id": "romitan.t",
+   "name": "Ромитан туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "economic:farxsud",
+   "type": "economic",
+   "id": "farxsud",
+   "name": "Фарғона вилоят суди",
+   "region": "fargona",
+   "level": "region"
+  },
+  {
+   "key": "economic:quqon.t",
+   "type": "economic",
+   "id": "quqon.t",
+   "name": "Қўқон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "economic:margilon.t",
+   "type": "economic",
+   "id": "margilon.t",
+   "name": "Марғилон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "economic:rishton.t",
+   "type": "economic",
+   "id": "rishton.t",
+   "name": "Риштон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "economic:uzbekiston.t",
+   "type": "economic",
+   "id": "uzbekiston.t",
+   "name": "Ўзбекистон туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "economic:fargona.t",
+   "type": "economic",
+   "id": "fargona.t",
+   "name": "Фарғона туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "economic:jizxsud",
+   "type": "economic",
+   "id": "jizxsud",
+   "name": "Жиззах вилоят суди",
+   "region": "jizzax",
+   "level": "region"
+  },
+  {
+   "key": "economic:gallaorol.t",
+   "type": "economic",
+   "id": "gallaorol.t",
+   "name": "Ғаллаорол туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "economic:dustlik.t",
+   "type": "economic",
+   "id": "dustlik.t",
+   "name": "Дўстлик туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "economic:jizzax.t",
+   "type": "economic",
+   "id": "jizzax.t",
+   "name": "Жиззах туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "economic:zomin.t",
+   "type": "economic",
+   "id": "zomin.t",
+   "name": "Зомин туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "economic:forish.t",
+   "type": "economic",
+   "id": "forish.t",
+   "name": "Фориш туман суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "economic:namxsud",
+   "type": "economic",
+   "id": "namxsud",
+   "name": "Наманган вилоят суди",
+   "region": "namangan",
+   "level": "region"
+  },
+  {
+   "key": "economic:namangan.t",
+   "type": "economic",
+   "id": "namangan.t",
+   "name": "Наманган туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "economic:uchqurgon.t",
+   "type": "economic",
+   "id": "uchqurgon.t",
+   "name": "Учқўрғон туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "economic:chust.t",
+   "type": "economic",
+   "id": "chust.t",
+   "name": "Чуст туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "economic:yangiqurgon.t",
+   "type": "economic",
+   "id": "yangiqurgon.t",
+   "name": "Янгиқўрғон туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "economic:navxsud",
+   "type": "economic",
+   "id": "navxsud",
+   "name": "Навоий вилоят суди",
+   "region": "navoiy",
+   "level": "region"
+  },
+  {
+   "key": "economic:navoiy.t",
+   "type": "economic",
+   "id": "navoiy.t",
+   "name": "Навоий туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "economic:zarafshon.t",
+   "type": "economic",
+   "id": "zarafshon.t",
+   "name": "Зарафшон туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "economic:karmana.t",
+   "type": "economic",
+   "id": "karmana.t",
+   "name": "Кармана туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "economic:navbahor.t",
+   "type": "economic",
+   "id": "navbahor.t",
+   "name": "Навбаҳор туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "economic:uchquduq.t",
+   "type": "economic",
+   "id": "uchquduq.t",
+   "name": "Учқудуқ туман суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "economic:qashxsud",
+   "type": "economic",
+   "id": "qashxsud",
+   "name": "Қашқадарё вилоят суди",
+   "region": "qashqadaryo",
+   "level": "region"
+  },
+  {
+   "key": "economic:guzor.t",
+   "type": "economic",
+   "id": "guzor.t",
+   "name": "Ғузор туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:qarshi.t",
+   "type": "economic",
+   "id": "qarshi.t",
+   "name": "Қарши туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:kasbi.t",
+   "type": "economic",
+   "id": "kasbi.t",
+   "name": "Касби туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:koson.t",
+   "type": "economic",
+   "id": "koson.t",
+   "name": "Косон туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:chiroqchi.t",
+   "type": "economic",
+   "id": "chiroqchi.t",
+   "name": "Чироқчи туман суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:shaxrisabz.t",
+   "type": "economic",
+   "id": "shaxrisabz.t",
+   "name": "Шаҳрисабз туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:yakkabog.t",
+   "type": "economic",
+   "id": "yakkabog.t",
+   "name": "Яккабоғ туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:QRxsud",
+   "type": "economic",
+   "id": "QRxsud",
+   "name": "Қорақалпоғистон Республикаси суди",
+   "region": "qoraqalpoq",
+   "level": "region"
+  },
+  {
+   "key": "economic:amudaryo.t",
+   "type": "economic",
+   "id": "amudaryo.t",
+   "name": "Амударё туман суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "economic:beruniy.t",
+   "type": "economic",
+   "id": "beruniy.t",
+   "name": "Беруний туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "economic:qungirot.t",
+   "type": "economic",
+   "id": "qungirot.t",
+   "name": "Қўнғирот туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "economic:nukus.t",
+   "type": "economic",
+   "id": "nukus.t",
+   "name": "Нукус туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "economic:chimboy.t",
+   "type": "economic",
+   "id": "chimboy.t",
+   "name": "Чимбой туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "economic:samxsud",
+   "type": "economic",
+   "id": "samxsud",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "region"
+  },
+  {
+   "key": "economic:samarqand.sh",
+   "type": "economic",
+   "id": "samarqand.sh",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:jomboy.t",
+   "type": "economic",
+   "id": "jomboy.t",
+   "name": "Жомбой туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:ishtixon.t",
+   "type": "economic",
+   "id": "ishtixon.t",
+   "name": "Иштихон туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:kattaqurgon.t",
+   "type": "economic",
+   "id": "kattaqurgon.t",
+   "name": "Каттақўрғон туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:nurobod.t",
+   "type": "economic",
+   "id": "nurobod.t",
+   "name": "Нуробод туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:payariq.t",
+   "type": "economic",
+   "id": "payariq.t",
+   "name": "Пайариқ туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:pastdargom.t",
+   "type": "economic",
+   "id": "pastdargom.t",
+   "name": "Пастдарғом туман суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:tayloq.t",
+   "type": "economic",
+   "id": "tayloq.t",
+   "name": "Тайлоқ туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "economic:sirxsud",
+   "type": "economic",
+   "id": "sirxsud",
+   "name": "Сирдарё вилоят суди",
+   "region": "sirdaryo",
+   "level": "region"
+  },
+  {
+   "key": "economic:boyovut.t",
+   "type": "economic",
+   "id": "boyovut.t",
+   "name": "Боёвут туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:guliston.t",
+   "type": "economic",
+   "id": "guliston.t",
+   "name": "Гулистон туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:oqoltin.t",
+   "type": "economic",
+   "id": "oqoltin.t",
+   "name": "Оқолтин туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:sirdaryo.t",
+   "type": "economic",
+   "id": "sirdaryo.t",
+   "name": "Сирдарё туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:suxsud",
+   "type": "economic",
+   "id": "suxsud",
+   "name": "Сурхондарё вилоят суди",
+   "region": "surxondaryo",
+   "level": "region"
+  },
+  {
+   "key": "economic:boysun.t",
+   "type": "economic",
+   "id": "boysun.t",
+   "name": "Бойсун туман суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:denov.t",
+   "type": "economic",
+   "id": "denov.t",
+   "name": "Денов туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:qumqurgon.t",
+   "type": "economic",
+   "id": "qumqurgon.t",
+   "name": "Қумқўрғон туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:sariosiyo.t",
+   "type": "economic",
+   "id": "sariosiyo.t",
+   "name": "Сариосиё туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:termiz.t",
+   "type": "economic",
+   "id": "termiz.t",
+   "name": "Термиз туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:sherobod.t",
+   "type": "economic",
+   "id": "sherobod.t",
+   "name": "Шеробод туманлараро суди",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "economic:xorxsud",
+   "type": "economic",
+   "id": "xorxsud",
+   "name": "Хоразм вилоят суди",
+   "region": "xorazm",
+   "level": "region"
+  },
+  {
+   "key": "economic:bogot.t",
+   "type": "economic",
+   "id": "bogot.t",
+   "name": "Боғот туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "economic:urganch.t",
+   "type": "economic",
+   "id": "urganch.t",
+   "name": "Урганч туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "economic:shovot.t",
+   "type": "economic",
+   "id": "shovot.t",
+   "name": "Шовот туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  },
+  {
+   "key": "administrative:oliymsud",
+   "type": "administrative",
+   "id": "oliymsud",
+   "name": "Олий суд",
+   "region": null,
+   "level": "supreme"
+  },
+  {
+   "key": "administrative:tashmsud",
+   "type": "administrative",
+   "id": "tashmsud",
+   "name": "Тошкент шаҳар суди",
+   "region": "toshkent",
+   "level": "region"
+  },
+  {
+   "key": "administrative:ttmsud",
+   "type": "administrative",
+   "id": "ttmsud",
+   "name": "Тошкент туманлараро суди",
+   "region": "toshkent",
+   "level": "district"
+  },
+  {
+   "key": "administrative:toshvmsud",
+   "type": "administrative",
+   "id": "toshvmsud",
+   "name": "Тошкент вилоят суди",
+   "region": "toshkentvil",
+   "level": "region"
+  },
+  {
+   "key": "administrative:ntmsud",
+   "type": "administrative",
+   "id": "ntmsud",
+   "name": "Нурафшон туманлараро суди",
+   "region": "toshkentvil",
+   "level": "district"
+  },
+  {
+   "key": "administrative:andmsud",
+   "type": "administrative",
+   "id": "andmsud",
+   "name": "Андижон вилоят суди",
+   "region": "andijon",
+   "level": "region"
+  },
+  {
+   "key": "administrative:andtmsud",
+   "type": "administrative",
+   "id": "andtmsud",
+   "name": "Андижон туманлараро суди",
+   "region": "andijon",
+   "level": "district"
+  },
+  {
+   "key": "administrative:buxmsud",
+   "type": "administrative",
+   "id": "buxmsud",
+   "name": "Бухоро вилоят суди",
+   "region": "buxoro",
+   "level": "region"
+  },
+  {
+   "key": "administrative:buxtmsud",
+   "type": "administrative",
+   "id": "buxtmsud",
+   "name": "Бухоро туманлараро суди",
+   "region": "buxoro",
+   "level": "district"
+  },
+  {
+   "key": "administrative:farmsud",
+   "type": "administrative",
+   "id": "farmsud",
+   "name": "Фарғона вилоят суди",
+   "region": "fargona",
+   "level": "region"
+  },
+  {
+   "key": "administrative:fartmsud",
+   "type": "administrative",
+   "id": "fartmsud",
+   "name": "Фарғона туманлараро суди",
+   "region": "fargona",
+   "level": "district"
+  },
+  {
+   "key": "administrative:jizmsud",
+   "type": "administrative",
+   "id": "jizmsud",
+   "name": "Жиззах вилоят суди",
+   "region": "jizzax",
+   "level": "region"
+  },
+  {
+   "key": "administrative:jtmsud",
+   "type": "administrative",
+   "id": "jtmsud",
+   "name": "Жиззах туманлараро суди",
+   "region": "jizzax",
+   "level": "district"
+  },
+  {
+   "key": "administrative:nammsud",
+   "type": "administrative",
+   "id": "nammsud",
+   "name": "Наманган вилоят суди",
+   "region": "namangan",
+   "level": "region"
+  },
+  {
+   "key": "administrative:namtmsud",
+   "type": "administrative",
+   "id": "namtmsud",
+   "name": "Наманган туманлараро суди",
+   "region": "namangan",
+   "level": "district"
+  },
+  {
+   "key": "administrative:navmsud",
+   "type": "administrative",
+   "id": "navmsud",
+   "name": "Навоий вилоят суди",
+   "region": "navoiy",
+   "level": "region"
+  },
+  {
+   "key": "administrative:navoiytmsud",
+   "type": "administrative",
+   "id": "navoiytmsud",
+   "name": "Навоий туманлараро суди",
+   "region": "navoiy",
+   "level": "district"
+  },
+  {
+   "key": "administrative:qashmsud",
+   "type": "administrative",
+   "id": "qashmsud",
+   "name": "Қашқадарё вилоят суди",
+   "region": "qashqadaryo",
+   "level": "region"
+  },
+  {
+   "key": "administrative:qtmsud",
+   "type": "administrative",
+   "id": "qtmsud",
+   "name": "Қарши туманлараро суди",
+   "region": "qashqadaryo",
+   "level": "district"
+  },
+  {
+   "key": "administrative:QRmsud",
+   "type": "administrative",
+   "id": "QRmsud",
+   "name": "Қорақалпоғистон Республикаси суди",
+   "region": "qoraqalpoq",
+   "level": "region"
+  },
+  {
+   "key": "administrative:nuktmsud",
+   "type": "administrative",
+   "id": "nuktmsud",
+   "name": "Нукус туманлараро суди",
+   "region": "qoraqalpoq",
+   "level": "district"
+  },
+  {
+   "key": "administrative:sammsud",
+   "type": "administrative",
+   "id": "sammsud",
+   "name": "Самарқанд вилоят суди",
+   "region": "samarqand",
+   "level": "region"
+  },
+  {
+   "key": "administrative:samtmsud",
+   "type": "administrative",
+   "id": "samtmsud",
+   "name": "Самарқанд туманлараро суди",
+   "region": "samarqand",
+   "level": "district"
+  },
+  {
+   "key": "administrative:sirvmsud",
+   "type": "administrative",
+   "id": "sirvmsud",
+   "name": "Сирдарё вилоят суди",
+   "region": "sirdaryo",
+   "level": "region"
+  },
+  {
+   "key": "administrative:gtmsud",
+   "type": "administrative",
+   "id": "gtmsud",
+   "name": "Гулистон туманлараро суди",
+   "region": "sirdaryo",
+   "level": "district"
+  },
+  {
+   "key": "administrative:surmsud",
+   "type": "administrative",
+   "id": "surmsud",
+   "name": "Сурхондарё вилоят суди",
+   "region": "surxondaryo",
+   "level": "region"
+  },
+  {
+   "key": "administrative:tertmsud",
+   "type": "administrative",
+   "id": "tertmsud",
+   "name": "Термиз туманлараро судии",
+   "region": "surxondaryo",
+   "level": "district"
+  },
+  {
+   "key": "administrative:xormsud",
+   "type": "administrative",
+   "id": "xormsud",
+   "name": "Хоразм вилоят суди",
+   "region": "xorazm",
+   "level": "region"
+  },
+  {
+   "key": "administrative:urgtmsud",
+   "type": "administrative",
+   "id": "urgtmsud",
+   "name": "Урганч туманлараро суди",
+   "region": "xorazm",
+   "level": "district"
+  }
+ ]
+}
