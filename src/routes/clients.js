@@ -999,15 +999,16 @@ clients.post("/:id/merge", managersOnly, async (req, res, next) => {
 });
 
 // ----------------------------------------------------------------- cases
-// A new case for a client someone works on — not for an operator who only
-// sees a past result: the case would be theirs, and the client's details
-// with it. A returning client with something new is booked in from the
-// calendar instead (that starts their new consultation, lib/clientsDb.js).
+// A new case for a client someone may see. An operator who only sees a past
+// result may too: a returning client with something new is a consultation
+// again, and theirs (the portal's "Yangi masala" on the result view; booking
+// them in does the same, lib/clientsDb.js). What they may set on it is an
+// operator's (newCaseInput).
 clients.post("/:id/cases", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
-    await requireClientAccess(req.user, clientId, { write: true });
+    await requireClientAccess(req.user, clientId);
     const b = newCaseInput(req, req.body);
     const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId, req)) || {}) };
     const operatorId = (await operatorFor(req, b.operatorId)) ?? req.user.employee?.id ?? null;

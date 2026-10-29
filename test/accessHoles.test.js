@@ -197,12 +197,15 @@ function clientWithCase(status) {
   return created;
 }
 
-test("an operator who only sees a past result can't add a case to that client", async () => {
+test("an operator who only sees a past result may still add a new matter, with an operator's fields only", async () => {
   const created = clientWithCase("contract");
-  const res = await call(operator, "POST", "/api/clients/1/cases", { matter: "Meros", status: "consultation" });
-  assert.equal(res.status, 403);
-  assert.equal(res.body.error, "result_only");
+  const done = await call(operator, "POST", "/api/clients/1/cases", { matter: "Meros", status: "done" });
+  assert.equal(done.status, 403);
   assert.deepEqual(created, []);
+  const ok = await call(operator, "POST", "/api/clients/1/cases", { matter: "Meros", status: "consultation" });
+  assert.ok(ok.status < 300, `status ${ok.status}`);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].status, "consultation");
 });
 
 test("a new case takes only what its operator may set: no finished case, no contract date of their own", async () => {
