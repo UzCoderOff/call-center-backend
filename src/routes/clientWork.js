@@ -7,7 +7,7 @@ const env = require("../config/env");
 const { requireAuth, isManager, isLawyer } = require("../middleware/auth");
 const { badRequest, parseId } = require("../utils/params");
 const { firmNow, firmDayRange, shiftDate } = require("../lib/firmTime");
-const { requireClientAccess } = require("../lib/clientAccess");
+const { requireClientAccess, worksOnCase } = require("../lib/clientAccess");
 const { INCOMING_DIR, removeQuietly } = require("../utils/fileStorage");
 const { events } = require("../lib/events");
 const cl = require("../services/clients");
@@ -256,13 +256,18 @@ followUps.get("/no-next-step", async (req, res, next) => {
   }
 });
 
-async function followUpFor(req) {
+// `closing`: marking it done or cancelled.
+async function followUpFor(req, { closing = false } = {}) {
   const row = await prisma.clientFollowUp.findUnique({ where: { id: parseId(req.params.id) } });
   if (!row) throw fail(404, "not_found");
   const { roles, level } = await requireClientAccess(req.user, row.clientId, { write: true });
-  if (row.caseId && level !== "manager" && (!roles.get(row.caseId) || roles.get(row.caseId) === "result")) throw fail(404, "not_found");
+  if (row.caseId && level !== "manager" && !worksOnCase(roles.get(row.caseId))) throw fail(404, "not_found");
   // Yours (given to you or by you), one nobody is assigned to, or a manager.
-  const mayChange = isManager(req.user) || row.assigneeId === req.user.id || row.createdById === req.user.id || row.assigneeId == null;
+  // Marking one done: also anyone who works on its case — a case's
+  // follow-up is the case's work, whoever it's written to (2026-10-29: the
+  // boss gave themselves a call on a coordinator's case; the coordinator
+  // made the call and couldn't mark it). Moving it stays with those above.
+  const mayChange = isManager(req.user) || row.assigneeId === req.user.id || row.createdById === req.user.id || row.assigneeId == null || (closing && row.caseId != null);
   if (!mayChange) throw fail(403, "forbidden");
   return { row, roles };
 }
@@ -296,7 +301,7 @@ followUps.patch("/:id", async (req, res, next) => {
 // once: "no answer, try again tomorrow" ({ next: { kind, dueAt, … } }).
 followUps.post("/:id/close", async (req, res, next) => {
   try {
-    const { row, roles } = await followUpFor(req);
+    const { row, roles } = await followUpFor(req, { closing: true });
     if (row.status !== "open") throw badRequest("already closed");
     const close = fu.normalizeClose(req.body);
     const result = await prisma.$transaction(async (tx) => {
