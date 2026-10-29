@@ -3,6 +3,7 @@ const prisma = require("../lib/prisma");
 const { requireAuth, isManager } = require("../middleware/auth");
 const { parseId } = require("../utils/params");
 const { clientScope } = require("../lib/clientAccess");
+const { canSeeFinance } = require("../lib/finance");
 
 // Ledger AI's suggestions about clients (services/ai/reports.js):
 //
@@ -11,11 +12,23 @@ const { clientScope } = require("../lib/clientAccess");
 //   PATCH /api/ai-suggestions/:id               { done: true } | { dismissed: true }
 //   POST  /api/ai-suggestions/run               managers: a new look now
 //
-// Someone sees only suggestions about clients they may see.
+// Someone sees only suggestions about clients they may see — and one about
+// client money (kind "money") only with the right to that money
+// (lib/finance.js): Moliya, or it's theirs as the coordinator of every
+// contract case of that client.
 const router = express.Router();
 router.use(requireAuth);
 
 const PERSON = { select: { id: true, username: true, name: true, employee: { select: { name: true } } } };
+
+function moneyScope(user) {
+  if (canSeeFinance(user)) return {};
+  const me = user.employee?.id;
+  const theirs = me
+    ? [{ forUserId: user.id, client: { cases: { some: { coordinatorId: me }, none: { status: "contract", OR: [{ coordinatorId: null }, { coordinatorId: { not: me } }] } } } }]
+    : [];
+  return { OR: [{ kind: { not: "money" } }, ...theirs] };
+}
 
 router.get("/", async (req, res, next) => {
   try {
@@ -27,6 +40,7 @@ router.get("/", async (req, res, next) => {
         AND: [
           team ? {} : isManager(req.user) ? { OR: [{ forUserId: req.user.id }, { forUserId: null }] } : { forUserId: req.user.id },
           { OR: [{ clientId: null }, { client: { archivedAt: null, ...clientScope(req.user) } }] },
+          moneyScope(req.user),
         ],
       },
       orderBy: [{ priority: "asc" }, { createdAt: "desc" }],
@@ -41,7 +55,7 @@ router.get("/", async (req, res, next) => {
 
 router.patch("/:id", async (req, res, next) => {
   try {
-    const row = await prisma.aiSuggestion.findUnique({ where: { id: parseId(req.params.id) } });
+    const row = await prisma.aiSuggestion.findFirst({ where: { AND: [{ id: parseId(req.params.id) }, moneyScope(req.user)] } });
     if (!row || (row.forUserId !== req.user.id && !isManager(req.user))) return res.status(404).json({ error: "not_found" });
     const data = req.body?.done ? { doneAt: new Date() } : req.body?.dismissed ? { dismissedAt: new Date() } : null;
     if (!data) return res.status(400).json({ error: "done or dismissed" });
@@ -77,3 +91,4 @@ features.get("/", async (req, res, next) => {
 
 module.exports = router;
 module.exports.features = features;
+module.exports.moneyScope = moneyScope;

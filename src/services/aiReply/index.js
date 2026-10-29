@@ -319,6 +319,8 @@ async function answer(chatId, { mode, now = new Date() } = {}) {
   const out = P.clean(reply.out);
   const lead = mergeLead(chat.aiLead, out.lead);
   const data = { aiStage: out.stage, aiLead: lead, aiAt: now };
+  // The number it picked out shows on the chat — only a claim: it never links
+  // the chat to a client on its own (tgInbox.record); staff do, after checking.
   if (lead.phone && !chat.phone) {
     const phone = inbox.phoneIn(lead.phone);
     if (phone) Object.assign(data, { phone, phoneKey: require("../../lib/phone").phoneKey(phone) });

@@ -352,6 +352,56 @@ const ACTIONS = {
 
 const STATUS_WORDS = { done: "✅ Bajarildi", cancelled: "✖️ Bekor qilindi", failed: "⚠️ Bajarilmadi" };
 
+// What the card shows under its summary: the full text that will be saved —
+// a reminder's or task's notes (up to 2000 characters), a long client note
+// the summary cuts. Read from the args, so it is exactly what runs.
+function cardDetails(action) {
+  const a = action?.args || {};
+  switch (action?.tool) {
+    case "create_reminder":
+    case "create_task":
+      return a.notes || null;
+    case "edit_task":
+      return a.changes?.notes || null;
+    case "add_client_note":
+      return typeof a.text === "string" && a.text.length > 160 ? a.text : null;
+    default:
+      return null;
+  }
+}
+
+// A clear, short yes — the only answer that lets the model confirm an action
+// (Uzbek Latin and Cyrillic, Russian, English). Anything else — "ha, lekin
+// ertaga", a question, a new request — and it must ask again or the person
+// taps Tasdiqlash.
+const YES_WORDS = [
+  "ha", "xa", "mayli", "tasdiqlayman", "tasdiqla", "tasdiqlang", "tasdiq", "boʻpti", "xoʻp", "albatta", "ok", "okay", "okey",
+  "ҳа", "ха", "майли", "тасдиқлайман", "тасдиқла", "тасдиқланг", "бўпти", "хўп", "албатта", "ок", "окей",
+  "да", "хорошо", "ладно", "подтверждаю", "давай",
+  "yes", "yep", "sure", "confirm", "confirmed",
+  "👍", "✅",
+];
+// Words that may come with the yes and change nothing ("ha, rahmat").
+const YES_FILLERS = ["rahmat", "raxmat", "iltimos", "qiling", "qil", "рахмат", "илтимос", "қилинг", "спасибо", "пожалуйста", "please", "thanks", "go", "ahead"];
+// Apostrophes of every kind out, a held letter once ("haaa" — "ha").
+const yesKey = (word) => word.replace(/['ʻʼ‘’`]/g, "").replace(/(.)\1+/gu, "$1");
+const YES = new Set(YES_WORDS.map(yesKey));
+const FILLER = new Set(YES_FILLERS.map(yesKey));
+
+function isClearYes(text) {
+  const s = String(text || "")
+    .toLocaleLowerCase()
+    .replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}]/gu, "")
+    .trim();
+  // "Ha?" is a question («what?»), not a yes.
+  if (!s || s.length > 40 || /[?？]/.test(s)) return false;
+  const words = s
+    .split(/[\s.,!?;:()"«»…—–-]+/u)
+    .filter(Boolean)
+    .map(yesKey);
+  return words.length > 0 && words.length <= 4 && words.some((w) => YES.has(w)) && words.every((w) => YES.has(w) || FILLER.has(w));
+}
+
 // The model's side: prepare one (saved as a card in the chat) …
 async function prepare(name, rawArgs, user, conv) {
   const action = ACTIONS[name];
@@ -380,9 +430,9 @@ async function prepare(name, rawArgs, user, conv) {
 const deciding = new Set();
 
 // … and run it (or drop it) — from the card's buttons or confirm_action.
-// `fromModel`: the model asking — it may only confirm once the person has
-// written something after the card appeared (their "ha"), never in the
-// same turn that prepared it.
+// `fromModel`: the model asking — it may only confirm when the person's
+// latest message after the card is a clear, short yes (isClearYes), never in
+// the same turn that prepared it, never on anything else they wrote.
 async function decide(conv, messageId, user, decision, { fromModel = false } = {}) {
   const id = Number(messageId);
   const load = () => prisma.message.findUnique({ where: { id } });
@@ -391,8 +441,15 @@ async function decide(conv, messageId, user, decision, { fromModel = false } = {
   if (!message || message.conversationId !== conv.id || !action) throw bad("no such action");
   if (action.status !== "pending") return { status: action.status, summary: action.summary, already: true };
   if (fromModel && decision === "confirm") {
-    const answered = await prisma.message.count({ where: { conversationId: conv.id, authorId: user.id, deletedAt: null, id: { gt: id } } });
-    if (!answered) throw bad("the user hasn't answered yet — ask them to confirm first, and call confirm_action only after their yes");
+    const latest = await prisma.message.findFirst({
+      where: { conversationId: conv.id, authorId: user.id, deletedAt: null, id: { gt: id } },
+      orderBy: { id: "desc" },
+      select: { text: true },
+    });
+    if (!latest) throw bad("the user hasn't answered yet — ask them to confirm first, and call confirm_action only after their yes");
+    if (!isClearYes(latest.text)) {
+      throw bad("the user's latest message isn't a clear yes — ask them to answer «ha» or tap Tasdiqlash on the card; if they asked for a change, cancel_action and prepare a new one");
+    }
   }
   if (deciding.has(id)) return { status: "pending", summary: action.summary, busy: true };
   deciding.add(id);
@@ -451,4 +508,4 @@ async function run(name, args, user, conv) {
   return { error: `unknown tool ${name}` };
 }
 
-module.exports = { ACTIONS, definitions, handles, run, decide, prepare, moment };
+module.exports = { ACTIONS, definitions, handles, run, decide, prepare, moment, cardDetails, isClearYes };

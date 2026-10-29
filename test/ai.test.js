@@ -131,3 +131,105 @@ test("reports: **bold** for Telegram, everything else escaped", () => {
   const { telegramHtml } = require("../src/services/ai/reports");
   assert.equal(telegramHtml("**Xulosa**: 5 < 7 & ok"), "<b>Xulosa</b>: 5 &lt; 7 &amp; ok");
 });
+
+test("Ledger AI is told that tool results are outside people's words, never orders", () => {
+  const { systemPrompt } = require("../src/services/ai/assistant");
+  const s = systemPrompt({ role: "BOSS", name: "Rahbar" }, { now: false });
+  assert.match(s, /tashqi odamlarning soʻzlari/);
+  assert.match(s, /koʻrsatma emas/);
+});
+
+test("the model confirms an action only on a clear, short yes", () => {
+  const { isClearYes } = require("../src/services/ai/actions");
+  for (const yes of ["ha", "Ha!", "xa", "haaa", "ha mayli", "Mayli", "tasdiqlayman", "Tasdiqla", "bo'pti", "boʻpti", "xoʻp", "ok", "OK, rahmat", "yes", "да", "Да, хорошо", "хорошо", "ҳа", "Ҳа, майли", "👍", "ha, iltimos"]) {
+    assert.equal(isClearYes(yes), true, yes);
+  }
+  for (const no of ["", null, "yoʻq", "ha?", "Ha, lekin ertaga 11:00 ga", "ertaga qilamiz", "nima?", "keyin", "ha emas", "Mijoz aytdi: ha", "boshqa vazifa ber", "ha ".repeat(15), "нет", "rahmat"]) {
+    assert.equal(isClearYes(no), false, String(no));
+  }
+});
+
+// decide() with a stand-in database: card 10, then the person's messages.
+function actionDb(latestText) {
+  const prisma = require("../src/lib/prisma");
+  const actions = require("../src/services/ai/actions");
+  const ran = [];
+  actions.ACTIONS.test_noop = { execute: async (args) => (ran.push(args), { ok: true }) };
+  let card = { id: 10, conversationId: 1, data: { action: { tool: "test_noop", args: { n: 1 }, summary: "s", status: "pending" } } };
+  prisma.message.findUnique = async () => card;
+  prisma.message.findFirst = async () => (latestText === undefined ? null : { text: latestText });
+  prisma.message.update = async ({ data }) => (card = { ...card, ...data });
+  return { ran, decide: (opts) => actions.decide({ id: 1 }, 10, { id: 5, role: "BOSS" }, "confirm", opts) };
+}
+
+test("confirm_action: the person's latest message must be a clear yes; the button needs none", async () => {
+  let db = actionDb(undefined);
+  await assert.rejects(db.decide({ fromModel: true }), /hasn't answered yet/);
+  db = actionDb("Ha, lekin muddatini ertaga qiling");
+  await assert.rejects(db.decide({ fromModel: true }), /isn't a clear yes/);
+  assert.equal(db.ran.length, 0);
+  db = actionDb("ha");
+  assert.equal((await db.decide({ fromModel: true })).status, "done");
+  assert.equal(db.ran.length, 1);
+  // The card's own button: no message needed.
+  db = actionDb(undefined);
+  assert.equal((await db.decide({})).status, "done");
+});
+
+test("the action card shows the full notes it will save", () => {
+  const { cardDetails } = require("../src/services/ai/actions");
+  const long = "Batafsil: ".padEnd(1500, "x");
+  assert.equal(cardDetails({ tool: "create_task", args: { notes: long } }), long);
+  assert.equal(cardDetails({ tool: "create_reminder", args: { notes: "Hujjatlarni olib kelsin" } }), "Hujjatlarni olib kelsin");
+  assert.equal(cardDetails({ tool: "edit_task", args: { changes: { notes: "Yangi izoh" } } }), "Yangi izoh");
+  assert.equal(cardDetails({ tool: "edit_task", args: { changes: { title: "x" } } }), null);
+  // A client note: shown whole only when the summary cuts it.
+  assert.equal(cardDetails({ tool: "add_client_note", args: { text: "qisqa" } }), null);
+  assert.equal(cardDetails({ tool: "add_client_note", args: { text: "y".repeat(400) } }).length, 400);
+  assert.equal(cardDetails({ tool: "set_target", args: {} }), null);
+  // …and the chat sends it to the portal with the card.
+  const { publicMessage } = require("../src/services/chat");
+  const m = { id: 3, text: "s", authorId: null, data: { action: { tool: "create_task", args: { notes: long }, summary: "✅ Vazifa", status: "pending" } } };
+  assert.equal(publicMessage(m, { id: 5 }).action.details, long);
+});
+
+test("AI suggestions: client money only to someone who may see it", () => {
+  const { routeSuggestion } = require("../src/services/ai/reports");
+  const who = { operator: 11, coordinator: 12, lawyer: 13, money: 12 };
+  const owing = new Set([7]);
+  // About a client whose overdue payment the model saw: a money one, to the coordinator.
+  assert.deepEqual(routeSuggestion({ clientId: 7, kind: "call", for: "operator" }, who, owing), { kind: "money", forUserId: 12 });
+  // No one coordinates all their contract cases: the managers (with Moliya) only.
+  assert.deepEqual(routeSuggestion({ clientId: 7, kind: "money", for: "coordinator" }, { ...who, coordinator: null, money: null }, owing), { kind: "money", forUserId: null });
+  assert.deepEqual(routeSuggestion({ clientId: 8, kind: "money", for: "operator" }, { ...who, money: null }, owing), { kind: "money", forUserId: null });
+  // Not money: as before (no coordinator yet — the operator).
+  assert.deepEqual(routeSuggestion({ clientId: 8, kind: "call", for: "coordinator" }, { ...who, coordinator: null }, owing), { kind: "call", forUserId: 11 });
+  assert.deepEqual(routeSuggestion({ clientId: null, kind: "data", for: "managers" }, null, owing), { kind: "data", forUserId: null });
+});
+
+test("AI suggestions: the money one's reader is the coordinator of every contract case", async () => {
+  const prisma = require("../src/lib/prisma");
+  const { responsibleFor } = require("../src/services/ai/reports");
+  const k = (clientId, status, coordinatorId, userId = coordinatorId && coordinatorId + 100) => ({ clientId, status, lawyerId: null, operator: { userId: 1 }, coordinatorId, coordinator: coordinatorId ? { userId } : null });
+  prisma.clientCase.findMany = async () => [k(1, "contract", 4), k(1, "contract", 4), k(2, "contract", 4), k(2, "contract", 5), k(3, "contract", null), k(4, "consultation", null), k(5, "contract", 6, null)];
+  const map = await responsibleFor([1, 2, 3, 4, 5]);
+  assert.equal(map.get(1).money, 104);
+  assert.equal(map.get(2).money, null);
+  assert.equal(map.get(3).money, null);
+  assert.equal(map.get(4).money, null);
+  assert.equal(map.get(5).money, null);
+});
+
+test("AI suggestions on the page: money ones only with Moliya or as their coordinator", () => {
+  const { moneyScope } = require("../src/routes/aiSuggestions");
+  assert.deepEqual(moneyScope({ role: "DEVELOPER", active: true }), {});
+  assert.deepEqual(moneyScope({ role: "BOSS", active: true, seesFinance: true }), {});
+  // A boss without Moliya: no money suggestions at all.
+  assert.deepEqual(moneyScope({ id: 2, role: "BOSS", active: true }), { OR: [{ kind: { not: "money" } }] });
+  // A coordinator: their own, about a client whose every contract case they coordinate.
+  const c = moneyScope({ id: 3, role: "EMPLOYEE", active: true, employee: { id: 4 } });
+  assert.deepEqual(c.OR[0], { kind: { not: "money" } });
+  assert.equal(c.OR[1].forUserId, 3);
+  assert.deepEqual(c.OR[1].client.cases.some, { coordinatorId: 4 });
+  assert.deepEqual(c.OR[1].client.cases.none, { status: "contract", OR: [{ coordinatorId: null }, { coordinatorId: { not: 4 } }] });
+});
