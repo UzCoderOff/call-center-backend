@@ -144,17 +144,25 @@ router.get("/:id", async (req, res, next) => {
   try {
     const { a: appointment, writer } = await loadFor(req.user, parseId(req.params.id));
     let a = appointment;
-    // The specialist who held it (and managers): its client's cases and
-    // people, to pick from. Anyone else (whoever booked it, the client's
-    // operator or coordinator): only the cases they work on — someone who
-    // only sees a past result, or no case, gets the appointment without the
-    // summary.
-    let visibleCase = () => writer;
-    let level = writer ? "writer" : null;
-    if (!writer && a.clientId) {
+    // The specialist who held it: the cases the summary may be about, to
+    // pick from — managers all of the client's, a lawyer only theirs and
+    // the one this consultation is for (services/consultSummary.js
+    // summaryCases); the client's people with them. Anyone else (whoever
+    // booked it, the client's operator or coordinator): only the cases they
+    // work on — someone who only sees a past result, or no case, gets the
+    // appointment without the summary.
+    let visibleCase = () => false;
+    let level = null;
+    let peopleShown = false;
+    if (writer) {
+      const scope = await s.summaryCases(prisma, req.user, a);
+      visibleCase = (caseId) => !scope || scope.has(caseId);
+      peopleShown = !scope || scope.size > 0;
+    } else if (a.clientId) {
       const access = await requireClientAccess(req.user, a.clientId).catch(() => null);
       level = access?.level ?? null;
       visibleCase = (caseId) => Boolean(access) && (access.level === "manager" || (access.roles.get(caseId) && access.roles.get(caseId) !== "result"));
+      peopleShown = level != null && level !== "result";
     }
     const summaryShown = writer || (a.caseId ? visibleCase(a.caseId) : level != null && level !== "result");
     if (!summaryShown) a = { ...a, summary: null, case: null };
@@ -166,9 +174,7 @@ router.get("/:id", async (req, res, next) => {
             orderBy: { updatedAt: "desc" },
             select: { id: true, matter: true, details: true, status: true, operator: { select: { id: true, name: true } } },
           }),
-          writer || (level && level !== "result")
-            ? prisma.clientContact.findMany({ where: { clientId: a.clientId, deletedAt: null }, select: { id: true, name: true, relation: true, decides: true } })
-            : [],
+          peopleShown ? prisma.clientContact.findMany({ where: { clientId: a.clientId, deletedAt: null }, select: { id: true, name: true, relation: true, decides: true } }) : [],
         ])
       : [[], []];
     const cases = allCases.filter((k) => visibleCase(k.id));
