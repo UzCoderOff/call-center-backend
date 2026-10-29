@@ -182,7 +182,9 @@ test("client payment and cash handover sent twice in a moment: the first one is 
   assert.equal(created.length, 0);
   // Identical in every field, by the same person, within the last few seconds.
   assert.deepEqual({ ...asked.where, createdAt: undefined }, { amount: 1000000, date: "2026-10-29", method: "cash", kind: "contract", note: null, cashHolderId: null, clientId: 9, caseId: null, recordedById: 1, editedAt: null, createdAt: undefined });
-  assert.ok(Date.now() - asked.where.createdAt.gte.getTime() <= 10_000);
+  // The window reaches 10 s back from when it was asked (a moment ago).
+  const reach = Date.now() - asked.where.createdAt.gte.getTime();
+  assert.ok(reach >= 10_000 && reach < 15_000, `reach ${reach}`);
 
   stub(t, prisma.user, "findUnique", async ({ where }) => (where.id === 1 ? person({ role: "DEVELOPER" }) : { id: 3 }));
   const handover = await call("POST", "/api/cash/handovers", { cookie, body: { userId: 3, amount: 500000 } });
