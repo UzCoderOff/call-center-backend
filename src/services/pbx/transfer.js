@@ -1,9 +1,8 @@
 const prisma = require("../../lib/prisma");
 const state = require("./state");
 const { phoneKey } = require("../../lib/phone");
-const { isManager } = require("../../middleware/auth");
 const { hasJob } = require("../../lib/jobs");
-const { canAccessClient } = require("../../lib/clientAccess");
+const { accessibleClientIds } = require("../../lib/clientAccess");
 const { searchable } = require("../clients");
 const { callerLabel } = require("./caller");
 
@@ -21,7 +20,9 @@ const { callerLabel } = require("./caller");
 //
 // What an operator learns here about someone else's client is what the rest
 // of Ledger already shows them (clientAccess.js restricted()): that the client
-// exists and who works on them — no case, no status, no money.
+// exists and who works on them — no case, no status, no money. Found by a
+// search, not even their name or number (else searching numbers would list
+// the whole client base): just "Mijoz" and its people.
 
 const ROLE = { coordinator: "Koordinator", lawyer: "Advokat", operator: "Operator" };
 const SEARCH_MIN = 3;
@@ -174,6 +175,16 @@ const phoneTail = (phone) => {
   return digits.length >= 4 ? `•• ${digits.slice(-2)}` : null;
 };
 
+// A client a search found, as this person may know them: their own (or any,
+// for managers) by name and the end of their number; someone else's only as
+// "Mijoz" with the people who work on them, so the call can still go there.
+// (The app shows `name` as it comes: null would read "null".)
+const OTHERS_CLIENT = "Mijoz";
+function foundClient(c, mayOpen, people) {
+  if (!mayOpen) return { id: null, name: OTHERS_CLIENT, phone: null, restricted: true, people };
+  return { id: c.id, name: c.name, phone: phoneTail(c.phones?.[0]?.phone), people };
+}
+
 // The transfer panel: { forCaller, clients, colleagues }.
 //   number  the other side of the call: the people who work on that client
 //   q       a client's name or number (3+ letters), or a colleague's name
@@ -205,19 +216,12 @@ async function transferTargets(user, { number, q } = {}) {
       take: SEARCH_MAX,
       select: { id: true, name: true, phones: { orderBy: { id: "asc" }, take: 1, select: { phone: true } }, cases: { select: CASE_PEOPLE } },
     });
-    clients = await Promise.all(
-      rows.map(async (c) => ({
-        id: (await canAccessClient(user, c.id)) || isManager(user) ? c.id : null,
-        name: c.name,
-        phone: phoneTail(c.phones[0]?.phone),
-        people: notMe(peopleOf(c, byEmployee)),
-      }))
-    );
-    clients = clients.filter((c) => c.people.length > 0);
+    const mayOpen = await accessibleClientIds(user, rows.map((c) => c.id));
+    clients = rows.map((c) => foundClient(c, mayOpen.has(c.id), notMe(peopleOf(c, byEmployee)))).filter((c) => c.people.length > 0);
   }
 
   const people = words.length ? all.filter((c) => words.every((w) => searchable(c.name).includes(w))) : all;
   return { forCaller, clients, colleagues: people };
 }
 
-module.exports = { transferCall, transferTargets, findClientLeg, reachabilityOf, peopleOf, TransferError };
+module.exports = { transferCall, transferTargets, findClientLeg, reachabilityOf, peopleOf, foundClient, TransferError };

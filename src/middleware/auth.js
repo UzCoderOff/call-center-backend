@@ -13,7 +13,24 @@ const isLawyer = (user) => Boolean(user) && user.role === "LAWYER";
 // linked Employee record, if any) to req.user. The account is re-fetched
 // from the DB on every request — not just decoded from the token — so a
 // deactivated account or a role change takes effect immediately.
+//
+// Someone still on a temporary password (a new account, or one a manager
+// reset) is asked to choose their own by the portal, which shows only that
+// screen until they do (SetPasswordPage). The server doesn't refuse their
+// other requests: it did for an hour on 2026-10-29 and broke an operator's
+// app, whose open portal page was the one from before that screen existed.
+// requireAuthAllowingTempPassword stays for the routes that must keep
+// working if that refusal ever comes back (who they are, changing the
+// password, signing out).
 async function requireAuth(req, res, next) {
+  return checkSession(req, res, next);
+}
+
+async function requireAuthAllowingTempPassword(req, res, next) {
+  return checkSession(req, res, next);
+}
+
+async function checkSession(req, res, next) {
   try {
     const token = req.cookies?.session;
     if (!token) return res.status(401).json({ error: "unauthorized" });
@@ -58,4 +75,4 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireAuth, requireRole, ROLES, MANAGER_ROLES, isManager, isLawyer };
+module.exports = { requireAuth, requireAuthAllowingTempPassword, requireRole, ROLES, MANAGER_ROLES, isManager, isLawyer };

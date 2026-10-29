@@ -12,9 +12,11 @@ const { workScope, CONTRACT_STATUSES } = require("../lib/clientAccess");
 // bot every message of the account's private chats — the client's and the
 // firm's own replies typed in the Telegram app — as business_message updates
 // (services/telegram/bot.js passes them here). Ledger keeps them: one TgChat
-// per person, its TgMessages, linked to their client when their number is a
-// client's. Nothing is sent from here yet — the operator answers in the
-// Telegram app; Ledger sees both sides.
+// per person, its TgMessages, linked to their client when their own number
+// — shared with Telegram's contact button, so Telegram vouches for it — is a
+// client's. A number they only type is kept on the chat, never linked on its
+// own: staff link it (2026-10-29). Nothing is sent from here yet — the
+// operator answers in the Telegram app; Ledger sees both sides.
 //
 // Who sees which chat (the firm's rules, 2026-10-15 and 2026-10-17):
 //   - managers: all
@@ -128,15 +130,21 @@ function phoneIn(text) {
   return national ? `+998${national}` : null;
 }
 
-// Their own number: a contact of themselves they shared, else one they typed.
+// A number they typed (or the AI picked out of what they wrote): anyone can
+// type anyone's number, so it is only a claim.
+const typed = (phone) => (phone ? { phone, vouched: false } : null);
+
+// Their own number: a contact of themselves they shared with Telegram's
+// button — Telegram vouches for it (the contact's account is the sender) —
+// else one they typed. -> { phone, vouched } | null
 function phoneFrom(msg, tgUserId) {
   const c = msg.contact;
   // A contact without a Telegram account behind it is someone else's (a relative…).
   if (c?.phone_number && c.user_id != null && String(c.user_id) === tgUserId) {
     const digits = c.phone_number.replace(/\D/g, "");
-    return digits ? `+${digits}` : null;
+    return digits ? { phone: `+${digits}`, vouched: true } : null;
   }
-  return phoneIn(msg.text ?? msg.caption);
+  return typed(phoneIn(msg.text ?? msg.caption));
 }
 
 // The one client with this number, if there is exactly one.
@@ -216,8 +224,8 @@ const AI_PAUSE_MS = 12 * 60 * 60 * 1000;
 // One message into a chat, from Telegram or Instagram (services/igInbox.js):
 // kept, and the chat follows — waiting or answered, their number, the client
 // it goes with, the AI stepping back when a person answers. `phoneOf` finds
-// their own number in it. -> the chat
-async function record(chat, m, phoneOf = () => phoneIn(m.text)) {
+// their own number in it: { phone, vouched } (phoneFrom). -> the chat
+async function record(chat, m, phoneOf = () => typed(phoneIn(m.text))) {
   const { out, auto = false, ai = false, sentAt } = m;
   try {
     await prisma.tgMessage.create({
@@ -243,6 +251,8 @@ async function record(chat, m, phoneOf = () => phoneIn(m.text)) {
   }
 
   const data = {};
+  // A number Telegram vouches for, in this message.
+  let vouchedKey = null;
   if (!chat.lastMessageAt || sentAt > chat.lastMessageAt) data.lastMessageAt = sentAt;
   if (out && !auto) {
     data.lastOutAt = sentAt;
@@ -253,15 +263,20 @@ async function record(chat, m, phoneOf = () => phoneIn(m.text)) {
     if (!chat.waitingSince) data.waitingSince = sentAt;
     // The AI took it out of the list; they've written again — a person looks.
     if (chat.aiHidden) Object.assign(data, { hidden: false, aiHidden: false });
-    if (!chat.phone) {
-      const phone = phoneOf();
-      if (phone) Object.assign(data, { phone, phoneKey: phoneKey(phone) });
-    }
+    // The first number they give is kept; one Telegram vouches for replaces
+    // one they only typed.
+    const found = phoneOf();
+    const key = found ? phoneKey(found.phone) : null;
+    if (found && (!chat.phone || (found.vouched && key !== chat.phoneKey))) Object.assign(data, { phone: found.phone, phoneKey: key });
+    if (found?.vouched) vouchedKey = key;
   }
-  // Their number is a client's: the chat goes with that client (unless a
-  // person has already decided whose it is).
-  if (!chat.clientId && chat.autoLink) {
-    const clientId = await clientByPhone(data.phoneKey || chat.phoneKey);
+  // Their own number, vouched for by Telegram, is a client's: the chat goes
+  // with that client (unless a person has already decided whose it is). A
+  // typed number never links on its own — anyone can type a client's number
+  // to pass as them: it shows on the chat, and staff link it after checking
+  // (Bogʻlash, which finds whose number it is).
+  if (!chat.clientId && chat.autoLink && vouchedKey) {
+    const clientId = await clientByPhone(vouchedKey);
     if (clientId) data.clientId = clientId;
   }
   const updated = Object.keys(data).length ? await prisma.tgChat.update({ where: { id: chat.id }, data }) : chat;

@@ -253,8 +253,12 @@ function publicMessage(m, viewer) {
     text: m.deletedAt ? "" : m.text,
     deleted: Boolean(m.deletedAt),
     event: m.eventAt && !m.deletedAt ? { title: m.eventTitle, at: m.eventAt } : null,
-    // Ledger AI: something it offers to do (services/ai/actions.js).
-    action: m.data?.action && !m.deletedAt ? { summary: m.data.action.summary, status: m.data.action.status, error: m.data.action.error ?? null } : null,
+    // Ledger AI: something it offers to do (services/ai/actions.js) — with the
+    // full notes it will save, so nothing is confirmed unseen.
+    action:
+      m.data?.action && !m.deletedAt
+        ? { summary: m.data.action.summary, details: require("./ai/actions").cardDetails(m.data.action), status: m.data.action.status, error: m.data.action.error ?? null }
+        : null,
     author: m.author ? { id: m.author.id, name: personName(m.author), role: m.author.role } : null,
     mine: m.authorId === viewer.id,
     createdAt: m.createdAt,

@@ -185,26 +185,47 @@ const SUGGESTION_SCHEMA = {
   },
 };
 
-// Who works on each of these clients now (their latest open case).
+// Who works on each of these clients now (their latest open case) — and who
+// may read their money (`money`): the coordinator, when one person
+// coordinates every contract case of the client (lib/finance.js
+// canSeeCaseMoney); otherwise nobody but the managers with Moliya.
 async function responsibleFor(clientIds) {
   const cases = await prisma.clientCase.findMany({
     where: { clientId: { in: clientIds }, status: { in: ["consultation", "call_again", "contract"] } },
     orderBy: { updatedAt: "desc" },
-    select: { clientId: true, lawyerId: true, operator: { select: { userId: true } }, coordinator: { select: { userId: true } } },
+    select: { clientId: true, status: true, lawyerId: true, operator: { select: { userId: true } }, coordinatorId: true, coordinator: { select: { userId: true } } },
   });
   const map = new Map();
   for (const k of cases) {
     if (map.has(k.clientId)) continue;
-    map.set(k.clientId, { operator: k.operator?.userId ?? null, coordinator: k.coordinator?.userId ?? null, lawyer: k.lawyerId ?? null });
+    map.set(k.clientId, { operator: k.operator?.userId ?? null, coordinator: k.coordinator?.userId ?? null, lawyer: k.lawyerId ?? null, money: null });
+  }
+  for (const [clientId, who] of map) {
+    const contracts = cases.filter((k) => k.clientId === clientId && k.status === "contract");
+    const coordinators = new Set(contracts.map((k) => k.coordinatorId));
+    const only = contracts[0]?.coordinator?.userId ?? null;
+    if (contracts.length && coordinators.size === 1 && !coordinators.has(null)) who.money = only;
   }
   return map;
+}
+
+// A suggestion with client money in it: kind "money", or about a client whose
+// overdue payments the model was shown. It goes to the person who may read
+// that money (responsibleFor), else to the managers — and the managers
+// without Moliya don't see it either (routes/aiSuggestions.js).
+function routeSuggestion(x, who, moneyClients) {
+  const money = x.kind === "money" || (x.clientId != null && moneyClients.has(x.clientId));
+  if (money) return { kind: "money", forUserId: who?.money ?? null };
+  const forUserId = x.for === "managers" || !who ? null : who[x.for] ?? who.operator ?? null;
+  return { kind: KINDS.includes(x.kind) ? x.kind : "other", forUserId };
 }
 
 async function suggestions({ force = false } = {}) {
   if (!force && !(await claudeFeatureOn("suggestions"))) return { skipped: "off" };
   const settings = await aiSettings();
-  // The whole firm's view, money included (each suggestion then goes to the
-  // person on that client — a money one to the coordinator, who sees it).
+  // The whole firm's view, money included. Each suggestion then goes to the
+  // person on that client; one with money in it only to someone who may see
+  // that money (routeSuggestion).
   const firm = { role: "DEVELOPER", active: true };
   const radar = await insights.clientRadar(firm, { limit: 30 });
   const ids = [...new Set(Object.values(radar).flat().map((r) => r.clientId).filter(Boolean))];
@@ -215,6 +236,7 @@ async function suggestions({ force = false } = {}) {
     "- text: nima qilish kerak, buyruq ohangida, 1 jumla (masalan: «Karimov Jasurga qoʻngʻiroq qiling — qarorini soʻrang, 5 kun kechikdi»).",
     "- why: nega — maʼlumotdan 1 qisqa jumla.",
     "- for: kim qiladi — operator (konsultatsiya bosqichi), coordinator (shartnomadan keyin, pul), lawyer (ish boʻyicha), managers (boshqa hollarda).",
+    "- Pul (overduePayments: muddati oʻtgan toʻlov, qarz summasi) faqat kind = money tavsiyada yozilsin; boshqa tavsiyalarda pul haqida yozmang.",
     "- priority: 1 — bugun, 2 — shu hafta, 3 — kutsa boʻladi.",
     "- clientId: roʻyxatdagi mijoz id si (boshqa raqam yozmang).",
     ...COMMON_RULES,
@@ -227,6 +249,7 @@ async function suggestions({ force = false } = {}) {
   const out = claude.jsonOf(response);
   if (!out) return { done: false, reason: response.stop_reason };
   const known = new Set(ids);
+  const moneyClients = new Set((radar.overduePayments || []).map((r) => r.clientId));
   const people = await responsibleFor(ids);
   const runId = crypto.randomUUID();
   const rows = out.suggestions
@@ -234,8 +257,8 @@ async function suggestions({ force = false } = {}) {
     .slice(0, 25)
     .map((x) => {
       const who = x.clientId != null ? people.get(x.clientId) : null;
-      const forUserId = x.for === "managers" || !who ? null : who[x.for] ?? who.operator ?? null;
-      return { clientId: x.clientId, forUserId, kind: KINDS.includes(x.kind) ? x.kind : "other", priority: [1, 2, 3].includes(x.priority) ? x.priority : 2, text: x.text.slice(0, 400), why: x.why?.slice(0, 400) || null, runId };
+      const { kind, forUserId } = routeSuggestion(x, who, moneyClients);
+      return { clientId: x.clientId, forUserId, kind, priority: [1, 2, 3].includes(x.priority) ? x.priority : 2, text: x.text.slice(0, 400), why: x.why?.slice(0, 400) || null, runId };
     });
   await prisma.$transaction(async (tx) => {
     // The new run replaces what's still open from earlier ones.
@@ -262,4 +285,4 @@ async function tick() {
   }
 }
 
-module.exports = { weeklyReport, lostAnalysis, suggestions, tick, telegramHtml, SUGGESTION_SCHEMA };
+module.exports = { weeklyReport, lostAnalysis, suggestions, tick, telegramHtml, SUGGESTION_SCHEMA, responsibleFor, routeSuggestion };

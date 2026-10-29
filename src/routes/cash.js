@@ -5,6 +5,7 @@ const { badRequest, parseId } = require("../utils/params");
 const { firmDate, isValidDate } = require("../lib/firmTime");
 const { canSeeFinance } = require("../lib/finance");
 const { cashBalances, cashHolderChoices, cashHolderId, heldWhere, holderOf, CASH_FROM } = require("../services/cash");
+const { savedJustNow } = require("../lib/doubleSubmit");
 
 // Kassa — cash in people's hands (src/services/cash.js).
 //
@@ -134,7 +135,13 @@ router.post("/handovers", kassa, async (req, res, next) => {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) throw badRequest("unknown user");
     const note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 200) : null;
-    const row = await prisma.cashHandover.create({ data: { userId, amount, date, note, receivedById: req.user.id }, include: { user: PERSON, receivedBy: PERSON } });
+    const data = { userId, amount, date, note, receivedById: req.user.id };
+    // Sent twice in a moment (src/lib/doubleSubmit.js): the first one is the answer.
+    const row = await prisma.$transaction(
+      async (tx) =>
+        (await tx.cashHandover.findFirst({ where: { ...data, createdAt: savedJustNow() }, orderBy: { id: "desc" }, include: { user: PERSON, receivedBy: PERSON } })) ||
+        tx.cashHandover.create({ data, include: { user: PERSON, receivedBy: PERSON } })
+    );
     res.status(201).json(shape(row));
   } catch (err) {
     next(err);

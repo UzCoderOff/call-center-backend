@@ -3,7 +3,9 @@ const prisma = require("../lib/prisma");
 const { verifyPassword, hashPassword } = require("../lib/passwords");
 const { startSession, endSession, publicMe } = require("../lib/session");
 const throttle = require("../lib/loginThrottle");
-const { requireAuth } = require("../middleware/auth");
+// Who you are and changing your password work on a temporary password too:
+// they are how one gets off it (middleware/auth.js).
+const { requireAuthAllowingTempPassword } = require("../middleware/auth");
 
 // Deliberately generous — this guards against trivially weak passwords
 // without being a source of confusing rejected-for-no-clear-reason support
@@ -67,7 +69,7 @@ router.post("/logout", (req, res) => {
   res.json({ ok: true });
 });
 
-router.get("/me", requireAuth, async (req, res, next) => {
+router.get("/me", requireAuthAllowingTempPassword, async (req, res, next) => {
   try {
     res.json(await withTelegram(req.user));
   } catch (err) {
@@ -80,7 +82,7 @@ router.get("/me", requireAuth, async (req, res, next) => {
 // the original temp one or something they already changed it to) so a
 // session left open on a shared/unlocked device can't be used to lock the
 // real owner out.
-router.post("/change-password", requireAuth, async (req, res, next) => {
+router.post("/change-password", requireAuthAllowingTempPassword, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body || {};
     if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword || !newPassword) {

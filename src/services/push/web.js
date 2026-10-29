@@ -14,6 +14,25 @@ const configured = () => Boolean(env.webPush.publicKey && env.webPush.privateKey
 // The "who's sending" contact push services want: the portal's address.
 const subject = () => env.portalUrl || "mailto:ledger@localhost";
 
+// The server posts each notification to the address the browser gave, so
+// only the browsers' own push services are accepted (Chrome, Firefox, Edge,
+// Safari) — never any other address, which would let someone make this
+// server send requests wherever they like.
+const PUSH_HOSTS = ["fcm.googleapis.com"];
+const PUSH_HOST_ENDINGS = [".push.services.mozilla.com", ".notify.windows.com", ".push.apple.com"];
+
+function isPushServiceUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value));
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
+  const host = url.hostname;
+  return PUSH_HOSTS.includes(host) || PUSH_HOST_ENDINGS.some((ending) => host.endsWith(ending));
+}
+
 // { title, body?, link?, tag? } -> each of this person's browsers. Browsers
 // that are gone (uninstalled, notifications revoked) are forgotten. Whether
 // at least one browser took it.
@@ -22,6 +41,8 @@ async function sendToUser(userId, payload) {
   const subs = await prisma.webPushSubscription.findMany({ where: { userId } });
   let sent = false;
   for (const sub of subs) {
+    // One saved before the address was checked: never sent to.
+    if (!isPushServiceUrl(sub.endpoint)) continue;
     try {
       await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, JSON.stringify(payload), {
         vapidDetails: { subject: subject(), publicKey: env.webPush.publicKey, privateKey: env.webPush.privateKey },
@@ -46,4 +67,4 @@ async function hasBrowser(userId) {
   return configured() && (await prisma.webPushSubscription.count({ where: { userId } })) > 0;
 }
 
-module.exports = { configured, sendToUser, hasBrowser };
+module.exports = { configured, sendToUser, hasBrowser, isPushServiceUrl };

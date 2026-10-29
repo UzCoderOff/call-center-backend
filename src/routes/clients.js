@@ -19,6 +19,7 @@ const { events: bus } = require("../lib/events");
 const { linkConsultationFees } = require("../services/consultationFee");
 const { scheduleOf, normalizeSchedule } = require("../services/installments");
 const { cashHolderId } = require("../services/cash");
+const { savedJustNow } = require("../lib/doubleSubmit");
 const entries = require("../services/caseEntries");
 const courtDirectory = require("../services/courts/directory");
 const courtSync = require("../services/courts/sync");
@@ -610,12 +611,13 @@ clients.post("/", async (req, res, next) => {
     // "Is this a new client, or one we already had?" — asked in the form;
     // only new ones count as new clients (older portals don't ask: new).
     if (b.isNew !== undefined) data.isNew = b.isNew !== false;
+    const caseIn = b.case ? newCaseInput(req, b.case) : null;
     const phones = cl.normalizePhones(b.phones || []);
     if (b.force !== true) {
       const clash = await clientsByPhoneKeys(prisma, phones.map((p) => p.phoneKey));
       if (clash.length > 0) return res.status(409).json({ error: "phone_exists", client: (await clientIndexFor(req.user, [clash[0].phoneKey])).get(clash[0].phoneKey) });
     }
-    const firstCase = b.case ? { ...cl.normalizeCase(caseInput(req, b.case), {}, today()), ...((await lawyerFor(b.case.lawyerId, req)) || {}) } : null;
+    const firstCase = caseIn ? { ...cl.normalizeCase(caseIn, {}, today()), ...((await lawyerFor(b.case.lawyerId, req)) || {}) } : null;
     const operatorId = b.case ? ((await operatorFor(req, b.case.operatorId)) ?? req.user.employee?.id ?? null) : null;
     const client = await prisma.$transaction(async (tx) => {
       const created = await tx.client.create({
@@ -1012,12 +1014,17 @@ clients.post("/:id/merge", managersOnly, async (req, res, next) => {
 });
 
 // ----------------------------------------------------------------- cases
+// A new case for a client someone may see. An operator who only sees a past
+// result may too: a returning client with something new is a consultation
+// again, and theirs (the portal's "Yangi masala" on the result view; booking
+// them in does the same, lib/clientsDb.js). What they may set on it is an
+// operator's (newCaseInput).
 clients.post("/:id/cases", async (req, res, next) => {
   try {
     const clientId = parseId(req.params.id);
     await loadClient(clientId);
     await requireClientAccess(req.user, clientId);
-    const b = caseInput(req, req.body);
+    const b = newCaseInput(req, req.body);
     const data = { ...cl.normalizeCase(b, {}, today()), ...((await lawyerFor(b.lawyerId, req)) || {}) };
     if (b.courtKey !== undefined) Object.assign(data, courtFields(b.courtKey, b.court));
     const operatorId = (await operatorFor(req, b.operatorId)) ?? req.user.employee?.id ?? null;
@@ -1052,6 +1059,27 @@ const CASE_FIELDS = {
 // An operator moves a consultation along — up to the contract (or "didn't
 // continue"); finishing a contract is the lawyer's and the managers'.
 const OPERATOR_STATUSES = ["consultation", "call_again", "contract", "declined"];
+
+// Throws 403 unless `b` (a case's input) holds only what this role may set
+// on a case (managers: anything).
+function checkCaseFields(user, role, b) {
+  if (role === "manager") return;
+  const forbidden = () => Object.assign(new Error("forbidden"), { status: 403 });
+  const allowed = CASE_FIELDS[role] || [];
+  if (Object.keys(b).some((k) => !allowed.includes(k) && !(k === "contractAmount" && canSeeFinance(user)))) throw forbidden();
+  if (role === "operator" && b.status !== undefined && !OPERATOR_STATUSES.includes(b.status)) throw forbidden();
+}
+
+// A new case's input (a new client's first case too), checked like a
+// change: whoever adds it is its operator, so staff set what an operator
+// may — not a finished case, a contract date of their choosing or a court
+// (Natijalar counts contracts by their date).
+function newCaseInput(req, input) {
+  const b = caseInput(req, input);
+  checkCaseFields(req.user, isManager(req.user) ? "manager" : "operator", b);
+  return b;
+}
+
 // Changes shown on the timeline field by field (money is kept out of it;
 // long text shortened).
 const TRACKED = ["matter", "details", "number", "court", "startDate", "consultationDate", "contractDate", "closedDate"];
@@ -1098,12 +1126,8 @@ cases.patch("/:id", async (req, res, next) => {
     const role = caseRole(req.user, current, current.client);
     if (!role) return res.status(404).json({ error: "not_found" });
     if (role === "result") return res.status(403).json({ error: "result_only" });
-    let b = caseInput(req, req.body);
-    if (role !== "manager") {
-      const allowed = CASE_FIELDS[role] || [];
-      if (Object.keys(b).some((k) => !allowed.includes(k) && !(k === "contractAmount" && canSeeFinance(req.user)))) return res.status(403).json({ error: "forbidden" });
-      if (role === "operator" && b.status !== undefined && !OPERATOR_STATUSES.includes(b.status)) return res.status(403).json({ error: "forbidden" });
-    }
+    const b = caseInput(req, req.body);
+    checkCaseFields(req.user, role, b);
     const { legalStage, ...rest } = b;
     const data = cl.normalizeCase(rest, current, today());
     if (b.courtKey !== undefined) Object.assign(data, courtFields(b.courtKey, b.court, current));
@@ -1245,8 +1269,15 @@ clients.post("/:id/payments", async (req, res, next) => {
     const data = cl.normalizePayment(b);
     // Cash: who took it (Kassa) — "me" when they did.
     const holder = data.method === "cash" ? await cashHolderId(b.cashWith, req.user.id) : null;
-    let payment = await prisma.payment.create({ data: { ...data, cashHolderId: holder ?? null, clientId, caseId, recordedById: req.user.id } });
-    await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+    const fields = { ...data, method: data.method ?? null, note: data.note ?? null, cashHolderId: holder ?? null, clientId, caseId, recordedById: req.user.id };
+    // Sent twice in a moment (src/lib/doubleSubmit.js): the first one is the answer.
+    let payment = await prisma.$transaction(async (tx) => {
+      const same = await tx.payment.findFirst({ where: { ...fields, editedAt: null, createdAt: savedJustNow() }, orderBy: { id: "desc" } });
+      if (same) return same;
+      const row = await tx.payment.create({ data: fields });
+      await tx.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+      return row;
+    });
     // A consultation fee: tie it to the client's appointment, so the
     // calendar shows it as paid.
     if (isConsultation(payment) && (await linkConsultationFees(prisma, clientId)) > 0) {
