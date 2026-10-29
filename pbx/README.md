@@ -166,8 +166,18 @@ speech model, then reviewed by Claude Haiku against the firm's call standard
 - **The transcriber:** `pbx/transcriber/worker.py`, a systemd service
   (`ledger-transcriber`). It asks Ledger for work on the hooks listener.
   - It runs at idle priority, waits while anyone is on a call, and holds the
-    model (about 1.6 GB) only while there is work. It's capped at 2 GB.
+    model (about 1.3 GB at work) only while there is work. It's capped at 2 GB.
+    A retry of a hard window decodes one sample, not five: five at once took
+    2.5 GB.
   - On this server it measured about 2× faster than the call itself.
+  - One call can't run away with it (2026-10-28: a 14-second call sent the
+    decoder round in circles to 3 GB and froze the server). Each call has a
+    time limit (60 s + 3× its length; waits for calls don't count) and a memory
+    limit (`MAX_MB`). Past either, Ledger is told and the worker restarts.
+    Pieces that keep repeating, or don't move on in the audio, are dropped.
+  - Ledger tries a call the transcriber got stuck on once more, then marks it
+    failed ("stuck twice, given up"). Stuck means past its limits, or left
+    "processing" for an hour.
 - **The review:** `src/services/callReview.js`. It gives points for the nine
   criteria, what was good, what to improve, and "said → better".
   - The operator is told (notification kind `callReviews`).
