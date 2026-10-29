@@ -19,6 +19,7 @@ const { events: bus } = require("../lib/events");
 const { linkConsultationFees } = require("../services/consultationFee");
 const { scheduleOf, normalizeSchedule } = require("../services/installments");
 const { cashHolderId } = require("../services/cash");
+const { savedJustNow } = require("../lib/doubleSubmit");
 const entries = require("../services/caseEntries");
 const env = require("../config/env");
 
@@ -1217,8 +1218,15 @@ clients.post("/:id/payments", async (req, res, next) => {
     const data = cl.normalizePayment(b);
     // Cash: who took it (Kassa) — "me" when they did.
     const holder = data.method === "cash" ? await cashHolderId(b.cashWith, req.user.id) : null;
-    let payment = await prisma.payment.create({ data: { ...data, cashHolderId: holder ?? null, clientId, caseId, recordedById: req.user.id } });
-    await prisma.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+    const fields = { ...data, method: data.method ?? null, note: data.note ?? null, cashHolderId: holder ?? null, clientId, caseId, recordedById: req.user.id };
+    // Sent twice in a moment (src/lib/doubleSubmit.js): the first one is the answer.
+    let payment = await prisma.$transaction(async (tx) => {
+      const same = await tx.payment.findFirst({ where: { ...fields, editedAt: null, createdAt: savedJustNow() }, orderBy: { id: "desc" } });
+      if (same) return same;
+      const row = await tx.payment.create({ data: fields });
+      await tx.client.update({ where: { id: clientId }, data: { updatedAt: new Date() } });
+      return row;
+    });
     // A consultation fee: tie it to the client's appointment, so the
     // calendar shows it as paid.
     if (isConsultation(payment) && (await linkConsultationFees(prisma, clientId)) > 0) {

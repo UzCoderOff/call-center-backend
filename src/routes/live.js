@@ -1,11 +1,13 @@
 const express = require("express");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuthAllowingTempPassword } = require("../middleware/auth");
 const live = require("../services/live");
 
 // GET /api/live?v=<last version>  -> { v } once something of mine changed
 // (or after ~20 s with the same v). See services/live.js.
+// It tells nothing but a number, so it answers on a temporary password too:
+// refused, every open portal would ask again every 3 seconds.
 const router = express.Router();
-router.use(requireAuth);
+router.use(requireAuthAllowingTempPassword);
 
 router.get("/", async (req, res, next) => {
   try {

@@ -1,7 +1,7 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const env = require("../config/env");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireAuthAllowingTempPassword } = require("../middleware/auth");
 const web = require("../services/push/web");
 
 // Notifications in this browser (the portal, services/push/web.js):
@@ -10,18 +10,18 @@ const web = require("../services/push/web");
 //   POST   /api/push/web             { endpoint, keys: { p256dh, auth } } — this browser, for me
 //   DELETE /api/push/web             { endpoint } — this browser no more (signing out)
 const router = express.Router();
-router.use(requireAuth);
 
 const isText = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;
 
-router.get("/web", (req, res) => {
+router.get("/web", requireAuth, (req, res) => {
   res.json({ publicKey: web.configured() ? env.webPush.publicKey : null });
 });
 
-router.post("/web", async (req, res, next) => {
+router.post("/web", requireAuth, async (req, res, next) => {
   try {
     const { endpoint, keys } = req.body || {};
-    if (!isText(endpoint, 2000) || !/^https:\/\//.test(endpoint) || !isText(keys?.p256dh, 200) || !isText(keys?.auth, 100)) {
+    // Only a real push service's address: the server sends to it later.
+    if (!isText(endpoint, 2000) || !web.isPushServiceUrl(endpoint) || !isText(keys?.p256dh, 200) || !isText(keys?.auth, 100)) {
       return res.status(400).json({ error: "invalid subscription" });
     }
     const data = { userId: req.user.id, p256dh: keys.p256dh, auth: keys.auth, userAgent: String(req.get("user-agent") || "").slice(0, 300) };
@@ -33,7 +33,8 @@ router.post("/web", async (req, res, next) => {
   }
 });
 
-router.delete("/web", async (req, res, next) => {
+// Part of signing out, so it works on a temporary password too.
+router.delete("/web", requireAuthAllowingTempPassword, async (req, res, next) => {
   try {
     const endpoint = req.body?.endpoint;
     if (isText(endpoint, 2000)) await prisma.webPushSubscription.deleteMany({ where: { endpoint, userId: req.user.id } });

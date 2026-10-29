@@ -33,8 +33,22 @@ const clientFilesDir = process.env.CLIENT_FILES_DIR
   ? path.resolve(process.env.CLIENT_FILES_DIR)
   : path.join(path.dirname(storageRoot), "client-files");
 
+const nodeEnv = process.env.NODE_ENV || "development";
+
+// Which network addresses the API listens on (HOST, comma-separated). On the
+// server (NODE_ENV=production) only this machine itself, over IPv4 and IPv6
+// — Caddy forwards from localhost, and the deploy and health checks ask
+// 127.0.0.1 — so nobody reaches port 4000 straight from the internet over
+// plain HTTP. Elsewhere every address, so test phones on the office Wi-Fi
+// can reach a developer's computer. Empty list: every address.
+const hosts = (process.env.HOST || (nodeEnv === "production" ? "127.0.0.1,::1" : ""))
+  .split(",")
+  .map((h) => h.trim())
+  .filter(Boolean);
+
 module.exports = {
   port: Number(process.env.PORT) || 4000,
+  hosts,
   downloadsDir,
   materialsDir,
   clientFilesDir,
@@ -68,7 +82,7 @@ module.exports = {
   // cookie is also Secure, i.e. served over HTTPS — see COOKIE_SECURE.
   cookieSameSite: process.env.COOKIE_SAME_SITE || "lax",
   corsOrigin: process.env.CORS_ORIGIN || "",
-  nodeEnv: process.env.NODE_ENV || "development",
+  nodeEnv,
   adminUsername: process.env.ADMIN_USERNAME,
   adminPassword: process.env.ADMIN_PASSWORD,
   // Which calendar day a daily report belongs to is decided in the firm's
