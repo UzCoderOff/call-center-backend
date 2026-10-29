@@ -24,6 +24,21 @@ const books = (u) => u.employee?.calendarAccess === "book";
 // each person gets the lines that apply to them, or nothing.
 const NEWS = [
   {
+    id: "2026-10-29-court-hearings",
+    date: "2026-10-29",
+    boss: [
+      "<b>Sud majlislari sud.uz dan</b>: Ledger har kecha sud.uz roʻyxatlarini oʻqiydi. Shartnoma tuzilgan ishning raqami boʻlsa, uni oʻz sudida, viloyat sudida va Oliy sudda kuzatadi: yangi majlis ish sanalariga oʻzi tushadi, koʻchirilgani yoki vaqti oʻzgargani yangilanadi, apellyatsiya yoki kassatsiyaga chiqsa bosqich oʻzgaradi. Advokat va koordinatorga xabar boradi (ilova, Telegram).",
+      "<b>«Bu bizning mijozmi?»</b>: raqami yoʻq ishda Ledger mijozning ismini viloyatidagi sudlar roʻyxatidan qidiradi va topsa, bir marta soʻraydi. «Ha» — raqam va sud ishga yoziladi va kuzatiladi; «Yoʻq» — boshqa soʻralmaydi.",
+      "Ishni tahrirlashda sudni roʻyxatdan tanlash mumkin; ish sahifasida «Hozir tekshirish» tugmasi bor.",
+    ],
+    staff: [
+      {
+        to: (u) => isLawyerUser(u) || (u.role === "EMPLOYEE" && isCoordinator(u.employee)),
+        text: "Sud majlislari endi sud.uz dan oʻzi keladi: ishga sud raqamini yozing (yoki «Ishni tahrirlash»da sudni tanlang) — Ledger har kecha tekshiradi va yangi yoki koʻchirilgan majlis haqida xabar beradi. Raqami yoʻq ishda mijoz ismi sud roʻyxatida chiqsa, «Bu bizning mijozmi?» deb soʻraydi — «Ha» yoki «Yoʻq» bosing.",
+      },
+    ],
+  },
+  {
     id: "2026-10-27-ring-own-caller-after-call",
     date: "2026-10-27",
     boss: [
