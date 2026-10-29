@@ -15,20 +15,22 @@ const isLawyer = (user) => Boolean(user) && user.role === "LAWYER";
 // deactivated account or a role change takes effect immediately.
 //
 // Someone still on a temporary password (a new account, or one a manager
-// reset) chooses their own before anything else: until then everything
-// answers 403 "must_change_password", except the few routes that use
-// requireAuthAllowingTempPassword — who they are, changing the password and
-// signing out. The Android app's own calls (sync, transfer, its session)
-// use the device token (deviceAuth.js), not this, and keep working.
+// reset) is asked to choose their own by the portal, which shows only that
+// screen until they do (SetPasswordPage). The server doesn't refuse their
+// other requests: it did for an hour on 2026-10-29 and broke an operator's
+// app, whose open portal page was the one from before that screen existed.
+// requireAuthAllowingTempPassword stays for the routes that must keep
+// working if that refusal ever comes back (who they are, changing the
+// password, signing out).
 async function requireAuth(req, res, next) {
-  return checkSession(req, res, next, { tempPasswordOk: false });
+  return checkSession(req, res, next);
 }
 
 async function requireAuthAllowingTempPassword(req, res, next) {
-  return checkSession(req, res, next, { tempPasswordOk: true });
+  return checkSession(req, res, next);
 }
 
-async function checkSession(req, res, next, { tempPasswordOk }) {
+async function checkSession(req, res, next) {
   try {
     const token = req.cookies?.session;
     if (!token) return res.status(401).json({ error: "unauthorized" });
@@ -48,9 +50,6 @@ async function checkSession(req, res, next, { tempPasswordOk }) {
     const issuedAt = typeof decoded.at === "number" ? decoded.at : decoded.iat * 1000 + 999;
     if (user.sessionsValidAfter && issuedAt < user.sessionsValidAfter.getTime()) {
       return res.status(401).json({ error: "unauthorized" });
-    }
-    if (user.mustChangePassword && !tempPasswordOk) {
-      return res.status(403).json({ error: "must_change_password" });
     }
 
     req.user = user;

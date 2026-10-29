@@ -194,7 +194,7 @@ test("client payment and cash handover sent twice in a moment: the first one is 
 
 // ------------------------------------------------ temporary passwords
 
-test("temporary password: only who I am, changing it and signing out answer", async (t) => {
+test("temporary password: the server still answers everything (the portal asks for a new one)", async (t) => {
   const cookie = signIn(t, person({ mustChangePassword: true }));
   stub(t, prisma.webPushSubscription, "deleteMany", async () => ({ count: 0 }));
 
@@ -206,10 +206,10 @@ test("temporary password: only who I am, changing it and signing out answer", as
   assert.equal((await call("DELETE", "/api/push/web", { cookie, body: { endpoint: "https://fcm.googleapis.com/fcm/send/test" } })).status, 200);
   assert.equal((await call("POST", "/api/auth/logout", { cookie })).status, 200);
 
-  for (const [method, url] of [["GET", "/api/calls"], ["GET", "/api/push/web"], ["GET", "/api/tasks"], ["GET", "/api/clients"], ["POST", "/api/appointments/5/fee"], ["GET", "/api/users"]]) {
-    const res = await call(method, url, { cookie, body: method === "POST" ? {} : undefined });
-    assert.equal(res.status, 403, `${method} ${url}`);
-    assert.equal(res.body.error, "must_change_password", `${method} ${url}`);
+  // An app's portal page from before the password screen keeps polling these.
+  for (const [method, url] of [["GET", "/api/calls"], ["GET", "/api/tasks"], ["GET", "/api/clients"], ["GET", "/api/users"]]) {
+    const res = await call(method, url, { cookie });
+    assert.notEqual(res.body?.error, "must_change_password", `${method} ${url}`);
   }
 });
 
