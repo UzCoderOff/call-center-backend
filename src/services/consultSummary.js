@@ -4,6 +4,8 @@ const { firmNow, firmDayRange } = require("../lib/firmTime");
 const { events } = require("../lib/events");
 const cl = require("./clients");
 const { syncNextCall } = require("./clientFollowUps");
+const { isManager } = require("../middleware/auth");
+const { caseRole, worksOnCase, EXTRA_LAWYERS } = require("../lib/clientAccess");
 
 // "Suhbat yakuni" — the consultation summary (the boss, 2026-10-14): after a
 // consultation, the specialist who held it (the calendar's owner) writes
@@ -179,19 +181,60 @@ function mayWrite(user, appointment) {
   return appointment.calendar?.ownerId === user.id || user.role === "BOSS" || user.role === "DEVELOPER";
 }
 
+// Which of the client's cases a summary may be about — and which its writer
+// sees on the summary page. null: any of them (managers). The specialist who
+// held it doesn't get the client's file by holding it (2026-10-29): a lawyer
+// can book any number into their own calendar. They get the cases they work
+// on anyway (clientAccess.js), the case the summary was written for, and —
+// when someone else booked the client in — the open consultation that
+// booking joined or started (lib/clientsDb.js clientForBooking: an operator
+// books a client into a lawyer's calendar, the lawyer holds it and writes
+// its outcome). A lawyer's or the client's coordinator's booking is only
+// linked to the client, so it brings no case with it.
+// `appointment` needs calendar.ownerId, bookedById, caseId; `client` its
+// createdById and cases (CASE_SCOPE, newest first); `booker` their role
+// and employee id.
+const CONSULTING = ["consultation", "call_again"];
+function summaryCaseIds(user, appointment, client, booker) {
+  if (isManager(user)) return null;
+  const cases = client?.cases || [];
+  const ids = new Set(cases.filter((k) => worksOnCase(caseRole(user, k, client))).map((k) => k.id));
+  if (appointment.caseId != null) ids.add(appointment.caseId);
+  const bookedForThem = booker && appointment.bookedById !== appointment.calendar?.ownerId;
+  const onlyLinked = booker?.role === "LAWYER" || (booker?.employee?.id != null && cases.some((k) => k.coordinatorId === booker.employee.id));
+  if (bookedForThem && !onlyLinked) {
+    const open = cases.find((k) => CONSULTING.includes(k.status));
+    if (open) ids.add(open.id);
+  }
+  return ids;
+}
+
+const CASE_SCOPE = { id: true, status: true, operatorId: true, coordinatorId: true, lawyerId: true, extraLawyers: EXTRA_LAWYERS };
+// summaryCaseIds, from the database.
+async function summaryCases(db, user, appointment) {
+  if (isManager(user) || !appointment.clientId) return null;
+  const [client, booker] = await Promise.all([
+    db.client.findUnique({ where: { id: appointment.clientId }, select: { createdById: true, cases: { orderBy: { updatedAt: "desc" }, select: CASE_SCOPE } } }),
+    appointment.bookedById ? db.user.findUnique({ where: { id: appointment.bookedById }, select: { role: true, employee: { select: { id: true } } } }) : null,
+  ]);
+  return summaryCaseIds(user, appointment, client, booker);
+}
+
 // The case the consultation was about: its own, the one asked for, or the
-// client's open consultation (else their latest case).
+// client's open consultation (else their latest case) — of the ones this
+// writer may pick (`allowed`, summaryCases; null: any).
 const WITH_OPERATOR = { operator: { select: { userId: true, name: true } } };
-async function caseFor(tx, appointment, requestedCaseId) {
+async function caseFor(tx, appointment, requestedCaseId, allowed = null) {
   if (!appointment.clientId) return null;
   const id = requestedCaseId ?? appointment.caseId;
   if (id != null) {
     const k = await tx.clientCase.findFirst({ where: { id: Number(id), clientId: appointment.clientId }, include: WITH_OPERATOR });
-    if (!k) throw new SummaryError("case is not this client's");
+    if (!k || (allowed && !allowed.has(k.id))) throw new SummaryError("case is not this client's");
     return k;
   }
-  const open = await tx.clientCase.findFirst({ where: { clientId: appointment.clientId, status: { in: ["consultation", "call_again"] } }, orderBy: { updatedAt: "desc" }, include: WITH_OPERATOR });
-  return open || tx.clientCase.findFirst({ where: { clientId: appointment.clientId }, orderBy: { updatedAt: "desc" }, include: WITH_OPERATOR });
+  const theirs = allowed ? { id: { in: [...allowed] } } : {};
+  const open = await tx.clientCase.findFirst({ where: { clientId: appointment.clientId, status: { in: CONSULTING }, ...theirs }, orderBy: { updatedAt: "desc" }, include: WITH_OPERATOR });
+  return open || tx.clientCase.findFirst({ where: { clientId: appointment.clientId, ...theirs }, orderBy: { updatedAt: "desc" }, include: WITH_OPERATOR });
 }
 
 const FOLLOW_UP_KIND = { decision: "decision", call: "call", meeting: "meeting" };
@@ -208,9 +251,11 @@ async function saveSummary(db, { appointmentId, user, input, caseId: requestedCa
     if (a.status === "cancelled") throw new SummaryError("cancelled", 409);
     if (a.status === "no_show") throw new SummaryError("no_show", 409);
     if (a.summaryAt) throw new SummaryError("already_written", 409);
-    const kase = await caseFor(tx, a, requestedCaseId);
+    const allowed = await summaryCases(tx, user, a);
+    const kase = await caseFor(tx, a, requestedCaseId, allowed);
     if (summary.next?.contactId != null) {
-      const c = await tx.clientContact.findFirst({ where: { id: summary.next.contactId, clientId: a.clientId ?? -1, deletedAt: null }, select: { id: true } });
+      // The client's people: only for someone who sees one of its cases.
+      const c = allowed && allowed.size === 0 ? null : await tx.clientContact.findFirst({ where: { id: summary.next.contactId, clientId: a.clientId ?? -1, deletedAt: null }, select: { id: true } });
       if (!c) throw new SummaryError("contact is not this client's");
     }
     const stored = { ...summary, operator: kase?.operator?.name ?? null };
@@ -336,6 +381,8 @@ module.exports = {
   deadlineFor,
   missingWhere,
   mayWrite,
+  summaryCaseIds,
+  summaryCases,
   saveSummary,
   updateSummaryText,
   evaluateSummaryStrikes,
