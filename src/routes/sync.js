@@ -18,6 +18,17 @@ class SyncError extends Error {
   }
 }
 
+const PAYLOAD_MAX_BYTES = 2 * 1024 * 1024;
+
+// Calls through Ledger's own line are saved by the server itself
+// (services/pbx/ingest.js) under the id "pbx:<line call id>". A phone may
+// never write one, nor overwrite one: that would turn a missed line call
+// into an answered one (no strike, no lost-client alert) or give it a
+// made-up recording. Every line call's key carries this prefix, so a phone
+// entry without it can't reach one. Any letter case: the database's
+// "starts with" comparisons ignore it (services/clients.js).
+const isLineCallId = (id) => /^pbx:/i.test(id);
+
 // The Android app posts one multipart request per sync: a "payload" text
 // part (JSON, see call-center-agent/SyncWorker.kt for the exact shape) plus
 // zero or more "recording" file parts, matched to payload.calls[] entries
@@ -32,8 +43,8 @@ class SyncError extends Error {
 // into memory, and are only moved into the recordings folder once matched
 // to a call.
 //
-// fieldSize is set explicitly (multer's default is 1MB) because a busy
-// employee's payload can plausibly exceed 1MB.
+// The payload text arrives before the phone is checked, so its size limit
+// (fieldSize below) is kept close to what a phone really sends.
 function authenticateOnce(req) {
   if (!req.syncAuth) req.syncAuth = authenticate(req);
   return req.syncAuth;
@@ -119,10 +130,13 @@ const upload = multer({
     // that fell behind — Honor froze the app for a day — used to get "too
     // many recordings" for the same batch forever.
     files: 400,
-    fieldSize: 10 * 1024 * 1024, // 10MB for the JSON "payload" text field
+    // The JSON "payload" text field. The app sends at most 400 calls of
+    // about 200 bytes each (under 100 KB); 2 MB also fits the old agent,
+    // which sent its whole call log at once.
+    fieldSize: PAYLOAD_MAX_BYTES,
     // Only the payload is a text part; anything more is junk, refused
     // before it can fill memory (it arrives before the phone is checked).
-    fields: 4,
+    fields: 2,
     parts: 410,
   },
   fileFilter: (req, file, cb) => {
@@ -132,15 +146,34 @@ const upload = multer({
   },
 });
 
-// Records one sync attempt — success or failure, including ones that never
-// got far enough to know which employee sent them. Never throws: a bug in
-// logging must never take down the actual response to the device.
+// Records one sync attempt from a known person's phone — success or
+// failure. Never throws: a bug in logging must never take down the actual
+// response to the device.
 async function logSyncAttempt(fields) {
   try {
     await prisma.syncLog.create({ data: fields });
   } catch (err) {
     console.error("failed to write SyncLog row:", err);
   }
+}
+
+// Whose phone a failed sync came from, when that can be told: refused after
+// the phone was recognised (collection off, inactive), the upload went
+// wrong after the phone was checked (a recording too large), or a signed-in
+// app whose upload broke before it could be checked. Null for anyone else.
+async function identifySender(req, err) {
+  if (err?.employeeToken) return { employeeToken: err.employeeToken, deviceId: err.deviceId ?? null };
+  try {
+    if (req.syncAuth) {
+      const { employee, device } = await req.syncAuth;
+      return { employeeToken: employee.employeeId, deviceId: device?.id ?? null };
+    }
+    const device = await findDevice(bearerToken(req));
+    if (device?.user.employee) return { employeeToken: device.user.employee.employeeId, deviceId: device.id };
+  } catch {
+    // not recognised
+  }
+  return null;
 }
 
 function describeError(err) {
@@ -180,12 +213,19 @@ async function processSync({ employee, payload, files }) {
   const touchedKeys = new Set();
   const callIds = [];
   const recordingCallIds = [];
+  let lineCalls = 0;
 
   for (const raw of payload.calls) {
     if (raw == null || raw.callLogId == null) {
       throw new SyncError(400, "bad_call_entry", "call entry without callLogId");
     }
     const deviceCallLogId = String(raw.callLogId);
+    // Skipped, not refused: the rest of the batch is still saved. (Its
+    // recording, if any, is thrown away with the unmatched ones.)
+    if (isLineCallId(deviceCallLogId)) {
+      lineCalls += 1;
+      continue;
+    }
     const callTimestampMs = parseTimestamp(raw.callTimestampMs);
     const missed = Boolean(raw.missed);
     const phoneNumber = raw.phoneNumber ? String(raw.phoneNumber) : "unknown";
@@ -250,6 +290,10 @@ async function processSync({ employee, payload, files }) {
     console.error("follow-up reconciliation failed:", err);
   }
 
+  if (lineCalls > 0) {
+    console.warn(`sync: employee ${employee.id} sent ${lineCalls} entr${lineCalls === 1 ? "y" : "ies"} with a phone-line call id ("pbx:…"); skipped`);
+  }
+
   // Recordings that matched no call in the payload are dropped — say so in
   // the server log, so a naming problem on some phone can be noticed.
   if (filesByName.size > 0) {
@@ -296,28 +340,28 @@ router.post("/sync", (req, res) => {
       const { status, code, message } = describeError(err);
       if (status >= 500) console.error("sync error:", err);
 
-      // Best effort: record which device this was, even for a rejected one.
-      if (!employeeToken && err?.employeeToken) {
-        employeeToken = err.employeeToken;
-        deviceId = err.deviceId ?? null;
-      }
+      // Which person's phone this was, even for a rejected attempt. Only a
+      // real person's phone gets a SyncLog row: anyone on the internet can
+      // post here, and a stranger's attempts (with any made-up employeeId)
+      // must not fill the table. The request log line still shows them.
       if (!employeeToken) {
-        try {
-          const parsed = JSON.parse(req.body?.payload || "null");
-          if (typeof parsed?.employeeId === "string") employeeToken = parsed.employeeId.slice(0, 80);
-        } catch {
-          // unparseable payload — nothing to attribute it to
-        }
+        const sender = await identifySender(req, err);
+        employeeToken = sender?.employeeToken ?? null;
+        deviceId = sender?.deviceId ?? null;
       }
 
-      await logSyncAttempt({
-        employeeId: employeeToken,
-        deviceId,
-        ok: false,
-        httpStatus: status,
-        errorCode: code,
-        errorMessage: (err?.message || message).slice(0, 300),
-      });
+      if (employeeToken) {
+        await logSyncAttempt({
+          employeeId: employeeToken,
+          deviceId,
+          ok: false,
+          httpStatus: status,
+          errorCode: code,
+          errorMessage: (err?.message || message).slice(0, 300),
+        });
+      } else {
+        console.warn(`sync: refused (${status} ${code}), sender not recognised`);
+      }
 
       // The app reads the status code (and "message" for display). Internals
       // never leak to this unauthenticated endpoint: 500s get a generic message.
@@ -333,3 +377,6 @@ router.post("/sync", (req, res) => {
 });
 
 module.exports = router;
+module.exports.processSync = processSync;
+module.exports.identifySender = identifySender;
+module.exports.PAYLOAD_MAX_BYTES = PAYLOAD_MAX_BYTES;

@@ -9,9 +9,10 @@ router.use(requireAuth, requireRole(...MANAGER_ROLES));
 // failure both, optionally filtered to one employeeId. This is what makes
 // a "stuck on Syncing" report diagnosable from the portal instead of only
 // from an on-device log an employee has to manually export and send over:
-// every attempt lands here the moment the device tries, including ones
-// that failed before we even knew which employee it was (bad JSON, a
-// multer/multipart error).
+// every attempt from a known person's phone lands here the moment the
+// device tries. (Attempts from a sender that can't be recognised — no
+// valid device token or employee — are only in the server log: anyone can
+// post to the sync address. See routes/sync.js.)
 router.get("/", async (req, res, next) => {
   try {
     const { employeeId, limit } = req.query;

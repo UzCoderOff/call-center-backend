@@ -76,10 +76,17 @@ app.use(express.json());
 app.use((req, res, next) => {
   const start = Date.now();
   res.on("finish", () => {
-    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - start}ms`);
+    console.log(`${req.method} ${loggedPath(req.originalUrl)} ${res.statusCode} ${Date.now() - start}ms`);
   });
   next();
 });
+
+// Addresses that are their own key — listening to a call live, the TV
+// board — never go into the log in full: whoever read the log could use them.
+const SECRET_PATHS = /^(\/api\/(?:pbx-listen|wallboard\/tv)\/)[^/?#]+/i;
+function loggedPath(url) {
+  return url.replace(SECRET_PATHS, "$1***");
+}
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 

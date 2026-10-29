@@ -13,7 +13,22 @@ const isLawyer = (user) => Boolean(user) && user.role === "LAWYER";
 // linked Employee record, if any) to req.user. The account is re-fetched
 // from the DB on every request — not just decoded from the token — so a
 // deactivated account or a role change takes effect immediately.
+//
+// Someone still on a temporary password (a new account, or one a manager
+// reset) chooses their own before anything else: until then everything
+// answers 403 "must_change_password", except the few routes that use
+// requireAuthAllowingTempPassword — who they are, changing the password and
+// signing out. The Android app's own calls (sync, transfer, its session)
+// use the device token (deviceAuth.js), not this, and keep working.
 async function requireAuth(req, res, next) {
+  return checkSession(req, res, next, { tempPasswordOk: false });
+}
+
+async function requireAuthAllowingTempPassword(req, res, next) {
+  return checkSession(req, res, next, { tempPasswordOk: true });
+}
+
+async function checkSession(req, res, next, { tempPasswordOk }) {
   try {
     const token = req.cookies?.session;
     if (!token) return res.status(401).json({ error: "unauthorized" });
@@ -33,6 +48,9 @@ async function requireAuth(req, res, next) {
     const issuedAt = typeof decoded.at === "number" ? decoded.at : decoded.iat * 1000 + 999;
     if (user.sessionsValidAfter && issuedAt < user.sessionsValidAfter.getTime()) {
       return res.status(401).json({ error: "unauthorized" });
+    }
+    if (user.mustChangePassword && !tempPasswordOk) {
+      return res.status(403).json({ error: "must_change_password" });
     }
 
     req.user = user;
@@ -58,4 +76,4 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requireAuth, requireRole, ROLES, MANAGER_ROLES, isManager, isLawyer };
+module.exports = { requireAuth, requireAuthAllowingTempPassword, requireRole, ROLES, MANAGER_ROLES, isManager, isLawyer };

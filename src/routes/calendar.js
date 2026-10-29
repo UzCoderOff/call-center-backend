@@ -646,6 +646,7 @@ appointments.patch("/:id", async (req, res, next) => {
 // The consultation fee, when it's paid after booking (at the appointment,
 // say): { feeAmount?, feeMethod?, feeCashWith? }. Whoever may book, or a manager; not
 // lawyers; once per appointment.
+const FEE_TAKEN = Symbol("fee already recorded");
 appointments.post("/:id/fee", async (req, res, next) => {
   try {
     if (isLawyer(req.user) || (!canBook(req.user) && !isManager(req.user))) return res.status(403).json({ error: "forbidden" });
@@ -659,6 +660,10 @@ appointments.post("/:id/fee", async (req, res, next) => {
     const taken = fee.normalizeFee(req.body || {});
     if (taken.method === "cash") taken.cashHolderId = (await cashHolderId((req.body || {}).feeCashWith, req.user.id)) ?? null;
     const updated = await prisma.$transaction(async (tx) => {
+      // Looked at again in here: a second tap (or two people at once) waits
+      // for the first to be saved — SQLite lets one save through at a time —
+      // and then finds its fee. One fee per appointment.
+      if ((await tx.payment.count({ where: { appointmentId: appointment.id, kind: "consultation" } })) > 0) return FEE_TAKEN;
       // Booked without a phone number: no client yet — find or add one now.
       let clientId = appointment.clientId;
       if (!clientId) {
@@ -676,6 +681,7 @@ appointments.post("/:id/fee", async (req, res, next) => {
       await fee.recordFee(tx, { appointment, clientId, user: req.user, ...taken });
       return tx.appointment.findUnique({ where: { id: appointment.id }, include: APPOINTMENT_INCLUDE });
     });
+    if (updated === FEE_TAKEN) return res.status(409).json({ error: "fee_already_recorded" });
     if (!updated) return res.status(400).json({ error: "phone_required_for_fee" });
     res.status(201).json(withoutSummary(updated, req.user));
   } catch (err) {
